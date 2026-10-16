@@ -36,19 +36,33 @@ async def award_referral_first_topup(
     bonus = float(settings.REFERRAL_L1_CREDITS or 0)
     if bonus <= 0:
         return False
+    transaction = await session.scalar(
+        select(Transaction).where(Transaction.id == transaction.id)
+        .with_for_update().execution_options(populate_existing=True)
+    )
+    if transaction is None:
+        await session.commit()
+        return False
     if transaction.status != TransactionStatus.paid:
+        await session.commit()
         return False
     if float(transaction.amount_rub or 0) <= 0 or float(transaction.credits or 0) <= 0:
         return False
 
     referred = (
         await session.execute(
-            select(User).where(User.id == transaction.user_id).with_for_update()
+            select(User).where(User.id == transaction.user_id)
         )
     ).scalar_one_or_none()
     if referred is None or not referred.referrer_id or referred.referrer_id == referred.id:
         await session.commit()
         return False
+
+    # Consistent user lock order with refund/percentage-commission accounting.
+    await session.execute(
+        select(User.id).where(User.id.in_(sorted({referred.id, referred.referrer_id})))
+        .order_by(User.id).with_for_update()
+    )
 
     first_paid_id = (
         await session.execute(

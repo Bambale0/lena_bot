@@ -48,17 +48,11 @@ def test_legacy_trend_without_category_uses_featured():
 
 
 def test_frontend_is_category_first_and_keeps_studio_as_action():
-    source = open("webapp/src/main.jsx", encoding="utf-8").read()
-    css = open("webapp/src/style.css", encoding="utf-8").read()
+    source = open("webapp/src/features/trends-screen.tsx", encoding="utf-8").read()
+    shell = open("webapp/src/components/app-shell.tsx", encoding="utf-8").read()
     bot = open("bot/handlers/trends.py", encoding="utf-8").read()
-
-    assert "function TrendDiscoveryCard" in source
-    assert "trendCategoryTabs" in source
-    assert "trendDiscoveryRail" in source
-    assert 'openStudioKind?.("image")' in source
-    assert '["studio", "+", "Создать", "navCreate"]' in source
-    assert "trend-category-home-v4" in source
-    assert ".trendDiscoveryCard" in css
-    assert ".nav .navCreate" in css
-    assert "TrendAdminFSM.category" in bot
-    assert 'settings_payload = {\n        "category"' in bot
+    assert 'aria-label="Категории трендов"' in source
+    assert 'setCategoryFilter(item.value)' in source
+    assert 'function TrendGroup' in source and 'openTrendRunner(trend)' in source
+    assert 'id: "create"' in shell
+    assert 'TrendAdminFSM.category' in bot

@@ -69,11 +69,12 @@ def test_all_image_feed_media_is_served_as_webp():
     assert "install_feed_media_viewer(module)" in bootstrap
 
 
-def test_initial_feed_is_limited_and_build_id_is_bumped():
-    config = (WEBAPP / "vite.config.js").read_text(encoding="utf-8")
-    transform = (WEBAPP / "feed-pinterest-transform.js").read_text(encoding="utf-8")
-
-    assert "/feed?source=recent&limit=60" in config
-    assert "feedPinterestMiniApp" in config
-    assert 'import "./feed-pinterest.css"' in transform
-    assert "feed-webp-viewer-v4" in transform
+def test_native_feed_first_page_is_bounded_and_paginates():
+    import re
+    api = (WEBAPP / "src/lib/api.ts").read_text(encoding="utf-8")
+    size = re.search(r"FEED_PAGE_SIZE = (\d+)", api)
+    assert size and 1 <= int(size.group(1)) <= 100
+    assert '/feed?source=recent&limit=${FEED_PAGE_SIZE}' in api
+    app = (WEBAPP / "src/app/App.tsx").read_text(encoding="utf-8")
+    assert 'setFeedLimit(FEED_PAGE_SIZE)' in app
+    assert 'feedHasMore' in app

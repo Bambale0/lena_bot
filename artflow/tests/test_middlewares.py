@@ -272,3 +272,14 @@ async def test_auth_middleware_ignores_self_referral_payload(monkeypatch) -> Non
 
     assert result == "handled"
     assert create_user.await_args.kwargs["referrer"] is None
+
+
+@pytest.fixture(autouse=True)
+def isolated_referral_activity_snapshot(monkeypatch):
+    from datetime import datetime, timezone
+
+    from core.referral_antifraud import ReferralAntifraudSnapshot
+    monkeypatch.setattr("core.referral_antifraud._referral_antifraud_snapshot", AsyncMock(
+        return_value=ReferralAntifraudSnapshot(total_refs=0, refs_with_generations=0,
+            refs_with_paid_transactions=0, window_started_at=datetime.now(timezone.utc)),
+    ))

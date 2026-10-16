@@ -247,7 +247,7 @@ async def test_poll_kling_status_reads_nested_video_url(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_image_service_uses_comet_fallback_after_kie_create_error(monkeypatch) -> None:
+async def test_wan_provider_error_does_not_substitute_comet_model(monkeypatch) -> None:
     comet_calls: list[dict] = []
 
     async def fake_create_task(payload: dict, callback_url: str | None = None) -> dict:
@@ -260,21 +260,16 @@ async def test_image_service_uses_comet_fallback_after_kie_create_error(monkeypa
     monkeypatch.setattr(image_service.kieai_client, "create_task", fake_create_task)
     monkeypatch.setattr(image_service.comet_fallback, "generate_image", fake_generate_image)
 
-    result = await image_service.generate_image(
-        ImageModel.WAN_27_PRO,
-        "new editorial look",
-        image_url=["https://example.test/ref1.jpg", "https://example.test/ref2.jpg"],
-        aspect_ratio="3:4",
-        n=1,
-        quality="2K",
-    )
-
-    assert result.is_async is False
-    assert result.url == "https://cdn.example.test/image.jpg"
-    assert result.result_urls == ["https://cdn.example.test/image.jpg"]
-    assert comet_calls[0]["reference_urls"] == ["https://example.test/ref1.jpg", "https://example.test/ref2.jpg"]
-    assert comet_calls[0]["resolution"] == "2K"
-    assert comet_calls[0]["prompt"] == "new editorial look"
+    with pytest.raises(RuntimeError, match="fallback disabled to prevent model substitution"):
+        await image_service.generate_image(
+            ImageModel.WAN_27_PRO,
+            "new editorial look",
+            image_url=["https://example.test/ref1.jpg", "https://example.test/ref2.jpg"],
+            aspect_ratio="3:4",
+            n=1,
+            quality="2K",
+        )
+    assert comet_calls == []
 
 
 @pytest.mark.asyncio
@@ -335,7 +330,7 @@ async def test_image_service_routes_nano_banana_models_to_nexus(
 
 
 @pytest.mark.asyncio
-async def test_video_service_uses_comet_fallback_after_kie_create_error(monkeypatch) -> None:
+async def test_seedance_unknown_kie_failure_never_replays_paid_request(monkeypatch) -> None:
     comet_calls: list[dict] = []
 
     async def fake_create_task(payload: dict, callback_url: str | None = None) -> dict:
@@ -348,16 +343,17 @@ async def test_video_service_uses_comet_fallback_after_kie_create_error(monkeypa
     monkeypatch.setattr(video_service.kieai_client, "create_task", fake_create_task)
     monkeypatch.setattr(video_service.comet_fallback, "generate_video", fake_generate_video)
 
-    result = await video_service.generate_video(
-        VideoModel.SEEDANCE_2,
-        "animate the reference",
-        image_url=["https://example.test/ref1.jpg", "https://example.test/ref2.jpg"],
-        duration=5,
-        aspect_ratio="16:9",
-        callback_url="https://api.example.test/webhook/kie?secret=abc",
-    )
-
-    assert result.provider == "comet"
-    assert result.task_id == "comet:video:task_1"
-    assert comet_calls[0]["callback_url"] == "https://api.example.test/webhook/kie?secret=abc"
-    assert comet_calls[0]["reference_urls"] == ["https://example.test/ref1.jpg", "https://example.test/ref2.jpg"]
+    monkeypatch.setattr("core.config.settings.SEEDANCE_PRIMARY_PROVIDER", "kieai")
+    secondary = AsyncMock(side_effect=AssertionError("unknown submission must not be replayed"))
+    monkeypatch.setattr(video_service.neironych_seedance_runtime, "generate_product_video", secondary)
+    with pytest.raises(RuntimeError, match="kie down"):
+        await video_service.generate_video(
+            VideoModel.SEEDANCE_2,
+            "animate the reference",
+            image_url=["https://example.test/ref1.jpg", "https://example.test/ref2.jpg"],
+            duration=5,
+            aspect_ratio="16:9",
+            callback_url="https://api.example.test/webhook/kie?secret=abc",
+        )
+    secondary.assert_not_awaited()
+    assert comet_calls == []

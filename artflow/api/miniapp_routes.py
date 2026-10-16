@@ -1665,6 +1665,11 @@ def _normalize_image_request(
             "high": "4K" if "4K" in quality_options else quality_options[-1],
         }
         normalized_quality = legacy_quality_aliases.get(normalized_quality, normalized_quality)
+        # Legacy trend tags are lowercased by the tag resolver. Resolve only
+        # known quality choices case-insensitively before price lookup.
+        normalized_quality = {value.casefold(): value for value in quality_options}.get(
+            str(normalized_quality).casefold(), normalized_quality,
+        )
         normalized_quality = str(
             _normalize_choice(
                 normalized_quality,
@@ -5503,7 +5508,7 @@ async def list_payment_methods(
     if settings.TRIBUTE_API_KEY:
         from payments import tribute
 
-        if any(key in tribute.digital_product_plan_keys() for key in plan_keys):
+        if any(tribute.digital_product_for_plan(plan) is not None for plan in plans):
             methods.append("tribute")
     if settings.LAVA_API_KEY and any(settings.lava_offer_id_for_plan(key) for key in plan_keys):
         methods.append("lava")
@@ -5549,7 +5554,7 @@ async def list_plans(
             "price_rub_display": f"{_fmt_amount(p.price_rub)}₽",
             "price_stars": _plan_stars_price(p),
             "price_usdt": crypto_amount_usdt(p.price_rub),
-            "price_tribute_usd": tribute.digital_product_price_usd(p.key),
+            "price_tribute_usd": tribute.digital_product_price_usd(p),
         }
         for p in plans
     ]
@@ -5690,7 +5695,7 @@ async def topup_tribute(
         raise HTTPException(status_code=404, detail="Tribute is not enabled")
 
     plan = await repo.get_price_plan_by_key(session, body.plan_key)
-    if not plan or not plan.is_active or tribute.digital_product_for_plan(plan.key) is None:
+    if not plan or not plan.is_active or tribute.digital_product_for_plan(plan) is None:
         raise HTTPException(status_code=404, detail="Plan not found")
 
     try:

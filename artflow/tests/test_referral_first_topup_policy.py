@@ -59,11 +59,13 @@ async def test_first_paid_topup_credits_referrer_once(monkeypatch) -> None:
     )
     session = _session(
         _result(referred),
+        _result(None),  # ordered user row locks
         _result(101),
         _result(None),
         _result(13.0),
     )
 
+    session.scalar = AsyncMock(return_value=tx)
     created = await award_referral_first_topup(session, tx)
 
     assert created is True
@@ -92,8 +94,9 @@ async def test_later_paid_topup_cannot_create_first_topup_bonus(monkeypatch) -> 
         amount_rub=500,
         credits=50,
     )
-    session = _session(_result(referred), _result(101))
+    session = _session(_result(referred), _result(None), _result(101))
 
+    session.scalar = AsyncMock(return_value=second_tx)
     created = await award_referral_first_topup(session, second_tx)
 
     assert created is False
@@ -114,15 +117,16 @@ async def test_legacy_signup_reward_blocks_migration_double_bonus(monkeypatch) -
         amount_rub=500,
         credits=50,
     )
-    session = _session(_result(referred), _result(101), _result(999))
+    session = _session(_result(referred), _result(None), _result(101), _result(999))
 
+    session.scalar = AsyncMock(return_value=tx)
     created = await award_referral_first_topup(session, tx)
 
     assert created is False
     session.add.assert_not_called()
     session.commit.assert_awaited_once()
 
-    ledger_query = session.execute.await_args_list[2].args[0]
+    ledger_query = session.execute.await_args_list[3].args[0]
     sql = str(ledger_query.compile(compile_kwargs={"literal_binds": True}))
     assert LEGACY_REFERRAL_SIGNUP_ENTRY_TYPE in sql
     assert "220022" in sql

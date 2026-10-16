@@ -17,7 +17,7 @@ def _plan_list_price(plan: PricePlan) -> str:
         return rub
     from payments import tribute
 
-    usd = tribute.digital_product_price_text(plan.key)
+    usd = tribute.digital_product_price_text(plan)
     return f"{rub} | {usd}" if usd else rub
 
 
@@ -65,8 +65,8 @@ def plan_payment_methods_kb(plan: PricePlan, lang: str = "ru") -> InlineKeyboard
                 callback_data=f"topup:rub:{plan.key}",
             )
         )
-    if settings.TRIBUTE_API_KEY and tribute.digital_product_for_plan(plan.key) is not None:
-        price_text = tribute.digital_product_price_text(plan.key)
+    if settings.TRIBUTE_API_KEY and tribute.digital_product_for_plan(plan) is not None:
+        price_text = tribute.digital_product_price_text(plan)
         label = f"💵 USD · {price_text}" if price_text else "💵 USD"
         builder.row(InlineKeyboardButton(text=label, callback_data=f"topup:tribute_plan:{plan.key}"))
     if settings.CRYPTOBOT_TOKEN:
@@ -186,7 +186,7 @@ def tribute_plans_kb(plans: list[PricePlan], lang: str = "ru") -> InlineKeyboard
     builder = InlineKeyboardBuilder()
     back_text = "← " + ("Назад" if lang == "ru" else "Back")
     for plan in plans:
-        price_text = tribute.digital_product_price_text(plan.key) or f"{_fmt_amount(plan.price_rub)}₽"
+        price_text = tribute.digital_product_price_text(plan) or f"{_fmt_amount(plan.price_rub)}₽"
         builder.row(
             InlineKeyboardButton(
                 text=f"🟣 {plan.label} — {int(plan.credits) if float(plan.credits).is_integer() else _fmt_amount(plan.credits)} 💋 · {price_text}",

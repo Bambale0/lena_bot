@@ -44,11 +44,11 @@ def test_old_engagement_decays_instead_of_staying_first_forever():
 
 
 def test_vite_build_opens_feed_first_and_keeps_trends_available():
-    config = Path("webapp/vite.config.js").read_text(encoding="utf-8")
-
-    assert 'useState("feed")' in config
-    assert '["feed", "▤", "Лента", ""]' in config
-    assert '["home", "🔥", "Тренды", ""]' in config
-    assert 'source=recent&limit=200' in config
-    assert "свежесть, популярность, повторы" in config
-    assert "screens.feed" in config
+    app = Path("webapp/src/app/App.tsx").read_text(encoding="utf-8")
+    shell = Path("webapp/src/components/app-shell.tsx").read_text(encoding="utf-8")
+    api = Path("webapp/src/lib/api.ts").read_text(encoding="utf-8")
+    assert 'useState<AppTab>("feed")' in app
+    assert 'id: "feed"' in shell and 'id: "trends"' in shell
+    assert shell.index('id: "feed"') < shell.index('id: "trends"')
+    assert '/feed?source=recent&limit=${FEED_PAGE_SIZE}' in api
+    assert 'setFeedLimit(FEED_PAGE_SIZE)' in app
