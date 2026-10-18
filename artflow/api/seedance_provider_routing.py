@@ -2,11 +2,14 @@
 
 import logging
 from collections.abc import Awaitable, Callable
-from typing import TypeVar
+from typing import TYPE_CHECKING, TypeVar
 
 from api.kieai_client import KieDefiniteRejection, KieSubmissionOutcomeUnknown
 from api.neironych_seedance import NeironychPreSubmitFailure, NeironychSubmissionUnknown
 from core.config import settings
+
+if TYPE_CHECKING:
+    from api.neironych_seedance_runtime import SubmissionContext
 
 logger = logging.getLogger(__name__)
 Result = TypeVar("Result")
@@ -53,3 +56,17 @@ async def submit_seedance(
                 f"{product_model} failed via primary {primary} and {secondary} fallback: "
                 f"primary={primary_exc}; fallback={fallback_exc}"
             ) from fallback_exc
+
+
+async def journal_kie_fallback(context: "SubmissionContext | None") -> None:
+    """Transfer a rejected Neironych attempt to the existing KIE durable gate.
+
+    Called after local payload/media preparation, immediately before KIE POST.
+    The legacy KIE-primary path is unchanged; it has no Neironych journal to
+    transfer. Old unknown/accepted attempts fail the repository CAS guard.
+    """
+    if context is None or not context.started:
+        return
+    if not callable(context.before_kie_submit):
+        raise NeironychPreSubmitFailure(context.client_request_id, "kie-fallback")
+    await context.before_kie_submit()
