@@ -17,7 +17,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from api.seedance25_identity import validate_identity_transfer_refs
-from api.seedance_provider_routing import submit_seedance
+from api.seedance_provider_routing import journal_kie_fallback, submit_seedance
 
 MODEL_KEY = "bytedance/seedance-2-5"
 DISPLAY_NAME = "🌱 Seedance 2.5"
@@ -404,6 +404,7 @@ def _install_seedance25_generate_wrapper(video_service: Any) -> None:
                 }
             )
             input_payload["prompt"] = prompt
+            await journal_kie_fallback(kwargs.get("neironych_submission"))
             resp = await video_service.kieai_client.create_task(
                 {"model": MODEL_KEY, "input": input_payload},
                 callback_url=kwargs.get("callback_url"),
@@ -426,11 +427,7 @@ def _install_seedance25_generate_wrapper(video_service: Any) -> None:
                 uses_webhook=bool(kwargs.get("callback_url")),
             )
 
-        context = kwargs.get("neironych_submission")
-        return await submit_seedance(
-            MODEL_KEY, kie=submit_kie, neironych=submit_neironych,
-            before_kie_fallback=(context.prepare_kie_fallback if context else None),
-        )
+        return await submit_seedance(MODEL_KEY, kie=submit_kie, neironych=submit_neironych)
 
     video_service.generate_video = generate_video
     video_service._seedance25_generate_wrapper_installed = True

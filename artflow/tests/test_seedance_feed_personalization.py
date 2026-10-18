@@ -175,6 +175,10 @@ async def test_seedance_duration_comes_from_real_source_probe_before_tariff(seed
 @pytest.mark.parametrize("inputs", [{"change_request": "make the coat blue"}, {"image_url": USER_IMAGE}])
 async def test_feed_video_intent_reaches_provider_appropriate_mode_contract(seedance_api, monkeypatch, provider, inputs):
     from api import neironych_seedance_runtime
+    from core.config import settings
+
+    # This test selects the primary provider, not a rejected-primary fallback.
+    monkeypatch.setattr(settings, "SEEDANCE_PRIMARY_PROVIDER", "kieai" if provider == "kie" else "neironych")
 
     captured = {}
     async def select_provider(_model, *, kie, neironych, before_kie_fallback=None):

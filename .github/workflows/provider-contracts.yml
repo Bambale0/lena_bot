@@ -130,6 +130,9 @@ jobs:
       - name: Live smoke manifest validation
         run: python scripts/run_provider_live_smoke.py
 
+      - name: Native admission fallback and durable handoff
+        run: pytest -q tests/test_neironych_admission_fallback.py tests/test_neironych_qwen38_service.py
+
       - name: Provider contract tests
         run: |
           pytest -q \

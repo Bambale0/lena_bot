@@ -16,7 +16,7 @@ from api.seedance25_identity import (
     build_identity_transfer_prompt,
     validate_identity_transfer_refs,
 )
-from api.seedance_provider_routing import submit_seedance
+from api.seedance_provider_routing import journal_kie_fallback, submit_seedance
 from core.seedance_repeat_overrides import (
     build_seedance_content_edit_prompt,
     restore_seedance_reference_plan,
@@ -279,6 +279,7 @@ async def _seedance_generate(video_service: Any, prompt: str, args: tuple[Any, .
             }
         )
         input_payload["prompt"] = clean_prompt
+        await journal_kie_fallback(kwargs.get("neironych_submission"))
         response = await video_service.kieai_client.create_task(
             {"model": seedance25.MODEL_KEY, "input": input_payload},
             callback_url=kwargs.get("callback_url"),
@@ -307,11 +308,7 @@ async def _seedance_generate(video_service: Any, prompt: str, args: tuple[Any, .
             uses_webhook=bool(kwargs.get("callback_url")),
         )
 
-    context = kwargs.get("neironych_submission")
-    return await submit_seedance(
-        seedance25.MODEL_KEY, kie=submit_kie, neironych=submit_neironych,
-        before_kie_fallback=(context.prepare_kie_fallback if context else None),
-    )
+    return await submit_seedance(seedance25.MODEL_KEY, kie=submit_kie, neironych=submit_neironych)
 
 
 async def _veo_generate(

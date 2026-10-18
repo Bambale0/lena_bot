@@ -157,6 +157,19 @@ async def handle_submission_unknown(session, gen_id: int, context) -> bool:
     if callable(getattr(session, "rollback", None)):
         await session.rollback()
     changed = await repo.mark_seedance_submission_unknown(session, gen_id, context.client_request_id)
+    if not changed:
+        # The KIE journal COMMIT can succeed while its acknowledgement is lost.
+        # Do not trust the in-memory kie_started flag or overwrite a bound task;
+        # match the persisted fallback identity before marking it uncertain.
+        gen = await repo.get_generation_by_id(session, gen_id)
+        if gen is not None:
+            params = repo.parse_input_params(gen.input_params)
+            original = params.get(repo.SEEDANCE_SUBMISSION_KEY)
+            task = str(gen.task_id or "").removeprefix("web:")
+            if (task == f"kie-submit:{gen_id}" and isinstance(original, dict)
+                    and original.get("client_request_id") == context.client_request_id
+                    and original.get("state") == "definite_rejected_fallback_kie"):
+                return await repo.mark_kie_video_submission_unknown(session, gen_id)
     if changed:
         gen = await repo.get_generation_by_id(session, gen_id)
         try:

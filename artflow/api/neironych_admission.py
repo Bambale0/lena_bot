@@ -32,3 +32,28 @@ def rejected_before_acceptance(
     except ValueError:
         return False
     return body == {"detail": "provider_temporarily_unavailable"}
+
+
+def pre_admission_unavailable_trace(response: httpx.Response) -> str | None:
+    """Preserve trace telemetry, but require the durable receipt as authority."""
+    from uuid import UUID
+
+    try:
+        request = response.request
+    except RuntimeError:
+        return None
+    if request.method != "POST" or request.url.path not in {
+        "/v1/videos/generations", "/v1/chat/completions",
+    }:
+        return None
+    if not rejected_before_acceptance(
+        response, client_request_id=request.headers.get("X-Client-Request-Id", ""),
+        idempotency_key=request.headers.get("Idempotency-Key", ""),
+    ):
+        return None
+    trace = response.headers.get("X-Request-Id", "")
+    try:
+        canonical = str(UUID(trace))
+    except ValueError:
+        return None
+    return canonical if canonical == trace.lower() else None

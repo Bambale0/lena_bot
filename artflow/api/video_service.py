@@ -25,7 +25,7 @@ except ImportError:
 from api import comet_fallback, kieai_client, neironych_seedance_runtime, wan30_provider
 from api.kie_model_specs import VIDEO_SPECS, build_kie_input
 from api.public_files import ensure_video_reference_aspect_url, local_upload_path_from_url
-from api.seedance_provider_routing import submit_seedance
+from api.seedance_provider_routing import journal_kie_fallback, submit_seedance
 from api.video_prompt_limits import validate_video_prompt
 from api.wan30_contract import Wan30Request
 from core.gemini_omni import (
@@ -353,12 +353,10 @@ async def generate_video(
                 seed=seed,
                 source_task_id=source_task_id,
                 callback_url=callback_url,
+                neironych_submission=neironych_submission,
             )
 
-        return await submit_seedance(
-            model.value, kie=submit_kie, neironych=submit_neironych,
-            before_kie_fallback=(neironych_submission.prepare_kie_fallback if neironych_submission else None),
-        )
+        return await submit_seedance(model.value, kie=submit_kie, neironych=submit_neironych)
 
     image_url = await _prepare_video_reference_urls(image_url)
     last_frame_url = await _prepare_video_reference_url(last_frame_url)
@@ -423,6 +421,7 @@ async def _kieai_generate(
     seed: int | None,
     source_task_id: str | None,
     callback_url: str | None,
+    neironych_submission: neironych_seedance_runtime.SubmissionContext | None = None,
 ) -> VideoResult:
     del motion  # motion providers consume media/mode fields from their model spec
 
@@ -452,6 +451,7 @@ async def _kieai_generate(
         if aspect_ratio:
             inp["aspect_ratio"] = aspect_ratio
 
+    await journal_kie_fallback(neironych_submission)
     resp = await kieai_client.create_task(
         {"model": resolved_model, "input": inp},
         callback_url=callback_url,

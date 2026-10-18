@@ -2,11 +2,14 @@
 
 import logging
 from collections.abc import Awaitable, Callable
-from typing import TypeVar
+from typing import TYPE_CHECKING, TypeVar
 
 from api.kieai_client import KieDefiniteRejection, KieSubmissionOutcomeUnknown
 from api.neironych_seedance import NeironychPreSubmitFailure, NeironychSubmissionUnknown
 from core.config import settings
+
+if TYPE_CHECKING:
+    from api.neironych_seedance_runtime import SubmissionContext
 
 logger = logging.getLogger(__name__)
 Result = TypeVar("Result")
@@ -17,7 +20,6 @@ async def submit_seedance(
     *,
     kie: Callable[[], Awaitable[Result]],
     neironych: Callable[[], Awaitable[Result]],
-    before_kie_fallback: Callable[[], Awaitable[None]] | None = None,
 ) -> Result:
     """Route each paid request independently, never via another task's circuit.
 
@@ -45,8 +47,6 @@ async def submit_seedance(
             product_model, primary, secondary, primary_exc,
         )
         try:
-            if secondary == "kieai" and before_kie_fallback is not None:
-                await before_kie_fallback()
             return await providers[secondary]()
         except (NeironychSubmissionUnknown, NeironychPreSubmitFailure,
                 KieSubmissionOutcomeUnknown):
@@ -56,3 +56,20 @@ async def submit_seedance(
                 f"{product_model} failed via primary {primary} and {secondary} fallback: "
                 f"primary={primary_exc}; fallback={fallback_exc}"
             ) from fallback_exc
+
+
+async def journal_kie_fallback(context: "SubmissionContext | None") -> None:
+    """Transfer a rejected Neironych attempt to the existing KIE durable gate.
+
+    Called after local payload/media preparation, immediately before KIE POST.
+    The legacy KIE-primary path is unchanged; it has no Neironych journal to
+    transfer. Old unknown/accepted attempts fail the repository CAS guard.
+    """
+    if context is None:
+        return
+    if not context.started and settings.SEEDANCE_PRIMARY_PROVIDER != "neironych":
+        return
+    # This callback is reached only after a definite primary rejection. Keep
+    # that fact if KIE intent storage fails: the locked caller can refund only
+    # the matching original intent, never a committed KIE/real task identity.
+    await context.prepare_kie_fallback()
