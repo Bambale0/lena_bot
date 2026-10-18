@@ -13,7 +13,7 @@ from typing import Any
 
 import httpx
 
-from api.neironych_admission import pre_admission_unavailable_trace
+from api.neironych_admission import pre_admission_unavailable_trace, rejected_before_acceptance
 from core.neironych_seedance_contract import (
     SEEDANCE_MODELS,
     SeedanceContractError,
@@ -418,6 +418,7 @@ class NeironychSeedanceClient:
             "Content-Type": "application/json",
             "Idempotency-Key": idem,
             "X-Client-Request-Id": rid,
+            "X-Submission-Receipt": "v1",
         }
         payload_sha256 = hashlib.sha256(
             json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
@@ -441,7 +442,9 @@ class NeironychSeedanceClient:
                         "admission_trace=%s status=503 outcome=not_admitted",
                         canonical_model, rid, admission_trace,
                     )
-                if _definite_rejection(response):
+                if _definite_rejection(response) or rejected_before_acceptance(
+                    response, client_request_id=rid, idempotency_key=idem,
+                ):
                     raise _safe_error(response)
                 raise NeironychSubmissionUnknown(rid, idem)
             response_payload = response.json()

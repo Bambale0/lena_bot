@@ -1,5 +1,7 @@
 # Native admission rejection and Seedance fallback
 
+> Historical PR #281 evidence. The current contract is [fenced admission recovery](seedance-presubmit-recovery.md). A UUID-only 503 is no longer fallback authority; versioned opt-in receipt and durable upstream key fencing are required. The post-preparation handoff placement and lost-commit-ack recovery below are retained.
+
 ## Incident and scope (2026-10-18)
 
 Production APIX `0da8798d42dafbe2ba721bebcb85fe186605026b` kept new Seedance 2.5 requests at a Neironych submission-unknown marker after HTTP 503. Fresh gateway logs identified `native_inference_rejected`, stage `provider_capital`, before any paid supplier work. Qwen photo-to-prompt requests failed at the same stage. Healthy containers and public HTTP health were not evidence of successful generation.

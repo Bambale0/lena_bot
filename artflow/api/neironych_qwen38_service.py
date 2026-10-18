@@ -13,7 +13,7 @@ from typing import Any
 
 import httpx
 
-from api.neironych_admission import pre_admission_unavailable_trace
+from api.neironych_admission import pre_admission_unavailable_trace, rejected_before_acceptance
 from core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -92,13 +92,16 @@ class NeironychQwen38Service:
                             "Authorization": f"Bearer {self.api_key}",
                             "Idempotency-Key": request_id,
                             "X-Client-Request-Id": request_id,
+                            "X-Submission-Receipt": "v1",
                         },
                         json={"model": self.model, "stream": False, "messages": messages},
                     )
             status = response.status_code
             if status >= 400:
                 admission_trace = pre_admission_unavailable_trace(response)
-                if admission_trace is not None:
+                if rejected_before_acceptance(
+                    response, client_request_id=request_id, idempotency_key=request_id,
+                ):
                     raise Qwen38ProviderError("admission_rejected", ambiguous=False, status=status)
                 raise Qwen38ProviderError("http_error", ambiguous=status >= 500 or status in {408, 409, 425, 429}, status=status)
             try:

@@ -1,24 +1,43 @@
-"""Verified native pre-admission rejection, not a generic 503 retry policy.
-
-Contract: Bambale0/ooo@50963d35033497d5014b830bf3a1eda263d72402,
-app/inference/router.py:inference and service.py:reserve. Reserve checks
-idempotency before capital admission. Admission errors are FastAPI detail-only
-objects with a diagnostic UUID; errors after an admitted generation use an
-error envelope and generation request_id. Never infer rejection from 404 polls.
-"""
+"""Verify native admission receipts; a bare HTTP 503 never proves no paid work."""
 from __future__ import annotations
 
-from uuid import UUID
+import hashlib
+import hmac
 
 import httpx
 
 
+def rejected_before_acceptance(
+    response: httpx.Response, *, client_request_id: str, idempotency_key: str,
+) -> bool:
+    """Trust only the provider's versioned, invocation-bound rollback receipt.
+
+    The native gateway emits this after rolling back a typed rejection and
+    durably fencing the logical key against any overlapping/later acceptance. Other 5xx responses may follow an
+    accepted POST and remain ambiguous, including responses from older servers.
+    """
+    if (
+        response.status_code != 503
+        or response.headers.get("X-Submission-State") != "not-accepted-v1"
+        or not client_request_id or not idempotency_key
+        or not hmac.compare_digest(response.headers.get("X-Client-Request-Id", "").encode(), client_request_id.encode())
+        or not hmac.compare_digest(
+            response.headers.get("X-Idempotency-Key-Sha256", "").encode(),
+            hashlib.sha256(idempotency_key.encode()).hexdigest().encode(),
+        )
+    ):
+        return False
+    try:
+        body = response.json()
+    except ValueError:
+        return False
+    return body == {"detail": "provider_temporarily_unavailable"}
+
+
 def pre_admission_unavailable_trace(response: httpx.Response) -> str | None:
-    """Return the safe trace UUID only for the exact verified admission shape."""
-    if response.status_code != 503:
-        return None
-    if response.headers.get("content-type", "").split(";", 1)[0].strip().lower() != "application/json":
-        return None
+    """Preserve trace telemetry, but require the durable receipt as authority."""
+    from uuid import UUID
+
     try:
         request = response.request
     except RuntimeError:
@@ -27,14 +46,12 @@ def pre_admission_unavailable_trace(response: httpx.Response) -> str | None:
         "/v1/videos/generations", "/v1/chat/completions",
     }:
         return None
-    try:
-        body = response.json()
-    except ValueError:
+    if not rejected_before_acceptance(
+        response, client_request_id=request.headers.get("X-Client-Request-Id", ""),
+        idempotency_key=request.headers.get("Idempotency-Key", ""),
+    ):
         return None
-    # Extra fields could indicate accepted work or an unverified new contract.
-    if body != {"detail": "provider_temporarily_unavailable"}:
-        return None
-    trace = response.headers.get("x-request-id", "")
+    trace = response.headers.get("X-Request-Id", "")
     try:
         canonical = str(UUID(trace))
     except ValueError:

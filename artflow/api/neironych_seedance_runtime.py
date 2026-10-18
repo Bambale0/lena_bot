@@ -35,6 +35,14 @@ class SubmissionContext:
     # Provider-independent KIE admission, committed BEFORE any paid POST.
     before_kie_submit: Callable[[], Awaitable[None]] | None = None
     kie_started: bool = False
+    neironych_rejected: bool = False
+
+    async def prepare_kie_fallback(self) -> None:
+        # Called by the router only after a definite primary rejection, never
+        # for an unknown outcome. Preserve this fact if KIE intent storage fails.
+        self.neironych_rejected = True
+        if self.before_kie_submit is not None:
+            await self.before_kie_submit()
 
 
 class NeironychVideoTaskFailed(RuntimeError):

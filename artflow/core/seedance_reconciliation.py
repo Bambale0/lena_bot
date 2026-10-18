@@ -265,7 +265,9 @@ async def handle_submission_not_sent(session, gen_id: int, context) -> bool:
     from db import repository as repo
     from db.models import GenerationStatus
 
-    if context is None or context.started:
+    if context is None or getattr(context, "kie_started", False):
+        return False
+    if context.started and not getattr(context, "neironych_rejected", False):
         return False
     if callable(getattr(session, "rollback", None)):
         await session.rollback()

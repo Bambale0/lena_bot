@@ -65,14 +65,11 @@ async def journal_kie_fallback(context: "SubmissionContext | None") -> None:
     The legacy KIE-primary path is unchanged; it has no Neironych journal to
     transfer. Old unknown/accepted attempts fail the repository CAS guard.
     """
-    if context is None or not context.started:
+    if context is None:
         return
-    try:
-        if not callable(context.before_kie_submit):
-            raise NeironychPreSubmitFailure(context.client_request_id, "kie-fallback")
-        await context.before_kie_submit()
-    except NeironychPreSubmitFailure as exc:
-        # The primary journal already exists; the original pre-submit refund
-        # handler intentionally refuses started contexts. Route this failure
-        # through durable reconciliation, including an uncertain DB COMMIT.
-        raise NeironychSubmissionUnknown(context.client_request_id, "kie-fallback") from exc
+    if not context.started and settings.SEEDANCE_PRIMARY_PROVIDER != "neironych":
+        return
+    # This callback is reached only after a definite primary rejection. Keep
+    # that fact if KIE intent storage fails: the locked caller can refund only
+    # the matching original intent, never a committed KIE/real task identity.
+    await context.prepare_kie_fallback()

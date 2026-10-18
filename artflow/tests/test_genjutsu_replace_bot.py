@@ -177,6 +177,7 @@ def billing(monkeypatch):
     monkeypatch.setattr(
         video_gen.repo, "register_kie_video_callback", AsyncMock(return_value=True)
     )
+    monkeypatch.setattr(video_gen.repo, "begin_kie_video_submission", AsyncMock(return_value=True))
     monkeypatch.setattr(video_gen.repo, "fail_generation_and_refund", refund)
     return SimpleNamespace(spend=spend, create=create, refund=refund)
 
@@ -244,8 +245,14 @@ async def test_history_restores_exact_content_edit_before_charging(
 
 @pytest.mark.asyncio
 async def test_provider_rejection_refunds_once_and_keeps_editable_draft(
-    state, io, billing, provider
+    state, io, billing, provider, monkeypatch
 ):
+    from api.kieai_client import KieDefiniteRejection
+
+    # Both providers are external boundaries; do not use a live KIE request to
+    # manufacture an error. Durable backup admission has its own SQL tests.
+    backup = AsyncMock(side_effect=KieDefiniteRejection("synthetic backup rejection"))
+    monkeypatch.setattr(video_gen.video_service.kieai_client, "create_task", backup)
     provider.side_effect = RuntimeError("provider rejected")
     await ready(state, io)
     token = (await state.get_data())["gj_token"]
@@ -253,6 +260,7 @@ async def test_provider_rejection_refunds_once_and_keeps_editable_draft(
     assert await state.get_state() == "GenjutsuReplaceFSM:confirm"
     assert (await state.get_data())["seedance_content_edit"]["number"] == "25"
     billing.refund.assert_awaited_once()
+    backup.assert_awaited_once()
     await callback(f"gjreplace:launch:{token}", state, io)
     assert billing.spend.await_count == billing.refund.await_count == 1
 

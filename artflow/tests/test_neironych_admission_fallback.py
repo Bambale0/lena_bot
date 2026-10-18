@@ -1,10 +1,11 @@
 """Only the verified native pre-admission error can safely use the backup.
 
 All HTTP is synthetic. No provider job, secret, real balance or DB is used.
-The upstream contract was checked at ooo@50963d35033497d5014b830bf3a1eda263d72402.
+The receipt/fence contract extends the original native admission tests; UUID-only refusals now remain ambiguous.
 """
 from __future__ import annotations
 
+import hashlib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -24,6 +25,17 @@ HEADERS = {"X-Request-Id": TRACE}
 ADMISSION_BODY = {"detail": "provider_temporarily_unavailable"}
 
 
+def receipt_response(request):
+    # A trace UUID alone cannot exclude a concurrent same-key acceptance.
+    # Positive cases use the gateway's fenced, invocation-bound contract.
+    return httpx.Response(503, json=ADMISSION_BODY, headers={
+        **HEADERS,
+        "X-Submission-State": "not-accepted-v1",
+        "X-Client-Request-Id": request.headers["X-Client-Request-Id"],
+        "X-Idempotency-Key-Sha256": hashlib.sha256(request.headers["Idempotency-Key"].encode()).hexdigest(),
+    })
+
+
 async def submit_video(response, monkeypatch):
     monkeypatch.setattr(seedance_provider_routing.settings, "SEEDANCE_PRIMARY_PROVIDER", "neironych")
     requests = []
@@ -32,7 +44,7 @@ async def submit_video(response, monkeypatch):
 
     def handler(request):
         requests.append(request)
-        return response
+        return response(request) if callable(response) else response
 
     async with httpx.AsyncClient(base_url="https://provider.test", transport=httpx.MockTransport(handler)) as http:
         client = NeironychSeedanceClient("synthetic-key", "https://provider.test", client=http)
@@ -59,11 +71,12 @@ async def submit_video(response, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_seedance_native_capital_rejection_uses_backup_exactly_once(monkeypatch):
-    requests = await submit_video(httpx.Response(503, headers=HEADERS, json=ADMISSION_BODY), monkeypatch)
+    requests = await submit_video(receipt_response, monkeypatch)
     assert requests[0].headers["Idempotency-Key"] == "test-admission-503"
 
 
 UNKNOWN_RESPONSES = [
+    httpx.Response(503, headers=HEADERS, json=ADMISSION_BODY),  # UUID alone is not durable rejection proof
     httpx.Response(503, json=ADMISSION_BODY),  # no native diagnostic UUID
     httpx.Response(503, headers={"X-Request-Id": "not-a-uuid"}, json=ADMISSION_BODY),
     httpx.Response(503, headers={"X-Request-Id": "https://secret.test/?token=hidden"}, json=ADMISSION_BODY),
@@ -88,14 +101,14 @@ async def test_unknown_seedance_5xx_never_authorizes_backup(monkeypatch, respons
 def qwen(response):
     return NeironychQwen38Service(
         api_key="synthetic-key", base_url="https://provider.test", model="qwen3.8-max",
-        transport=httpx.MockTransport(lambda request: response),
+        transport=httpx.MockTransport(lambda request: response(request) if callable(response) else response),
     )
 
 
 @pytest.mark.asyncio
 async def test_qwen_native_capital_rejection_is_not_ambiguous():
     with pytest.raises(Qwen38ProviderError) as caught:
-        await qwen(httpx.Response(503, headers=HEADERS, json=ADMISSION_BODY)).analyze_text(user_instruction="Hello")
+        await qwen(receipt_response).analyze_text(user_instruction="Hello")
     assert caught.value.ambiguous is False
     assert caught.value.kind == "admission_rejected"
 
@@ -110,7 +123,7 @@ async def test_qwen_unproven_5xx_remains_ambiguous(response):
 
 @pytest.mark.asyncio
 async def test_shared_photo_prompt_uses_existing_configured_backup_after_capital_rejection(monkeypatch):
-    service = qwen(httpx.Response(503, headers=HEADERS, json=ADMISSION_BODY))
+    service = qwen(receipt_response)
     monkeypatch.setattr(photo_prompt_service, "NeironychQwen38Service", lambda: service)
     monkeypatch.setattr(photo_prompt_service, "get_qwen_route", AsyncMock(return_value=SimpleNamespace(
         primary_provider="neironych", backup_provider="kie",
@@ -169,7 +182,7 @@ async def test_seedance_fallback_journal_precedes_kie_http_and_binds_result(
         def primary(request):
             calls.append(("neironych", json.loads(request.content)))
             assert session.get(Generation, 73).task_id == "neironych-submit:" + context.client_request_id
-            return httpx.Response(503, headers=HEADERS, json=ADMISSION_BODY)
+            return receipt_response(request)
 
         def backup(request):
             row = session.get(Generation, 73)
@@ -207,17 +220,16 @@ async def test_seedance_fallback_journal_precedes_kie_http_and_binds_result(
                     return await video_service.generate_video(video_service.VideoModel(model), "Use my reference", **kwargs)
 
             if backup_outcome == "journal_failure":
-                with pytest.raises(NeironychSubmissionUnknown):
+                with pytest.raises(NeironychPreSubmitFailure):
                     await invoke()
                 assert [provider for provider, _ in calls] == ["neironych"]
                 assert not context.kie_started
                 assert session.get(Generation, 73).task_id.startswith("neironych-submit:")
-                monkeypatch.setattr(reconciliation, "pause_neironych_route", AsyncMock())
-                assert await reconciliation.handle_submission_unknown(db, 73, context)
-                marker = json.loads(session.get(Generation, 73).input_params)
-                assert marker[repo.SEEDANCE_SUBMISSION_KEY]["state"] == "submission_unknown"
-                assert marker[reconciliation.RECONCILIATION_KEY]["required"] is True
-                assert session.get(User, 42).credits == 100
+                assert context.neironych_rejected
+                assert await reconciliation.handle_submission_not_sent(db, 73, context)
+                assert session.get(Generation, 73).status == GenerationStatus.failed
+                assert session.get(User, 42).credits == 140
+                assert not await reconciliation.handle_submission_not_sent(db, 73, context)
                 return
             if backup_outcome == "timeout":
                 with pytest.raises(kieai_client.KieSubmissionOutcomeUnknown):
