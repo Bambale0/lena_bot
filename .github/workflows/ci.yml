@@ -71,100 +71,11 @@ jobs:
           grep -Fq 'docker compose run --rm -T app alembic upgrade head </dev/null' scripts/deploy-production.sh
           grep -Fq 'verifying Seedance 2.5 feed-repeat runtime and Telegram webhook' scripts/deploy-production.sh
 
-      - name: Pytest maintained PR gate
-        run: |
-          pytest -q \
-            tests/test_openapi_artifact_contract.py \
-            tests/test_audit_trend_entry.py \
-            tests/test_provider_callback_log_privacy.py \
-            tests/test_provider_exposure_consistency.py \
-            tests/test_higgsfield_seedance25_edit_lab.py \
-            tests/test_main_menu_contract.py::test_v2_create_hub_preserves_all_creation_entrypoints_and_explains_them \
-            tests/test_video_gen.py::test_cb_genjutsu_menu_opens_dedicated_flow_when_configured \
-            tests/test_video_gen.py::test_cb_genjutsu_menu_admin_preview_blocks_launch_without_credentials \
-            tests/test_genjutsu_integration.py \
-            tests/test_apix_legacy_concept_runtime.py \
-            tests/test_apix_production_trends_surface.py \
-            tests/test_gemini_omni_telegram_media_flow.py \
-            tests/test_kling_motion_visibility.py \
-            tests/test_admin_main_menu.py \
-            tests/test_nexusapi_client.py \
-            tests/test_nexus_image_migration.py \
-            tests/test_nano_banana_pro_reference_transport.py \
-            tests/test_feed_repeat_identity_contract.py \
-            tests/test_feed_output_binding.py \
-            tests/test_nano_banana21_routing.py \
-            tests/test_nano_banana21_control_plane.py \
-            tests/test_nano_banana21_recovery.py \
-            tests/test_nano_banana21_api_integration.py \
-            tests/test_neironych_video_stuck_recovery.py \
-            tests/test_neironych_video_notice_outbox.py \
-            tests/test_neironych_video_poll_gate.py \
-            tests/test_seedance_neironych_mode_contract.py \
-            tests/test_seedance_uncertain_submission.py \
-            tests/test_neironych_admission_fallback.py \
-            tests/test_neironych_qwen38_service.py \
-            tests/test_seedance_auto_timeout.py \
-            tests/test_kie_seedance_callback.py \
-            tests/test_video_progress_privacy.py \
-            tests/test_seedance_postgres_admission.py \
-            tests/test_neironych_automatic_recovery.py \
-            tests/test_reconcile_video_delivery.py \
-            tests/test_neironych_seedance_runtime.py \
-            tests/test_neironych_seedance_admin.py \
-            tests/test_nexus_admin_pricing.py \
-            tests/test_referral_commission_defaults.py \
-            tests/test_stars_payment.py \
-            tests/test_tribute.py \
-            tests/test_plan_payment_method_choice.py \
-            tests/test_payment_webhooks.py \
-            tests/test_miniapp_feed_webkit_stability.py \
-            tests/test_miniapp_ux2_preview.py \
-            tests/test_ux2_media_capabilities.py \
-            tests/test_ux2_upload_policy.py \
-            tests/test_ux2_reference_availability.py \
-            tests/test_repository_feed.py \
-            tests/test_midjourney.py \
-            tests/test_image_model_unlimited.py \
-            tests/test_image_model_unlimited_schema.py \
-            tests/test_admin_image_unlimited.py \
-            tests/test_image_gen_references.py::test_launch_session_generation_unlimited_records_zero_credits \
-            tests/test_webapp_routes.py::test_generate_image_unlimited_allows_zero_balance_and_records_zero_charge \
-            tests/test_feed_remix_prelaunch.py \
-            tests/test_feed_remix_prompt_security.py \
-            tests/test_seedance_feed_personalization.py \
-            tests/test_seedance_feed_bot.py \
-            tests/test_bot_prompt_and_regen_confirmation.py \
-            tests/test_feed_picker_reference_limits.py \
-            tests/test_feed_repeat_snapshot_security.py \
-            tests/test_feed_input_reference_privacy.py \
-            tests/test_prompt_privacy.py \
-            tests/test_realtime.py \
-            tests/test_feed_session_prompt_security.py \
-            tests/test_image_session_prompt_provenance.py \
-            tests/test_image_session_provenance_migration.py \
-            tests/test_feed_photo1_policy_migration.py \
-            tests/test_feed_recipe_identity_policy.py \
-            tests/test_delivery_prompt_security.py \
-            tests/test_repeat_multiple_references.py \
-            tests/test_repeat_marketplace_multiple_references.py \
-            tests/test_feed.py \
-            tests/test_safe_image_repeat.py \
-            tests/test_restored_repeat_reference_limits.py \
-            tests/test_repeat_callback_guard.py \
-            tests/test_feed_checkout_options.py \
-            tests/test_provider_contract_catalog.py \
-            tests/test_public_files.py \
-            tests/test_seedance25_identity_transfer.py \
-            tests/test_seedance25_repeat_keyboard.py \
-            tests/test_trend_animals_category.py \
-            tests/test_trend_personalization_fields.py \
-            tests/test_kie_model_specs.py \
-            tests/test_runtime_reliability.py \
-            tests/test_video_prompt_service.py \
-            tests/test_video_prompt_fps.py \
-            tests/test_video_prompt_surface.py \
-            tests/test_video_prompt_nginx_config.py
+      - name: Native admission fallback regressions
+        run: pytest -q tests/test_neironych_admission_fallback.py tests/test_neironych_qwen38_service.py
+
+      - name: Pytest full release gate
+        run: pytest -q
 
   bot-navigation:
     runs-on: ubuntu-latest

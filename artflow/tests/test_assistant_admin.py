@@ -191,6 +191,7 @@ def test_format_user_brief_report_contains_payments_referrals_and_favorite_ai() 
             amount_rub=150.0,
             credits=15.0,
             provider="tbank",
+            status="paid",
             created_at=datetime(2026, 5, 17, 19, 36, tzinfo=timezone.utc),
         ),
         SimpleNamespace(
@@ -198,6 +199,7 @@ def test_format_user_brief_report_contains_payments_referrals_and_favorite_ai() 
             amount_rub=250.0,
             credits=25.0,
             provider="tbank",
+            status="paid",
             created_at=datetime(2026, 5, 19, 7, 3, tzinfo=timezone.utc),
         ),
     ]

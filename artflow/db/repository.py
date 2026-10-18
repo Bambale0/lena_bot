@@ -16,7 +16,7 @@ from sqlalchemy import Date, cast, delete, desc, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased
+from sqlalchemy.orm import aliased, selectinload
 
 from api.public_files import mirror_url, public_url_is_available
 from core.config import settings
@@ -48,6 +48,7 @@ from db.models import (
     WebAuthCode,
     WithdrawalStatus,
 )
+from db.payment_reporting import net_paid_amount_expr
 from db.repeat_lookup import parse_input_params
 
 logger = logging.getLogger(__name__)
@@ -661,6 +662,28 @@ async def record_referral_commission(
     if rate < 0 or rate > 1:
         raise ValueError("Referral commission rate must be between 0 and 1")
 
+    # Serialize accrual with refund before taking any wallet row locks.
+    # A callback arriving after a refund must not resurrect a commission.
+    tx = await session.scalar(
+        select(Transaction).where(Transaction.id == transaction_id)
+        .with_for_update().execution_options(populate_existing=True)
+    )
+    if tx is None or tx.user_id != payer_user_id:
+        await session.rollback()
+        raise ValueError("Referral transaction/payer mismatch")
+    if event_type == "accrual" and tx.status != TransactionStatus.paid:
+        await session.commit()
+        return None
+    recipients = set((await session.scalars(
+        select(ReferralCommissionLedger.recipient_user_id)
+        .where(ReferralCommissionLedger.transaction_id == transaction_id)
+    )).all())
+    recipients.update((payer_user_id, recipient_user_id))
+    await session.execute(
+        select(User.id).where(User.id.in_(sorted(recipients)))
+        .order_by(User.id).with_for_update()
+    )
+
     statement = (
         pg_insert(ReferralCommissionLedger)
         .values(
@@ -681,7 +704,7 @@ async def record_referral_commission(
     )
     entry_id = (await session.execute(statement)).scalar_one_or_none()
     if entry_id is None:
-        await session.rollback()
+        await session.commit()
         return None
 
     balance_result = await session.execute(
@@ -700,6 +723,12 @@ async def record_referral_commission(
         .where(ReferralCommissionLedger.id == entry_id)
         .values(balance_after_rub=float(new_balance))
     )
+    if event_type == "accrual" and tx.refunded_amount_minor:
+        from db.payment_refunds import reverse_referral_share
+
+        await reverse_referral_share(
+            session, tx, target=tx.refunded_amount_minor, original=tx.provider_amount_minor,
+        )
     await session.commit()
     return await session.get(ReferralCommissionLedger, int(entry_id))
 
@@ -1089,7 +1118,7 @@ async def get_referral_children(
         .subquery()
     )
     revenue = (
-        select(Transaction.user_id.label("user_id"), func.coalesce(func.sum(Transaction.amount_rub), 0).label("rub"))
+        select(Transaction.user_id.label("user_id"), func.coalesce(func.sum(net_paid_amount_expr()), 0).label("rub"))
         .where(Transaction.status == TransactionStatus.paid)
         .group_by(Transaction.user_id)
         .subquery()
@@ -1126,7 +1155,7 @@ async def get_all_referral_bindings(
         .subquery()
     )
     revenue = (
-        select(Transaction.user_id.label("user_id"), func.coalesce(func.sum(Transaction.amount_rub), 0).label("rub"))
+        select(Transaction.user_id.label("user_id"), func.coalesce(func.sum(net_paid_amount_expr()), 0).label("rub"))
         .where(Transaction.status == TransactionStatus.paid)
         .group_by(Transaction.user_id)
         .subquery()
@@ -3041,7 +3070,14 @@ async def create_transaction(
     credits: float,
     provider: PaymentProvider,
     external_id: str | None = None,
+    *,
+    provider_amount_minor: int | None = None,
+    provider_currency: str | None = None,
 ) -> Transaction:
+    if provider == PaymentProvider.tbank:
+        from db.payment_refunds import money_minor
+        provider_amount_minor = money_minor(amount_rub)
+        provider_currency = "rub"
     tx = Transaction(
         user_id=user_id,
         amount_rub=amount_rub,
@@ -3049,6 +3085,8 @@ async def create_transaction(
         provider=provider,
         external_id=external_id,
         status=TransactionStatus.pending,
+        provider_amount_minor=provider_amount_minor,
+        provider_currency=provider_currency,
     )
     session.add(tx)
     await session.commit()
@@ -3082,6 +3120,28 @@ async def confirm_transaction_and_add_credits(
     entry_type: str = "payment_credit",
     note: str | None = None,
 ) -> tuple[Transaction, float] | None:
+    from db.models import PaymentRefundNotice
+    from db.payment_refunds import lock_payment_identity
+
+    await lock_payment_identity(session, external_id)
+    notice = await session.get(PaymentRefundNotice, external_id)
+    if notice is not None:
+        current_provider = await session.scalar(
+            select(Transaction.provider).where(Transaction.external_id == external_id)
+        )
+        if current_provider is not None and current_provider != PaymentProvider(notice.provider):
+            from db.payment_refunds import RefundNeedsReconciliation
+            await session.rollback()
+            raise RefundNeedsReconciliation("Payment/refund notice provider mismatch")
+        await session.execute(
+            update(Transaction).where(
+                Transaction.external_id == external_id,
+                Transaction.provider == PaymentProvider(notice.provider),
+                Transaction.status == TransactionStatus.pending,
+            ).values(status=TransactionStatus.refunded)
+        )
+        await session.commit()
+        return None
     result = await session.execute(
         update(Transaction)
         .where(
@@ -3179,19 +3239,20 @@ async def set_transaction_status(
     external_id: str,
     status: TransactionStatus,
 ) -> Transaction | None:
+    if status != TransactionStatus.failed:
+        raise ValueError("Use the atomic payment confirmation/refund operation")
     result = await session.execute(
-        select(Transaction).where(Transaction.external_id == external_id)
-    )
-    tx = result.scalar_one_or_none()
-    if not tx:
-        return None
-    await session.execute(
         update(Transaction)
-        .where(Transaction.id == tx.id)
-        .values(status=status)
+        .where(
+            Transaction.external_id == external_id,
+            Transaction.status == TransactionStatus.pending,
+        )
+        .values(status=TransactionStatus.failed)
+        .returning(Transaction)
     )
+    changed = result.scalar_one_or_none()
     await session.commit()
-    return tx
+    return changed
 
 
 # ─── Referral Withdrawals ────────────────────────────────────────────────────
@@ -3454,7 +3515,7 @@ async def set_withdrawal_status(
 async def get_revenue_today(session: AsyncSession) -> float:
     start_utc, end_utc = moscow_day_bounds_utc()
     result = await session.execute(
-        select(func.coalesce(func.sum(Transaction.amount_rub), 0))
+        select(func.coalesce(func.sum(net_paid_amount_expr()), 0))
         .where(
             Transaction.status == TransactionStatus.paid,
             Transaction.created_at >= start_utc,
@@ -3469,6 +3530,7 @@ async def get_revenue_today(session: AsyncSession) -> float:
 async def get_active_price_plans(session: AsyncSession) -> list[PricePlan]:
     result = await session.execute(
         select(PricePlan)
+        .options(selectinload(PricePlan.tribute_products))
         .where(PricePlan.is_active.is_(True))
         .order_by(PricePlan.sort_order)
     )
@@ -3476,7 +3538,7 @@ async def get_active_price_plans(session: AsyncSession) -> list[PricePlan]:
 
 
 async def get_price_plan_by_key(session: AsyncSession, key: str) -> PricePlan | None:
-    result = await session.execute(select(PricePlan).where(PricePlan.key == key))
+    result = await session.execute(select(PricePlan).options(selectinload(PricePlan.tribute_products)).where(PricePlan.key == key))
     return result.scalar_one_or_none()
 
 

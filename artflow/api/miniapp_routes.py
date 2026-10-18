@@ -174,6 +174,7 @@ from db.models import (
     UserPrompt,
     WithdrawalStatus,
 )
+from db.payment_reporting import net_paid_amount_expr
 from db.session import get_session
 from payments.checkout_options import crypto_amount_usdt, payment_options_for_plan
 
@@ -1665,6 +1666,11 @@ def _normalize_image_request(
             "high": "4K" if "4K" in quality_options else quality_options[-1],
         }
         normalized_quality = legacy_quality_aliases.get(normalized_quality, normalized_quality)
+        # Legacy trend tags are lowercased by the tag resolver. Resolve only
+        # known quality choices case-insensitively before price lookup.
+        normalized_quality = {value.casefold(): value for value in quality_options}.get(
+            str(normalized_quality).casefold(), normalized_quality,
+        )
         normalized_quality = str(
             _normalize_choice(
                 normalized_quality,
@@ -5161,8 +5167,8 @@ async def admin_overview(
     users_total = int((await session.execute(select(func.count(User.id)))).scalar() or 0)
     users_new_7d = int((await session.execute(select(func.count(User.id)).where(User.created_at >= seven_days_ago))).scalar() or 0)
     paid_users = int((await session.execute(select(func.count(func.distinct(Transaction.user_id))).where(Transaction.status == TransactionStatus.paid))).scalar() or 0)
-    revenue_total = float((await session.execute(select(func.coalesce(func.sum(Transaction.amount_rub), 0)).where(Transaction.status == TransactionStatus.paid))).scalar() or 0)
-    revenue_7d = float((await session.execute(select(func.coalesce(func.sum(Transaction.amount_rub), 0)).where(Transaction.status == TransactionStatus.paid, Transaction.created_at >= seven_days_ago))).scalar() or 0)
+    revenue_total = float((await session.execute(select(func.coalesce(func.sum(net_paid_amount_expr()), 0)).where(Transaction.status == TransactionStatus.paid))).scalar() or 0)
+    revenue_7d = float((await session.execute(select(func.coalesce(func.sum(net_paid_amount_expr()), 0)).where(Transaction.status == TransactionStatus.paid, Transaction.created_at >= seven_days_ago))).scalar() or 0)
     generations_total = int((await session.execute(select(func.count(Generation.id)))).scalar() or 0)
     generations_7d = int((await session.execute(select(func.count(Generation.id)).where(Generation.created_at >= seven_days_ago))).scalar() or 0)
     image_7d = int((await session.execute(select(func.count(Generation.id)).where(Generation.created_at >= seven_days_ago, Generation.gen_type == GenerationType.image))).scalar() or 0)
@@ -5181,7 +5187,7 @@ async def admin_overview(
         .order_by(cast(User.created_at, Date))
     )).all()
     revenue_rows = (await session.execute(
-        select(cast(Transaction.created_at, Date), func.coalesce(func.sum(Transaction.amount_rub), 0))
+        select(cast(Transaction.created_at, Date), func.coalesce(func.sum(net_paid_amount_expr()), 0))
         .where(Transaction.status == TransactionStatus.paid, Transaction.created_at >= since_dt)
         .group_by(cast(Transaction.created_at, Date))
         .order_by(cast(Transaction.created_at, Date))
@@ -5200,7 +5206,7 @@ async def admin_overview(
         .limit(8)
     )).all()
     providers = (await session.execute(
-        select(Transaction.provider, func.count(Transaction.id), func.coalesce(func.sum(Transaction.amount_rub), 0))
+        select(Transaction.provider, func.count(Transaction.id), func.coalesce(func.sum(net_paid_amount_expr()), 0))
         .where(Transaction.created_at >= thirty_days_ago)
         .group_by(Transaction.provider)
         .order_by(desc(func.count(Transaction.id)))
@@ -5266,7 +5272,7 @@ async def admin_users(
     items = []
     for row in rows:
         generations_count = int((await session.execute(select(func.count(Generation.id)).where(Generation.user_id == row.id))).scalar() or 0)
-        paid_rub = float((await session.execute(select(func.coalesce(func.sum(Transaction.amount_rub), 0)).where(Transaction.user_id == row.id, Transaction.status == TransactionStatus.paid))).scalar() or 0)
+        paid_rub = float((await session.execute(select(func.coalesce(func.sum(net_paid_amount_expr()), 0)).where(Transaction.user_id == row.id, Transaction.status == TransactionStatus.paid))).scalar() or 0)
         items.append({
             "id": int(row.id),
             "tg_id": int(row.tg_id),
@@ -5314,7 +5320,7 @@ async def admin_user_detail(
         },
         "stats": {
             "generations_count": int((await session.execute(select(func.count(Generation.id)).where(Generation.user_id == user_id))).scalar() or 0),
-            "paid_rub": float((await session.execute(select(func.coalesce(func.sum(Transaction.amount_rub), 0)).where(Transaction.user_id == user_id, Transaction.status == TransactionStatus.paid))).scalar() or 0),
+            "paid_rub": float((await session.execute(select(func.coalesce(func.sum(net_paid_amount_expr()), 0)).where(Transaction.user_id == user_id, Transaction.status == TransactionStatus.paid))).scalar() or 0),
             "payments_count": int((await session.execute(select(func.count(Transaction.id)).where(Transaction.user_id == user_id, Transaction.status == TransactionStatus.paid))).scalar() or 0),
             "referrals": {"l1": l1, "l2": l2, "l3": l3},
         },
@@ -5503,7 +5509,7 @@ async def list_payment_methods(
     if settings.TRIBUTE_API_KEY:
         from payments import tribute
 
-        if any(key in tribute.digital_product_plan_keys() for key in plan_keys):
+        if any(tribute.digital_product_for_plan(plan) is not None for plan in plans):
             methods.append("tribute")
     if settings.LAVA_API_KEY and any(settings.lava_offer_id_for_plan(key) for key in plan_keys):
         methods.append("lava")
@@ -5549,7 +5555,7 @@ async def list_plans(
             "price_rub_display": f"{_fmt_amount(p.price_rub)}₽",
             "price_stars": _plan_stars_price(p),
             "price_usdt": crypto_amount_usdt(p.price_rub),
-            "price_tribute_usd": tribute.digital_product_price_usd(p.key),
+            "price_tribute_usd": tribute.digital_product_price_usd(p),
         }
         for p in plans
     ]
@@ -5690,7 +5696,7 @@ async def topup_tribute(
         raise HTTPException(status_code=404, detail="Tribute is not enabled")
 
     plan = await repo.get_price_plan_by_key(session, body.plan_key)
-    if not plan or not plan.is_active or tribute.digital_product_for_plan(plan.key) is None:
+    if not plan or not plan.is_active or tribute.digital_product_for_plan(plan) is None:
         raise HTTPException(status_code=404, detail="Plan not found")
 
     try:

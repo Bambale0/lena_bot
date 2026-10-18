@@ -70,7 +70,7 @@ def _home_text(context: MainMenuContext, lang: str, *, show_session: bool) -> st
     return base + active
 
 
-def render_main_menu(context: MainMenuContext, lang: str = "ru", *, force_main_text: bool = False) -> ScreenRender:
+def build_main_menu_keyboard(*, has_active_image_session: bool, is_admin: bool, lang: str = "ru"):
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(
@@ -79,7 +79,7 @@ def render_main_menu(context: MainMenuContext, lang: str = "ru", *, force_main_t
         )
     )
 
-    if context.active_image_session:
+    if has_active_image_session:
         builder.row(
             InlineKeyboardButton(text="🔥 " + ("Продолжить" if lang == "ru" else "Continue"), callback_data="img_session:continue"),
             InlineKeyboardButton(text="🆕 " + ("Новая работа" if lang == "ru" else "New work"), callback_data="img_session:new"),
@@ -101,7 +101,7 @@ def render_main_menu(context: MainMenuContext, lang: str = "ru", *, force_main_t
         InlineKeyboardButton(text="💳 " + ("Пополнить" if lang == "ru" else "Top up"), callback_data="menu:topup"),
         InlineKeyboardButton(text="☰ " + ("Ещё" if lang == "ru" else "More"), callback_data="menu:more"),
     )
-    if context.is_admin:
+    if is_admin:
         builder.row(
             InlineKeyboardButton(text="🧪 " + ("Тест" if lang == "ru" else "Test"), callback_data="menu:test"),
             InlineKeyboardButton(
@@ -110,7 +110,15 @@ def render_main_menu(context: MainMenuContext, lang: str = "ru", *, force_main_t
             ),
         )
 
+    return builder.as_markup()
+
+
+def render_main_menu(context: MainMenuContext, lang: str = "ru", *, force_main_text: bool = False) -> ScreenRender:
+    markup = build_main_menu_keyboard(
+        has_active_image_session=bool(context.active_image_session), is_admin=context.is_admin, lang=lang,
+    )
+
     return ScreenRender(
         text=_home_text(context, lang, show_session=not force_main_text),
-        reply_markup=builder.as_markup(),
+        reply_markup=markup,
     )

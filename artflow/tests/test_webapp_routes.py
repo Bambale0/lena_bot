@@ -6,6 +6,7 @@ from unittest.mock import ANY, AsyncMock, MagicMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from tribute_fixtures import with_tribute_offer
 
 from api.miniapp_auth import create_web_auth_token, get_miniapp_user
 from api.miniapp_routes import (
@@ -21,7 +22,14 @@ from main import app
 
 
 async def fake_session():
-    yield AsyncMock()
+    session = AsyncMock()
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = None
+    result.scalar.return_value = 0
+    result.scalar_one.return_value = 0
+    result.scalars.return_value.all.return_value = []
+    session.execute.return_value = result
+    yield session
 
 
 async def fake_user():
@@ -58,7 +66,7 @@ async def client():
 async def test_webapp_health_is_public() -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get("/api/v1/health")
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
 
 
 @pytest.mark.asyncio
@@ -66,7 +74,7 @@ async def test_missing_static_upload_returns_placeholder() -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get("/static/upload/definitely-missing-upload.jpg")
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert response.headers["content-type"].startswith("image/png")
 
 
@@ -85,7 +93,7 @@ async def test_miniapp_missing_asset_does_not_fallback_to_index() -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get("/app/assets/missing-build-file.js")
 
-    assert response.status_code == 404
+    assert response.status_code == 404, response.text
     assert "immutable" not in response.headers.get("cache-control", "")
 
 
@@ -94,7 +102,7 @@ async def test_webapp_me_rejects_missing_init_data_without_override() -> None:
     app.dependency_overrides.clear()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get("/api/v1/me")
-    assert response.status_code == 401
+    assert response.status_code == 401, response.text
 
 
 @pytest.mark.asyncio
@@ -118,7 +126,7 @@ async def test_webapp_me_accepts_standalone_web_auth_token(monkeypatch) -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get("/api/v1/me", headers={"X-Web-Auth-Token": create_web_auth_token(111)})
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert response.json()["credits"] == 1003
 
 
@@ -131,7 +139,7 @@ async def test_upload_requires_auth() -> None:
             files={"file": ("ref.png", b"\x89PNG\r\n\x1a\npayload", "image/png")},
         )
 
-    assert response.status_code == 401
+    assert response.status_code == 401, response.text
 
 
 @pytest.mark.asyncio
@@ -144,8 +152,8 @@ async def test_upload_rejects_non_image_reference(client, monkeypatch) -> None:
         files={"file": ("ref.txt", b"not an image", "text/plain")},
     )
 
-    assert response.status_code == 422
-    assert "JPEG, PNG and WebP" in response.json()["detail"]
+    assert response.status_code == 422, response.text
+    assert "Only JPEG, PNG and WebP" in response.json()["detail"]
     save_public_file.assert_not_called()
 
 
@@ -159,7 +167,7 @@ async def test_upload_accepts_authenticated_image_reference(client, monkeypatch)
         files={"file": ("ref.png", b"\x89PNG\r\n\x1a\npayload", "image/png")},
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert response.json()["url"] == "https://example.test/static/upload/ref.png"
     save_public_file.assert_called_once()
 
@@ -174,8 +182,8 @@ async def test_photo_prompt_rejects_disguised_non_image(client, monkeypatch) -> 
         files={"file": ("fake.png", b"not an image", "image/png")},
     )
 
-    assert response.status_code == 422
-    assert "JPEG, PNG and WebP" in response.json()["detail"]
+    assert response.status_code == 422, response.text
+    assert "Only JPEG, PNG, WebP and GIF" in response.json()["detail"]
     generate_prompt.assert_not_awaited()
 
 
@@ -189,7 +197,7 @@ async def test_photo_prompt_accepts_gif(client, monkeypatch) -> None:
         files={"file": ("anim.gif", b"GIF89a" + b"payload", "image/gif")},
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert response.json()["prompt"] == "animated prompt"
     generate_prompt.assert_awaited_once()
 
@@ -205,7 +213,7 @@ async def test_photo_prompt_rejects_large_file_before_provider_call(client, monk
         files={"file": ("large.jpg", b"\xff\xd8\xff" + b"x" * 9, "image/jpeg")},
     )
 
-    assert response.status_code == 413
+    assert response.status_code == 413, response.text
     generate_prompt.assert_not_awaited()
 
 
@@ -221,7 +229,7 @@ async def test_video_prompt_rejects_disguised_non_video(client, monkeypatch) -> 
         files={"file": ("fake.mp4", b"not a video", "video/mp4")},
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 422, response.text
     assert "MP4, MOV and WebM" in response.json()["detail"]
     generate_prompt.assert_not_awaited()
     spend.assert_not_awaited()
@@ -248,7 +256,7 @@ async def test_video_prompt_spends_configured_price_and_returns_prompt(client, m
         files={"file": ("clip.mp4", b"\x00\x00\x00\x18ftypmp42payload", "video/mp4")},
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert response.json() == {
         "prompt": "точный видеопромпт",
         "credits_spent": 3.0,
@@ -286,7 +294,7 @@ async def test_video_prompt_refunds_on_provider_error(client, monkeypatch) -> No
         files={"file": ("clip.mp4", b"\x00\x00\x00\x18ftypmp42payload", "video/mp4")},
     )
 
-    assert response.status_code == 502
+    assert response.status_code == 502, response.text
     add_credits.assert_awaited_once()
     assert add_credits.await_args.args[:3] == (ANY, 1, 3.0)
     assert add_credits.await_args.kwargs["entry_type"] == "video_prompt_refund"
@@ -309,7 +317,7 @@ async def test_video_prompt_does_not_persist_file_when_balance_is_insufficient(c
         files={"file": ("clip.mp4", b"\x00\x00\x00\x18ftypmp42payload", "video/mp4")},
     )
 
-    assert response.status_code == 402
+    assert response.status_code == 402, response.text
     save_public.assert_not_called()
     generate_prompt.assert_not_awaited()
 
@@ -341,7 +349,7 @@ async def test_webapp_assistant_filters_history_and_appends_message(client, monk
         },
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert response.json()["reply"] == "Готово, вот короткий промпт."
     generate_reply.assert_awaited_once_with(
         [
@@ -356,7 +364,7 @@ async def test_webapp_assistant_filters_history_and_appends_message(client, monk
 async def test_webapp_assistant_rejects_blank_message(client) -> None:
     response = await client.post("/api/v1/assistant", json={"message": "   "})
 
-    assert response.status_code == 422
+    assert response.status_code == 422, response.text
     assert response.json()["detail"] == "Message cannot be empty"
 
 
@@ -367,7 +375,7 @@ async def test_webapp_set_language_updates_common_user_record(client, monkeypatc
 
     response = await client.post("/api/v1/settings/language", json={"language": "en"})
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert response.json() == {"language": "en"}
     set_user_language.assert_awaited_once()
     assert set_user_language.await_args.args[1:] == (1, "en")
@@ -380,7 +388,7 @@ async def test_webapp_set_language_rejects_unknown_language(client, monkeypatch)
 
     response = await client.post("/api/v1/settings/language", json={"language": "de"})
 
-    assert response.status_code == 422
+    assert response.status_code == 422, response.text
     set_user_language.assert_not_awaited()
 
 
@@ -404,7 +412,7 @@ async def test_webapp_set_profile_photo_saves_public_url(client, monkeypatch) ->
         json={"photo_url": "https://cdn.example.test/avatar.png"},
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert response.json()["photo_url"] == "https://cdn.example.test/avatar.png"
     set_user_photo_url.assert_awaited_once()
     assert set_user_photo_url.await_args.args[1:] == (1, "https://cdn.example.test/avatar.png")
@@ -417,7 +425,7 @@ async def test_webapp_set_profile_photo_rejects_blob_url(client, monkeypatch) ->
 
     response = await client.post("/api/v1/me/photo", json={"photo_url": "blob:local"})
 
-    assert response.status_code == 422
+    assert response.status_code == 422, response.text
     set_user_photo_url.assert_not_awaited()
 
 
@@ -477,7 +485,7 @@ async def test_webapp_referrals_returns_counts_balance_children_and_withdrawals(
 
     response = await client.get("/api/v1/referrals")
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     data = response.json()
     assert data["counts"] == {"l1": 2, "l2": 1, "l3": 0}
     assert data["balance"]["available_to_withdraw"] == 950.5
@@ -508,7 +516,7 @@ async def test_webapp_referral_withdrawal_creates_request(client, monkeypatch) -
         json={"amount_rub": 150, "payout_details": "  SBP +79990000000  "},
     )
 
-    assert response.status_code == 201
+    assert response.status_code == 201, response.text
     assert response.json()["id"] == 10
     assert create_withdrawal.await_args.kwargs["user_id"] == 1
     assert create_withdrawal.await_args.kwargs["amount_rub"] == 150
@@ -526,7 +534,7 @@ async def test_webapp_referral_withdrawal_rejects_amount_below_minimum(client, m
         json={"amount_rub": 99, "payout_details": "SBP +79990000000"},
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 422, response.text
     create_withdrawal.assert_not_awaited()
 
 
@@ -543,7 +551,7 @@ async def test_webapp_referral_withdrawal_reports_available_balance(client, monk
         json={"amount_rub": 150, "payout_details": "SBP +79990000000"},
     )
 
-    assert response.status_code == 402
+    assert response.status_code == 402, response.text
     assert "75.25" in response.json()["detail"]
 
 
@@ -563,7 +571,7 @@ async def test_webapp_referral_exchange_uses_standard_tariff_rate(client, monkey
 
     response = await client.post("/api/v1/referrals/exchange", json={"amount_rub": 500})
 
-    assert response.status_code == 201
+    assert response.status_code == 201, response.text
     data = response.json()
     assert data["amount_rub"] == 500.0
     assert data["amount_credits"] == 50.0
@@ -576,7 +584,7 @@ async def test_webapp_me_normalizes_bot_username_for_referral_link(client, monke
     monkeypatch.setattr("api.miniapp_routes.repo.get_active_image_session", AsyncMock(return_value=None))
     monkeypatch.setattr("api.miniapp_routes.settings.BOT_USERNAME", "@TestBot")
     response = await client.get("/api/v1/me")
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert response.json()["referral_link"] == "https://t.me/TestBot?start=REF"
 
 
@@ -606,10 +614,10 @@ async def test_webapp_feed_returns_items(client, monkeypatch) -> None:
     response = await client.get("/api/v1/feed")
     item = response.json()[0]
     assert item["remixes"] == 3
-    assert item["result_urls"] == [
-        "https://cdn.example.test/a.jpg",
-        "https://cdn.example.test/b.jpg",
-    ]
+    assert item["result_urls"] == []
+    assert len(item["preview_urls"]) == 2
+    for index, preview in enumerate(item["preview_urls"]):
+        assert preview.startswith(f"/api/v1/feed/5/preview.webp?index={index}&output_id=")
     assert item["author_photo_url"] == "https://example.test/avatar.jpg"
 
 
@@ -639,9 +647,10 @@ async def test_webapp_my_feed_returns_only_current_user_cards(client, monkeypatc
 
     response = await client.get("/api/v1/me/feed?limit=500")
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert response.json()[0]["is_mine"] is True
-    assert response.json()[0]["result_urls"] == ["https://cdn.example.test/mine.jpg"]
+    assert response.json()[0]["result_urls"] == []
+    assert response.json()[0]["preview_url"].startswith("/api/v1/feed/6/preview.webp?")
     get_user_feed_generations.assert_awaited_once()
     assert get_user_feed_generations.await_args.args[1] == 1
     assert get_user_feed_generations.await_args.kwargs["limit"] == 500
@@ -664,7 +673,7 @@ async def test_webapp_video_models_include_mode_options(client, monkeypatch) -> 
         AsyncMock(return_value=SimpleNamespace(credits=35)),
     )
     response = await client.get("/api/v1/models/video")
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert response.json()[0]["mode_options"] == ["fun", "normal", "spicy"]
 
 
@@ -684,7 +693,7 @@ async def test_webapp_image_models_allow_fractional_credits(client, monkeypatch)
 
     response = await client.get("/api/v1/models/image")
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert response.json()[0]["credits"] == 2.5
 
 
@@ -709,7 +718,7 @@ async def test_webapp_image_models_expose_quality_prices(client, monkeypatch) ->
 
     response = await client.get("/api/v1/models/image")
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     payload = response.json()[0]
     assert payload["quality_options"] == [
         {"value": "2K", "label": "2K"},
@@ -767,9 +776,9 @@ def test_generation_out_includes_all_result_urls() -> None:
 
     assert payload["result_url"] == "https://example.test/1.png"
     assert payload["result_urls"] == ["https://example.test/1.png", "https://example.test/2.png"]
-    assert payload["prompt"] == "fashion editorial"
-    assert payload["prompt_hidden"] is False
-    assert payload["prompt_actions_allowed"] is True
+    assert payload["prompt"] == ""
+    assert payload["prompt_hidden"] is True
+    assert payload["prompt_actions_allowed"] is False
 
 
 def test_generation_out_hides_feed_derivative_prompt() -> None:
@@ -832,10 +841,10 @@ async def test_webapp_public_models_is_public(monkeypatch) -> None:
     )
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as anonymous_client:
         response = await anonymous_client.get("/api/v1/public/models")
-    assert response.status_code == 200
-    assert response.json()["image"] == ["Seedream 4.5"]
-    assert response.json()["video"] == ["Kling 3.0"]
-    assert response.json()["music"] == ["Suno v4.5"]
+    assert response.status_code == 200, response.text
+    assert response.json()["image"] == ["🌸 Seedream 4.5"]
+    assert response.json()["video"] == ["⚡ Kling 3.0"]
+    assert response.json()["music"] == ["🎵 Suno v4.5"]
 
 
 @pytest.mark.asyncio
@@ -854,7 +863,7 @@ async def test_public_midjourney_catalog_returns_active_models(monkeypatch) -> N
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as anonymous_client:
         response = await anonymous_client.get("/api/v1/public/midjourney")
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     payload = {item["key"]: item for item in response.json()}
     assert set(payload) == {"midjourney-imagine", "midjourney-video"}
     assert payload["midjourney-imagine"]["available_in_studio"] is True
@@ -885,11 +894,11 @@ async def test_webapp_plans_use_label_as_title(client, monkeypatch) -> None:
     monkeypatch.setattr(
         "api.miniapp_routes.repo.get_active_price_plans",
         AsyncMock(return_value=[
-            SimpleNamespace(key="credits_100", label="100 💋", credits=100, price_rub=199.0),
+            with_tribute_offer(SimpleNamespace(key="credits_100", label="100 💋", credits=100, price_rub=199.0)),
         ]),
     )
     response = await client.get("/api/v1/plans")
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert response.json()[0]["title"] == "100 💋"
     assert response.json()[0]["label"] == "100 💋"
     assert response.json()[0]["price_rub_display"] == "199₽"
@@ -902,13 +911,13 @@ async def test_webapp_plans_expose_tribute_usd_price_for_mapped_pack(client, mon
     monkeypatch.setattr(
         "api.miniapp_routes.repo.get_active_price_plans",
         AsyncMock(return_value=[
-            SimpleNamespace(key="credits_15", label="мини", credits=15, price_rub=150.0),
+            with_tribute_offer(SimpleNamespace(key="credits_15", label="мини", credits=15, price_rub=150.0)),
         ]),
     )
 
     response = await client.get("/api/v1/plans")
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert response.json()[0]["price_rub"] == 150.0
     assert response.json()[0]["price_tribute_usd"] == 2.0
 
@@ -921,7 +930,7 @@ async def test_topup_stars_is_retired_even_when_legacy_flag_is_enabled(client, m
 
     response = await client.post("/api/v1/topup/stars", json={"plan_key": "credits_15"})
 
-    assert response.status_code == 404
+    assert response.status_code == 404, response.text
     assert "not available" in response.json()["detail"]
     create_transaction.assert_not_awaited()
 
@@ -958,7 +967,7 @@ async def test_webapp_prompt_use_marks_prompt_usage(client, monkeypatch) -> None
 
     response = await client.post("/api/v1/prompts/7/use")
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert response.json()["prompt"]["id"] == 7
     use_prompt.assert_awaited_once()
     assert use_prompt.await_args.args[1:] == (7, 1)
@@ -994,7 +1003,7 @@ async def test_webapp_prompt_detail_hides_pending_prompt_from_other_user(client,
 
     response = await client.get("/api/v1/prompts/8")
 
-    assert response.status_code == 404
+    assert response.status_code == 404, response.text
 
 
 @pytest.mark.asyncio
@@ -1029,7 +1038,7 @@ async def test_webapp_prompt_like_rejects_non_public_prompt(client, monkeypatch)
 
     response = await client.post("/api/v1/prompts/9/like")
 
-    assert response.status_code == 404
+    assert response.status_code == 404, response.text
     like_prompt.assert_not_awaited()
 
 
@@ -1063,7 +1072,7 @@ async def test_webapp_prompt_share_link_rejects_non_public_prompt(client, monkey
 
     response = await client.get("/api/v1/prompts/10/link")
 
-    assert response.status_code == 404
+    assert response.status_code == 404, response.text
 
 
 @pytest.mark.asyncio
@@ -1073,7 +1082,7 @@ async def test_webapp_remove_generation_from_library(client, monkeypatch) -> Non
 
     response = await client.post("/api/v1/generations/77/remove-library")
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert response.json() == {"id": 77, "is_prompt_library": False}
     remove_from_library.assert_awaited_once()
     assert remove_from_library.await_args.args[1:] == (77, 1)
@@ -1085,7 +1094,7 @@ async def test_webapp_remove_missing_generation_from_library_returns_404(client,
 
     response = await client.post("/api/v1/generations/77/remove-library")
 
-    assert response.status_code == 404
+    assert response.status_code == 404, response.text
 
 
 @pytest.mark.asyncio
@@ -1099,11 +1108,11 @@ async def test_webapp_publish_generation_returns_feed_link(client, monkeypatch) 
 
     response = await client.post("/api/v1/generations/77/publish")
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["ok"] is True
-    assert payload["link"].startswith("https://t.me/TestBot?start=")
-    assert "ref_REF__feed_77" in payload["link"]
+    from core.config import settings
+    assert payload["link"] == settings.WEB_PUBLIC_URL.rstrip("/") + "/app?feed=77"
 
 
 @pytest.mark.asyncio
@@ -1122,7 +1131,7 @@ async def test_webapp_prompt_publish_actions_reject_feed_derivatives(client, mon
 
     response = await client.post(path)
 
-    assert response.status_code == 403
+    assert response.status_code == 403, response.text
     blocked.assert_not_awaited()
 
 
@@ -1142,7 +1151,7 @@ async def test_webapp_share_allows_feed_derived_video_without_exposing_prompt(cl
 
     response = await client.post("/api/v1/generations/77/share")
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert response.json()["is_public_feed"] is True
     share_to_feed.assert_awaited_once()
     assert share_to_feed.await_args.args[1:] == (77, 1)
@@ -1156,7 +1165,7 @@ async def test_webapp_feed_link_uses_viewer_referral_for_public_posts(client, mo
 
     response = await client.get("/api/v1/feed/88/link")
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["gen_id"] == 88
     assert payload["link"] == "https://apixbotai.com/app?feed=88"
@@ -1179,14 +1188,14 @@ async def test_trend_checkout_quote_recommends_smallest_plan_covering_deficit(cl
     monkeypatch.setattr(
         "api.trends_routes.repo.get_active_price_plans",
         AsyncMock(return_value=[
-            SimpleNamespace(key="small", label="300 credits", credits=300, price_rub=300),
-            SimpleNamespace(key="medium", label="500 credits", credits=500, price_rub=500),
+            with_tribute_offer(SimpleNamespace(key="small", label="300 credits", credits=300, price_rub=300)),
+            with_tribute_offer(SimpleNamespace(key="medium", label="500 credits", credits=500, price_rub=500)),
         ]),
     )
 
     response = await client.get("/api/v1/trends/101/checkout")
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     payload = response.json()
     assert resolve_image_model_cost.await_args.kwargs["quality"] == "2K"
     assert payload["cost_credits"] == 1200
@@ -1211,7 +1220,7 @@ async def test_trend_share_link_uses_sharer_referral_and_bot_start(client, monke
 
     response = await client.get("/api/v1/trends/101/link")
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["link"] == "https://t.me/TestBot?start=ref_REF__trend_101"
     assert payload["start_param"] == "ref_REF__trend_101"
@@ -1224,7 +1233,7 @@ async def test_webapp_feed_item_returns_public_post_without_auth(monkeypatch) ->
         AsyncMock(return_value=SimpleNamespace(
             generation=SimpleNamespace(
                 id=88,
-                result_url="https://example.test/static/upload/feed-88.jpg",
+                result_url="https://cdn.example.test/feed-88.jpg",
                 result_urls=None,
                 gen_type=GenerationType.image,
                 model="seedream",
@@ -1245,10 +1254,11 @@ async def test_webapp_feed_item_returns_public_post_without_auth(monkeypatch) ->
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         response = await ac.get("/api/v1/public/feed/88")
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["id"] == 88
-    assert payload["result_url"] == "https://example.test/static/upload/feed-88.jpg"
+    assert payload["result_url"] == ""
+    assert payload["preview_url"].startswith("/api/v1/feed/88/preview.webp?")
 
 
 @pytest.mark.asyncio
@@ -1267,7 +1277,7 @@ async def test_generate_image_rejects_invalid_reference_without_spending_credits
         },
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 422, response.text
     spend_credits.assert_not_awaited()
 
 
@@ -1307,7 +1317,7 @@ async def test_webapp_generation_poll_refunds_stale_unfinished_task(client, monk
 
     response = await client.get("/api/v1/generations/77")
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert response.json()["status"] == "failed"
     fail_generation_and_refund.assert_awaited_once()
     assert fail_generation_and_refund.await_args.args[1:] == (77, "Generation timed out before completion")
@@ -1410,7 +1420,7 @@ async def test_generate_image_passes_multiple_reference_urls(client, monkeypatch
         },
     )
 
-    assert response.status_code == 202
+    assert response.status_code == 202, response.text
     create_image_session.assert_awaited_once()
     assert create_image_session.await_args.kwargs["mode"] == "image"
     assert create_image_session.await_args.kwargs["reference_url"] == "https://example.test/ref-1.jpg"
@@ -1421,7 +1431,7 @@ async def test_generate_image_passes_multiple_reference_urls(client, monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_generate_image_from_prompt_library_keeps_user_prompt_and_rewards(client, monkeypatch) -> None:
+async def test_library_prompt_id_uses_server_recipe_and_preserves_rewards(client, monkeypatch) -> None:
     from db.models import PromptCategory, PromptStatus
 
     prompt = SimpleNamespace(
@@ -1450,7 +1460,7 @@ async def test_generate_image_from_prompt_library_keeps_user_prompt_and_rewards(
     image_generate = AsyncMock(return_value=SimpleNamespace(task_id="img_task_prompt"))
 
     async def fake_create_generation(_session, _user_id, model, gen_type, prompt_text, credits_spent, **_kwargs):
-        assert prompt_text == "user-visible prompt"
+        assert prompt_text == "library prompt text"
         return SimpleNamespace(
             id=503,
             model=model,
@@ -1484,9 +1494,9 @@ async def test_generate_image_from_prompt_library_keeps_user_prompt_and_rewards(
         },
     )
 
-    assert response.status_code == 202
-    assert response.json()["prompt"] == "user-visible prompt"
-    assert image_generate.await_args.args[1] == "user-visible prompt"
+    assert response.status_code == 202, response.text
+    assert response.json()["prompt"] == ""
+    assert image_generate.await_args.args[1] == "library prompt text"
     use_prompt.assert_awaited_once()
     assert use_prompt.await_args.args[1:] == (44, 1)
     assert use_prompt.await_args.kwargs["credits_spent"] == 4
@@ -1533,7 +1543,7 @@ async def test_generate_image_normalizes_square_4k_before_pricing(client, monkey
         },
     )
 
-    assert response.status_code == 202
+    assert response.status_code == 202, response.text
     assert resolve_image_model_cost.await_args.kwargs["quality"] == "2K"
     assert create_image_session.await_args.kwargs["quality"] == "2K"
     assert image_generate.await_args.kwargs["quality"] == "2K"
@@ -1579,7 +1589,7 @@ async def test_generate_image_spends_selected_quality_price(client, monkeypatch)
         },
     )
 
-    assert response.status_code == 202
+    assert response.status_code == 202, response.text
     assert resolve_image_model_cost.await_args.kwargs["quality"] == "4K"
     spend_credits.assert_awaited_once()
     assert spend_credits.await_args.args[1:] == (1, 5)
@@ -1647,7 +1657,7 @@ async def test_generate_image_unlimited_allows_zero_balance_and_records_zero_cha
         },
     )
 
-    assert response.status_code == 202
+    assert response.status_code == 202, response.text
     charge_image_generation.assert_awaited_once()
     assert charge_image_generation.await_args.kwargs["user_id"] == 1
     assert charge_image_generation.await_args.kwargs["model_key"] == "nano-banana-pro"
@@ -1672,7 +1682,7 @@ async def test_generate_image_rejects_too_many_refs_for_single_ref_model(client,
         },
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 422, response.text
     assert "at most 1 reference" in response.json()["detail"]
 
 
@@ -1715,7 +1725,7 @@ async def test_generate_midjourney_image_available_to_regular_user(client, monke
         },
     )
 
-    assert response.status_code == 202
+    assert response.status_code == 202, response.text
     assert response.json()["model"] == "midjourney-imagine"
     imagine.assert_awaited_once_with("cat portrait", reference_url=None)
     update_generation_task.assert_awaited_once()
@@ -1732,7 +1742,7 @@ async def test_generate_image_rejects_missing_reference_for_image_only_model(cli
         },
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 422, response.text
     assert "requires at least one reference image" in response.json()["detail"]
 
 
@@ -1744,7 +1754,7 @@ async def test_image_models_include_max_refs_and_single_count_for_nano_banana_2(
 
     response = await client.get("/api/v1/models/image")
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     payload = response.json()[0]
     assert payload["counts"] == [1]
     assert payload["max_refs"] == 4
@@ -1758,7 +1768,7 @@ async def test_image_models_include_updated_wan_reference_limit(client, monkeypa
 
     response = await client.get("/api/v1/models/image")
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     payload = response.json()[0]
     assert payload["max_refs"] == 9
     assert payload["aspect_ratio_modes"] == ["text"]
@@ -1772,7 +1782,7 @@ async def test_image_models_include_standard_wan_reference_limit(client, monkeyp
 
     response = await client.get("/api/v1/models/image")
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     payload = response.json()[0]
     assert payload["max_refs"] == 9
     assert payload["aspect_ratio_modes"] == ["text"]
@@ -1815,7 +1825,7 @@ async def test_generate_video_uses_total_duration_cost(client, monkeypatch) -> N
         },
     )
 
-    assert response.status_code == 202
+    assert response.status_code == 202, response.text
     assert spend_credits.await_count == 1
     assert spend_credits.await_args.args[1:] == (1, 40)
     assert response.json()["credits_spent"] == 40
@@ -1860,7 +1870,7 @@ async def test_generate_video_grok_uses_per_second_cost(client, monkeypatch) -> 
         },
     )
 
-    assert response.status_code == 202
+    assert response.status_code == 202, response.text
     assert spend_credits.await_count == 1
     assert resolve_video_model_cost.await_args.kwargs["resolution"] == "720p"
     assert spend_credits.await_args.args[1:] == (1, 270)
@@ -1885,7 +1895,7 @@ async def test_generate_video_rejects_invalid_image_without_spending_credits(cli
         },
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 422, response.text
     spend_credits.assert_not_awaited()
 
 
@@ -1902,12 +1912,12 @@ async def test_generate_video_rejects_unsupported_duration_without_spending_cred
             "model": "grok-imagine/text-to-video",
             "prompt": "rainy city",
             "mode": "text",
-            "duration": 5,
+            "duration": 31,
             "resolution": "480p",
         },
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 422, response.text
     resolve_video_model_cost.assert_not_awaited()
     spend_credits.assert_not_awaited()
 
@@ -1965,22 +1975,25 @@ async def test_feed_remix_image_uses_and_saves_reference(client, monkeypatch) ->
         },
     )
 
-    assert response.status_code == 202
+    assert response.status_code == 202, response.text
     assert response.json()["prompt"] == ""
     assert response.json()["prompt_hidden"] is True
     assert response.json()["prompt_actions_allowed"] is False
     create_image_session.assert_awaited_once()
     assert create_image_session.await_args.kwargs["mode"] == "image"
     assert create_image_session.await_args.kwargs["reference_url"] == "https://example.test/source.jpg"
-    assert create_image_session.await_args.kwargs["base_prompt"] == "hidden prompt"
+    assert create_image_session.await_args.kwargs["base_prompt"] is None
     assert image_generate.await_args.kwargs["image_url"] == "https://example.test/source.jpg"
     assert image_generate.await_args.kwargs["n"] == 2
 
 
 @pytest.mark.asyncio
-async def test_feed_remix_image_uses_public_source_and_user_reference_without_secret(client, monkeypatch) -> None:
+async def test_feed_remix_uses_server_recipe_and_only_reader_reference(client, monkeypatch) -> None:
     source = SimpleNamespace(
         id=188,
+        is_public_feed=True,
+        user_id=2,
+        source_feed_gen_id=None,
         gen_type=GenerationType.image,
         model="seedream-4.0",
         prompt="hidden prompt",
@@ -2015,6 +2028,7 @@ async def test_feed_remix_image_uses_public_source_and_user_reference_without_se
     monkeypatch.setattr("api.miniapp_routes.repo.increment_feed_share", AsyncMock())
     monkeypatch.setattr("api.miniapp_routes.image_service.generate_image", image_generate)
 
+    monkeypatch.setattr("api.miniapp_routes.get_feed_recipe_identity_instruction", AsyncMock(return_value="Use the reader first photo as the sole facial identity reference, keeping the creator recipe for the scene."))
     response = await client.post(
         "/api/v1/feed/188/remix",
         json={
@@ -2027,15 +2041,14 @@ async def test_feed_remix_image_uses_public_source_and_user_reference_without_se
         },
     )
 
-    assert response.status_code == 202
+    assert response.status_code == 202, response.text
     assert response.json()["prompt_hidden"] is True
-    assert create_image_session.await_args.kwargs["reference_url"] == [
-        "https://example.test/source.jpg", "https://example.test/user-ref.jpg",
-    ]
-    assert image_generate.await_args.kwargs["image_url"] == [
-        "https://example.test/source.jpg", "https://example.test/user-ref.jpg",
-    ]
-    assert "hidden prompt" not in image_generate.await_args.args[1]
+    assert create_image_session.await_args.kwargs["reference_url"] == "https://example.test/user-ref.jpg"
+    assert create_image_session.await_args.kwargs["base_prompt"] is None
+    assert image_generate.await_args.kwargs["image_url"] == "https://example.test/user-ref.jpg"
+    assert "hidden prompt" in image_generate.await_args.args[1]
+    assert "hidden prompt" not in response.text
+    assert "Фото 1 — лицо" in image_generate.await_args.args[1]
 
 
 @pytest.mark.asyncio
@@ -2090,12 +2103,12 @@ async def test_feed_remix_midjourney_imagine_uses_hidden_prompt_and_source_ref(c
         },
     )
 
-    assert response.status_code == 202
+    assert response.status_code == 202, response.text
     assert response.json()["model"] == "midjourney-imagine"
     assert response.json()["prompt"] == ""
     assert response.json()["prompt_hidden"] is True
     assert create_image_session.await_args.kwargs["reference_url"] == "https://example.test/source-mj.jpg"
-    assert create_image_session.await_args.kwargs["base_prompt"] == "hidden mj prompt"
+    assert create_image_session.await_args.kwargs["base_prompt"] is None
     imagine.assert_awaited_once_with(
         "https://example.test/source-mj.jpg hidden mj prompt",
         reference_url="https://example.test/source-mj.jpg",
@@ -2126,15 +2139,18 @@ async def test_feed_remix_midjourney_blend_requires_refs_before_spending(client,
         },
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 422, response.text
     assert "Blend requires at least 2 reference images" in response.json()["detail"]
     spend_credits.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_feed_remix_midjourney_blend_uses_source_ref_and_reference_urls(client, monkeypatch) -> None:
+async def test_own_midjourney_blend_uses_two_explicit_reader_references(client, monkeypatch) -> None:
     source = SimpleNamespace(
         id=91,
+        user_id=1,
+        source_feed_gen_id=None,
+        input_params=None,
         gen_type=GenerationType.image,
         model="midjourney-imagine",
         prompt="hidden blend prompt",
@@ -2150,7 +2166,8 @@ async def test_feed_remix_midjourney_blend_uses_source_ref_and_reference_urls(cl
         assert kwargs["image_session_id"] == 79
         assert kwargs["parent_generation_id"] == 91
         assert kwargs["action_type"] == ImageGenerationAction.remix
-        assert kwargs["source_feed_gen_id"] == 91
+        assert source.user_id == 1
+        assert kwargs["source_feed_gen_id"] is None
         return SimpleNamespace(
             id=703,
             model=model,
@@ -2183,15 +2200,15 @@ async def test_feed_remix_midjourney_blend_uses_source_ref_and_reference_urls(cl
             "model": "midjourney-blend",
             "mode": "image",
             "aspect_ratio": "2:3",
-            "reference_urls": ["https://example.test/extra.jpg"],
+            "reference_urls": ["https://example.test/reader-first.jpg", "https://example.test/extra.jpg"],
         },
     )
 
-    assert response.status_code == 202
+    assert response.status_code == 202, response.text
     assert response.json()["model"] == "midjourney-blend"
     assert response.json()["prompt_hidden"] is True
-    assert create_image_session.await_args.kwargs["reference_url"] == "https://example.test/source-blend.jpg"
-    assert data_uri_from_url.await_args_list[0].args == ("https://example.test/source-blend.jpg",)
+    assert create_image_session.await_args.kwargs["reference_url"] == "https://example.test/reader-first.jpg"
+    assert data_uri_from_url.await_args_list[0].args == ("https://example.test/reader-first.jpg",)
     assert data_uri_from_url.await_args_list[1].args == ("https://example.test/extra.jpg",)
     blend.assert_awaited_once()
     assert blend.await_args.args[0] == ["data:image/jpeg;base64,source", "data:image/jpeg;base64,extra"]
@@ -2216,14 +2233,14 @@ async def test_webapp_image_models_expose_single_ref_caps_and_no_false_count(cli
 
     response = await client.get("/api/v1/models/image")
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     payload = {item["key"]: item for item in response.json()}
     assert payload["qwen/image-edit"]["counts"] == [1]
     assert payload["qwen/image-edit"]["aspect_ratios"] == []
     assert payload["grok-imagine/image-to-image"]["counts"] == [1]
     assert payload["grok-imagine/image-to-image"]["max_refs"] == 7
     assert payload["grok-imagine/image-to-image"]["aspect_ratios"] == []
-    assert payload["gpt-image-2-image-to-image"]["aspect_ratios"] == ["1:1", "9:16", "16:9", "4:3", "3:4"]
+    assert payload["gpt-image-2-image-to-image"]["aspect_ratios"] == ["auto", "1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16", "2:1", "1:2", "21:9"]
     assert payload["nano-banana-pro"]["counts"] == [1]
     assert payload["nano-banana-pro"]["quality_options"] == [
         {"value": "2K", "label": "2K"},
@@ -2255,7 +2272,7 @@ async def test_webapp_video_models_expose_kling_caps_and_per_second_pricing(clie
 
     response = await client.get("/api/v1/models/video")
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     payload = {item["key"]: item for item in response.json()}
     assert payload["kling-3.0/video"]["is_per_second"] is True
     assert payload["kling-3.0/video"]["credits"] == 6
@@ -2282,7 +2299,8 @@ def test_normalize_video_request_maps_legacy_kling_30_motion_aliases() -> None:
         aspect_ratio=None,
         resolution="pro",
         image_url="https://example.test/ref-1.jpg",
-        reference_urls=["https://example.test/ref-2.mp4"],
+        reference_urls=[],
+        video_url="https://example.test/ref-2.mp4",
         grok_mode="normal",
     )
 
@@ -2304,7 +2322,7 @@ async def test_webapp_video_models_expose_grok_as_per_second(client, monkeypatch
 
     response = await client.get("/api/v1/models/video")
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     payload = {item["key"]: item for item in response.json()}
     assert payload["grok-imagine/text-to-video"]["is_per_second"] is True
     assert payload["grok-imagine/text-to-video"]["credits"] == 35
@@ -2328,7 +2346,7 @@ async def test_webapp_video_models_expose_grok_i2v_ratio_min_refs(client, monkey
 
     response = await client.get("/api/v1/models/video")
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     payload = {item["key"]: item for item in response.json()}
     assert payload["grok-imagine/image-to-video"]["aspect_ratio_min_refs"] == 2
 
@@ -2360,7 +2378,7 @@ async def test_music_generation_uses_model_cost_from_db(client, monkeypatch) -> 
 
     response = await client.post("/api/v1/generate/music", json={"prompt": "lofi", "instrumental": True})
 
-    assert response.status_code == 202
+    assert response.status_code == 202, response.text
     assert response.json()["credits_spent"] == 37
 
 
@@ -2388,7 +2406,7 @@ async def test_music_generation_validates_custom_voice_before_spend(client, monk
         },
     )
 
-    assert response.status_code == 409
+    assert response.status_code == 409, response.text
     spend_credits.assert_not_awaited()
 
 
@@ -2429,7 +2447,7 @@ async def test_create_suno_voice_starts_validation(client, monkeypatch) -> None:
         files={"file": ("voice.mp3", b"ID3payload", "audio/mpeg")},
     )
 
-    assert response.status_code == 202
+    assert response.status_code == 202, response.text
     assert response.json()["id"] == 9
     assert response.json()["status"] == "validating"
 
@@ -2464,7 +2482,7 @@ async def test_refresh_suno_voice_stores_validation_phrase(client, monkeypatch) 
 
     response = await client.post("/api/v1/music/voices/9/refresh")
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert response.json()["status"] == "awaiting_verification"
     assert response.json()["validate_phrase"] == "Sing this phrase"
 
@@ -2477,12 +2495,12 @@ async def test_payment_methods_never_advertise_stars(client, monkeypatch) -> Non
     monkeypatch.setattr("api.miniapp_routes.settings.CRYPTOBOT_TOKEN", "crypto")
     monkeypatch.setattr(
         "api.miniapp_routes.repo.get_active_price_plans",
-        AsyncMock(return_value=[SimpleNamespace(key="credits_15")]),
+        AsyncMock(return_value=[with_tribute_offer(SimpleNamespace(key="credits_15", credits=15, price_rub=150))]),
     )
 
     response = await client.get("/api/v1/payment-methods")
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert "stars" not in response.json()
 
 
@@ -2490,7 +2508,7 @@ async def test_payment_methods_never_advertise_stars(client, monkeypatch) -> Non
 async def test_prompt_improve_returns_prompt_unchanged(client) -> None:
     response = await client.post("/api/v1/prompt/improve", json={"kind": "music", "prompt": "lofi rain"})
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert response.json()["prompt"] == "lofi rain"
 
 
@@ -2508,16 +2526,16 @@ async def test_webapp_image_models_expose_seedream_5_pro_caps(client, monkeypatc
 
     response = await client.get("/api/v1/models/image")
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     payload = {item["key"]: item for item in response.json()}
-    assert payload["seedream/5-pro-text-to-image"]["display_name"] == "Seedream 5.0 Pro"
-    assert payload["seedream/5-pro-text-to-image"]["modes"] == ["text"]
+    assert "Seedream 5 Pro" in payload["seedream/5-pro-text-to-image"]["display_name"]
+    assert payload["seedream/5-pro-text-to-image"]["modes"] == ["text", "image"]
     assert payload["seedream/5-pro-text-to-image"]["aspect_ratios"] == ["1:1", "4:3", "3:4", "16:9", "9:16", "2:3", "3:2"]
     assert payload["seedream/5-pro-text-to-image"]["quality_options"] == [
         {"value": "basic", "label": "🔷 1K"},
         {"value": "high", "label": "💎 2K"},
     ]
-    assert payload["seedream/5-pro-image-to-image"]["display_name"] == "Seedream 5.0 Pro Edit"
+    assert "Seedream 5 Pro" in payload["seedream/5-pro-image-to-image"]["display_name"]
     assert payload["seedream/5-pro-image-to-image"]["modes"] == ["image"]
     assert payload["seedream/5-pro-image-to-image"]["max_refs"] == 10
 
@@ -2530,18 +2548,18 @@ async def test_payment_methods_advertise_tribute_when_configured(client, monkeyp
     monkeypatch.setattr("api.miniapp_routes.settings.LAVA_API_KEY", "")
     monkeypatch.setattr(
         "api.miniapp_routes.repo.get_active_price_plans",
-        AsyncMock(return_value=[SimpleNamespace(key="credits_15")]),
+        AsyncMock(return_value=[with_tribute_offer(SimpleNamespace(key="credits_15", credits=15, price_rub=150))]),
     )
 
     response = await client.get("/api/v1/payment-methods")
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert response.json() == ["tribute"]
 
 
 @pytest.mark.asyncio
 async def test_topup_tribute_returns_fixed_digital_product_without_pending_transaction(client, monkeypatch) -> None:
-    plan = SimpleNamespace(key="credits_15", label="мини", credits=15.0, price_rub=150.0, is_active=True)
+    plan = with_tribute_offer(SimpleNamespace(key="credits_15", label="мини", credits=15.0, price_rub=150.0, is_active=True))
     create_transaction = AsyncMock()
     monkeypatch.setattr("api.miniapp_routes.settings.TRIBUTE_API_KEY", "tribute-key")
     monkeypatch.setattr("api.miniapp_routes.repo.get_price_plan_by_key", AsyncMock(return_value=plan))
@@ -2553,7 +2571,7 @@ async def test_topup_tribute_returns_fixed_digital_product_without_pending_trans
 
     response = await client.post("/api/v1/topup/tribute", json={"plan_key": "credits_15"})
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert response.json() == {
         "pay_url": "https://web.tribute.tg/p/DDs",
         "credits": 15.0,

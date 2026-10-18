@@ -11,24 +11,15 @@ def read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def test_v4_entrypoint_is_clean_and_does_not_import_legacy_layers() -> None:
-    entry = read(WEBAPP / "src" / "main.jsx")
-
-    assert 'import App from "./apix/AppV4.jsx";' in entry
-    assert 'import "./apix/apix.v4.css";' in entry
-    assert "createRoot" in entry
-
-    for forbidden in [
-        "./apix/App.jsx",
-        "apix.tokens.css",
-        "apix.css",
-        "apix-art.css",
-        "apix.archive.css",
-        "apix.final-pass.css",
-        "apix.structural.css",
-        "apix.v3.css",
-    ]:
-        assert forbidden not in entry
+def test_native_entrypoint_gates_legacy_app_explicitly() -> None:
+    entry = read(WEBAPP / "src" / "main.tsx")
+    index = read(WEBAPP / "index.html")
+    assert 'src="/src/main.tsx"' in index
+    assert 'import { App } from "@/app/App"' in entry
+    assert 'const legacy = search.get("legacy") === "1"' in entry
+    assert 'if (legacy)' in entry and 'void import("./main.jsx")' in entry
+    assert 'createRoot(root).render(' in entry
+    assert './apix/AppV4.jsx' not in entry
 
 
 def test_v4_app_keeps_real_api_contracts_and_telegram_auth() -> None:

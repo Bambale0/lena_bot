@@ -73,8 +73,8 @@ def _checkout_kb(plan) -> object:
                 callback_data=f"topup:rub:{key}",
             )
         )
-    if settings.TRIBUTE_API_KEY and tribute.digital_product_for_plan(key) is not None:
-        price = tribute.digital_product_price_text(key)
+    if settings.TRIBUTE_API_KEY and tribute.digital_product_for_plan(plan) is not None:
+        price = tribute.digital_product_price_text(plan)
         builder.row(
             InlineKeyboardButton(
                 text=f"💵 USD{f' · {price}' if price else ''}",

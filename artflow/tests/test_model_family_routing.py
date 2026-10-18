@@ -66,6 +66,6 @@ def test_native_multimodal_models_keep_one_provider_key():
             model=key,
             prompt="use reference",
             reference_urls="https://example.com/reference.png",
-            params={"duration": 5, "resolution": "720p"},
+            params={"duration": 6 if key == "gemini-omni-video" else 5, "resolution": "720p"},
         )
         assert resolved == key

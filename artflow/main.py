@@ -1255,6 +1255,8 @@ async def tbank_webhook(request: Request) -> PlainTextResponse:
         logger.warning('Invalid T-Bank webhook JSON: %s', type(exc).__name__)
         return PlainTextResponse("OK")
 
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="Invalid T-Bank notification shape")
     if not verify_notification_token(data, settings.TBANK_PASSWORD):
         logger.warning(
             "Invalid T-Bank webhook token: payment_id=%s status=%s order_id=%s",
@@ -1264,7 +1266,7 @@ async def tbank_webhook(request: Request) -> PlainTextResponse:
         )
         return PlainTextResponse("OK")
 
-    if not data.get("Success"):
+    if data.get("Success") is not True:
         logger.info(
             "T-Bank webhook non-success acknowledged: payment_id=%s status=%s order_id=%s",
             safe_identifier(data.get("PaymentId")),
@@ -1302,17 +1304,15 @@ async def tbank_webhook(request: Request) -> PlainTextResponse:
                             )
                         except Exception as e:
                             logger.warning('Failed to notify user %s: %s', user.tg_id, type(e).__name__)
-        elif status in {"CANCELED", "CANCELLED", "REJECTED", "DEADLINE_EXPIRED", "AUTH_FAIL"}:
+        elif status in {"CANCELED", "CANCELLED", "REJECTED", "DEADLINE_EXPIRED", "AUTH_FAIL", "REVERSED"}:
             await repo.set_transaction_status(session, external_id, TransactionStatus.failed)
-        elif status in {"REFUNDED", "REVERSED", "PARTIAL_REVERSED"}:
-            existing_tx = await repo.get_transaction_by_external_id(session, external_id)
-            was_paid = bool(existing_tx and existing_tx.status == TransactionStatus.paid)
-            tx = await repo.set_transaction_status(session, external_id, TransactionStatus.refunded)
-            if tx and was_paid:
-                await repo.add_credits(session, tx.user_id, -tx.credits, entry_type="payment_refund", source_type="transaction", source_id=str(tx.id), note=f"Refund/reversal via {tx.provider}")
-                user = await repo.get_user_by_id(session, tx.user_id)
-                if user:
-                    await _reverse_referral_commissions(session, user, tx)
+        elif status == "PARTIAL_REVERSED":
+            # Authorization hold reversal is not a refund of captured funds.
+            logger.info("T-Bank partial hold reversal acknowledged")
+        elif status in {"REFUNDED", "PARTIAL_REFUNDED"}:
+            from payments.refund_settlement import settle_tbank_refund
+
+            await settle_tbank_refund(session, external_id, status, data.get("Amount"))
         else:
             logger.info("Unhandled T-Bank status acknowledged: payment_id=%s status=%s", safe_identifier(external_id), safe_identifier(status))
 
@@ -1450,38 +1450,21 @@ async def tribute_webhook(request: Request) -> dict:
         if product_id is None or purchase_id is None:
             raise HTTPException(status_code=400, detail="Tribute digital product webhook missing product/purchase id")
 
-        product = tribute_digital_product_for_id(product_id)
-        if product is None:
-            logger.warning("Ignoring unmapped Tribute digital product id=%s purchase=%s", safe_identifier(product_id), safe_identifier(purchase_id))
-            return {"status": "ok"}
-
         external_id = tribute_digital_purchase_external_id(purchase_id)
         async with AsyncSessionLocal() as session:
             if event_name == "digital_product_refunded":
-                tx = await repo.get_transaction_by_external_id(session, external_id)
-                if not tx:
-                    logger.warning("Tribute refund for unknown digital purchase=%s", safe_identifier(purchase_id))
-                    return {"status": "ok"}
-                if tx.provider != PaymentProvider.tribute:
-                    logger.warning("Tribute digital purchase belongs to another provider: %s", safe_identifier(external_id))
-                    return {"status": "ok"}
-                was_paid = tx.status == TransactionStatus.paid
-                refunded_tx = await repo.set_transaction_status(session, external_id, TransactionStatus.refunded)
-                if refunded_tx and was_paid:
-                    await repo.add_credits(
-                        session,
-                        refunded_tx.user_id,
-                        -refunded_tx.credits,
-                        entry_type="payment_refund",
-                        source_type="transaction",
-                        source_id=str(refunded_tx.id),
-                        note="Refund via tribute digital product",
-                    )
-                    user = await repo.get_user_by_id(session, refunded_tx.user_id)
-                    if user:
-                        await _reverse_referral_commissions(session, user, refunded_tx)
+                from payments.refund_settlement import settle_tribute_refund
+
+                await settle_tribute_refund(
+                    session, external_id, amount_minor=tribute_webhook_amount_minor(data),
+                    currency=tribute_webhook_currency(data), digital=True,
+                )
                 return {"status": "ok"}
 
+            product = await tribute_digital_product_for_id(session, product_id)
+            if product is None:
+                logger.warning("Unmapped Tribute receipt product_id=%s", product_id)
+                raise HTTPException(status_code=503, detail="Tribute product requires reconciliation")
             telegram_user_id = tribute_webhook_telegram_user_id(data)
             if telegram_user_id is None:
                 # Without Telegram ID there is no safe APIX account to credit.
@@ -1489,7 +1472,7 @@ async def tribute_webhook(request: Request) -> dict:
                 raise HTTPException(status_code=503, detail="Tribute purchase has no Telegram user id")
 
             plan = await repo.get_price_plan_by_key(session, product.plan_key)
-            if not plan or not plan.is_active:
+            if not plan:
                 logger.error("Mapped Tribute plan is unavailable product=%s plan=%s", safe_identifier(product_id), product.plan_key)
                 raise HTTPException(status_code=503, detail="Mapped APIX plan is unavailable")
 
@@ -1508,32 +1491,42 @@ async def tribute_webhook(request: Request) -> dict:
 
             user = await repo.get_user_by_tg_id(session, telegram_user_id)
             if user is None:
-                user = await repo.create_user(
-                    session,
-                    tg_id=telegram_user_id,
-                    username=tribute_webhook_telegram_username(data),
-                    full_name=None,
-                    welcome_credits=settings.WELCOME_BONUS_CREDITS,
-                )
+                try:
+                    user = await repo.create_user(
+                        session, tg_id=telegram_user_id,
+                        username=tribute_webhook_telegram_username(data), full_name=None,
+                        welcome_credits=settings.WELCOME_BONUS_CREDITS,
+                    )
+                except IntegrityError:
+                    await session.rollback()
+                    user = await repo.get_user_by_tg_id(session, telegram_user_id)
+                    if user is None:
+                        raise
+            payer_id = user.id
 
             tx = await repo.get_transaction_by_external_id(session, external_id)
             if tx is None:
                 try:
                     tx = await repo.create_transaction(
                         session,
-                        user_id=user.id,
-                        amount_rub=float(plan.price_rub),
-                        credits=float(plan.credits),
+                        user_id=payer_id,
+                        amount_rub=float(product.amount_rub),
+                        credits=float(product.credits),
                         provider=PaymentProvider.tribute,
                         external_id=external_id,
+                        provider_amount_minor=product.amount_minor,
+                        provider_currency=product.currency,
                     )
                 except IntegrityError:
                     await session.rollback()
                     tx = await repo.get_transaction_by_external_id(session, external_id)
                     if tx is None:
                         raise
+                    user = await repo.get_user_by_id(session, payer_id)
+                    if user is None:
+                        raise HTTPException(status_code=503, detail="Tribute payer reconciliation required")
 
-            if tx.provider != PaymentProvider.tribute or tx.user_id != user.id:
+            if tx.provider != PaymentProvider.tribute or tx.user_id != payer_id:
                 logger.error("Tribute digital purchase collision external_id=%s", safe_identifier(external_id))
                 raise HTTPException(status_code=503, detail="Tribute purchase collision")
             if tx.status != TransactionStatus.pending:
@@ -1567,6 +1560,14 @@ async def tribute_webhook(request: Request) -> dict:
         raise HTTPException(status_code=400, detail="Tribute webhook missing order uuid")
 
     async with AsyncSessionLocal() as session:
+        if event_name == "shop_order_refunded":
+            from payments.refund_settlement import settle_tribute_refund
+
+            await settle_tribute_refund(
+                session, external_id, amount_minor=tribute_webhook_amount_minor(data),
+                currency=tribute_webhook_currency(data), digital=False,
+            )
+            return {"status": "ok"}
         tx = await repo.get_transaction_by_external_id(session, external_id)
         if not tx:
             logger.warning("Tribute webhook for unknown order uuid: %s", safe_identifier(external_id))
@@ -1632,23 +1633,7 @@ async def tribute_webhook(request: Request) -> dict:
                 await repo.set_transaction_status(session, external_id, TransactionStatus.failed)
             return {"status": "ok"}
 
-        if event_name == "shop_order_refunded":
-            was_paid = tx.status == TransactionStatus.paid
-            refunded_tx = await repo.set_transaction_status(session, external_id, TransactionStatus.refunded)
-            if refunded_tx and was_paid:
-                await repo.add_credits(
-                    session,
-                    refunded_tx.user_id,
-                    -refunded_tx.credits,
-                    entry_type="payment_refund",
-                    source_type="transaction",
-                    source_id=str(refunded_tx.id),
-                    note="Refund via tribute",
-                )
-                user = await repo.get_user_by_id(session, refunded_tx.user_id)
-                if user:
-                    await _reverse_referral_commissions(session, user, refunded_tx)
-            return {"status": "ok"}
+
 
     return {"status": "ok"}
 

@@ -39,6 +39,7 @@ from db.models import (
     UserPrompt,
     WithdrawalStatus,
 )
+from db.payment_reporting import net_paid_amount_expr
 from db.repository import InsufficientReferralBalanceError
 from db.session import get_session
 
@@ -561,7 +562,7 @@ async def _admin_overview_payload(session: AsyncSession) -> dict:
         )),
         "revenue_total": _money(await _scalar(
             session,
-            select(func.coalesce(func.sum(Transaction.amount_rub), 0)).where(Transaction.status == TransactionStatus.paid),
+            select(func.coalesce(func.sum(net_paid_amount_expr()), 0)).where(Transaction.status == TransactionStatus.paid),
         )),
         "credits_spent": _money(await _scalar(session, select(func.coalesce(func.sum(Generation.credits_spent), 0)))),
         "credits_on_balance": _money(await _scalar(session, select(func.coalesce(func.sum(User.credits), 0)))),
@@ -586,7 +587,7 @@ async def _admin_overview_payload(session: AsyncSession) -> dict:
         "generations_7d": int(await _scalar(session, select(func.count()).select_from(Generation).where(Generation.created_at >= week_start))),
         "revenue_today": _money(await _scalar(
             session,
-            select(func.coalesce(func.sum(Transaction.amount_rub), 0)).where(
+            select(func.coalesce(func.sum(net_paid_amount_expr()), 0)).where(
                 Transaction.status == TransactionStatus.paid,
                 Transaction.created_at >= today_start,
                 Transaction.created_at < today_end,
@@ -594,14 +595,14 @@ async def _admin_overview_payload(session: AsyncSession) -> dict:
         )),
         "revenue_7d": _money(await _scalar(
             session,
-            select(func.coalesce(func.sum(Transaction.amount_rub), 0)).where(
+            select(func.coalesce(func.sum(net_paid_amount_expr()), 0)).where(
                 Transaction.status == TransactionStatus.paid,
                 Transaction.created_at >= week_start,
             ),
         )),
         "revenue_30d": _money(await _scalar(
             session,
-            select(func.coalesce(func.sum(Transaction.amount_rub), 0)).where(
+            select(func.coalesce(func.sum(net_paid_amount_expr()), 0)).where(
                 Transaction.status == TransactionStatus.paid,
                 Transaction.created_at >= month_start,
             ),
@@ -678,7 +679,7 @@ async def _admin_overview_payload(session: AsyncSession) -> dict:
                 Transaction.created_at,
                 Transaction,
                 days=14,
-                value_expr=func.sum(Transaction.amount_rub),
+                value_expr=func.sum(net_paid_amount_expr()),
                 filters=(Transaction.status == TransactionStatus.paid,),
             ),
             "generations_14d": await _daily_series(session, Generation.created_at, Generation, days=14),
@@ -754,7 +755,7 @@ async def admin_users(
     paid_stats = (
         select(
             Transaction.user_id.label("user_id"),
-            func.coalesce(func.sum(Transaction.amount_rub), 0).label("paid_rub"),
+            func.coalesce(func.sum(net_paid_amount_expr()), 0).label("paid_rub"),
         )
         .where(Transaction.status == TransactionStatus.paid)
         .group_by(Transaction.user_id)
@@ -1065,3 +1066,51 @@ async def admin_ledger(
         for item in result.scalars().all()
     ]
     return ok({"items": items})
+
+
+class TributeProductUpdate(BaseModel):
+    plan_key: str = Field(min_length=1, max_length=64)
+    payment_url: str = Field(min_length=1, max_length=2048)
+    currency: Literal["usd"] = "usd"
+    amount_minor: int = Field(gt=0, lt=2**63, strict=True)
+    enabled: bool = True
+    expected_revision: int = Field(ge=0, strict=True)
+
+
+@router.get("/admin/payments/tribute-products")
+async def admin_tribute_products(
+    session: AsyncSession = Depends(get_session), user=Depends(get_web_user_or_none),
+):
+    if admin_error := _admin_error(user):
+        return admin_error
+    from db.tribute_catalog import list_products
+    return ok({"items": await list_products(session)})
+
+
+@router.put("/admin/payments/tribute-products/{product_id}")
+async def admin_save_tribute_product(
+    product_id: int, body: TributeProductUpdate,
+    session: AsyncSession = Depends(get_session), user=Depends(get_web_user_or_none),
+):
+    if admin_error := _admin_error(user):
+        return admin_error
+    actor_id = int(user.tg_id)
+    await session.commit()  # Release authentication reads before provider IO.
+    from db.tribute_catalog import CatalogConflict, save_product, validate_product
+    from payments.tribute import TributeDigitalProduct, validate_digital_product
+    try:
+        validate_product(product_id, body.payment_url, body.currency, body.amount_minor)
+        # Read-only supplier verification happens before acquiring database locks.
+        if body.enabled:
+            await validate_digital_product(TributeDigitalProduct(
+                body.plan_key, product_id, body.payment_url, body.currency, body.amount_minor,
+            ))
+        result = await save_product(session, product_id=product_id, **body.model_dump(),
+                                    admin_tg_id=actor_id)
+    except CatalogConflict as exc:
+        return error_response(409, str(exc))
+    except ValueError as exc:
+        return error_response(422, str(exc))
+    except Exception:
+        return error_response(503, "Tribute verification or catalog persistence unavailable")
+    return ok(result)

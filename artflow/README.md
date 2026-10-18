@@ -35,7 +35,7 @@ alembic upgrade head
 python run_polling.py
 ```
 
-The latest Alembic head at this audit is `044_trend_run_claims`; use `alembic heads` to check the active branch rather than a copied migration count. The application also runs migrations in its Compose startup command.
+The current Alembic head is `046_tribute_catalog`; use `alembic heads` to check the active branch rather than a copied migration count. The application also runs migrations in its Compose startup command.
 
 Build the Mini App from `artflow/webapp/`:
 
@@ -48,7 +48,7 @@ npm run build
 
 ## Verification
 
-The protected `main` branch requires `backend-quality`, `webapp`, `provider-contracts` and `bot-navigation`. The maintained backend gate is defined in [CI](../.github/workflows/ci.yml); provider checks are defined in [Provider Contract Compliance](../.github/workflows/provider-contracts.yml). The complete historical `pytest` suite has known failures outside that gate; see the [full-project audit](docs/audits/2026-10-16-full-project.md) before treating it as a release signal.
+The protected `main` branch requires `backend-quality`, `webapp`, `provider-contracts` and `bot-navigation`. The maintained backend gate is defined in [CI](../.github/workflows/ci.yml); provider checks are defined in [Provider Contract Compliance](../.github/workflows/provider-contracts.yml). The backend gate now runs the full `pytest` suite. See [audit completion](docs/audits/2026-10-16-completion.md) and [payment/catalog contracts](docs/payments-refunds-catalog.md) for repaired behavior, migration checks and verification boundaries.
 
 Useful local checks:
 

@@ -30,10 +30,10 @@ def flatten_buttons(markup):
 
 def test_main_menu_keyboard_keeps_core_buttons() -> None:
     buttons = flatten_buttons(main_menu_kb(balance=100, has_active_image_session=True, is_admin=True))
-    texts = [button.text for button in buttons]
-    assert "🎨 Изображение" in texts
-    assert "📚 Библиотека" in texts
-    assert "👑 Админ" in texts
+    callbacks = {button.callback_data for button in buttons}
+    # The shipped task-first menu keeps creation behind Create, not a second model list.
+    assert {"menu:create", "menu:history", "menu:admin", "menu:trends", "menu:pinterest"} <= callbacks
+    assert "img_session:continue" in callbacks
 
 
 def test_main_menus_show_webapp_button_at_top() -> None:
@@ -53,7 +53,7 @@ def test_main_menu_keyboard_uses_public_web_url(monkeypatch) -> None:
 
     markup = main_menu_kb(balance=100)
 
-    assert markup.inline_keyboard[0][0].web_app.url == "https://miniapp.example/app?v=1778285569"
+    assert markup.inline_keyboard[0][0].web_app.url == "https://miniapp.example/app"
 
 
 def test_render_main_menu_uses_public_web_url(monkeypatch) -> None:
@@ -62,7 +62,7 @@ def test_render_main_menu_uses_public_web_url(monkeypatch) -> None:
 
     render = render_main_menu(context)
 
-    assert render.reply_markup.inline_keyboard[0][0].web_app.url == "https://miniapp.example/app?v=1778285569"
+    assert render.reply_markup.inline_keyboard[0][0].web_app.url == "https://miniapp.example/app"
 
 
 def test_back_to_menu_keyboard_has_main_callback() -> None:
@@ -74,16 +74,16 @@ def test_render_main_menu_active_session_text() -> None:
     session = SimpleNamespace(model="nano-banana-pro", quality="2K", aspect_ratio="9:16", count=3)
     context = SimpleNamespace(balance=1003, active_image_session=session, is_admin=False)
     render = render_main_menu(context)
-    assert "Текущая серия изображений" in render.text
+    assert "У тебя есть активная серия" in render.text
 
 
 def test_render_main_menu_force_main_text_even_with_active_session() -> None:
     session = SimpleNamespace(model="nano-banana-pro", quality="2K", aspect_ratio="9:16", count=3)
     context = SimpleNamespace(balance=1003, active_image_session=session, is_admin=False)
     render = render_main_menu(context, force_main_text=True)
-    assert "Твоя AI-студия" in render.text
-    assert "Выбирай, что запустить:" in render.text
-    assert "Текущая серия изображений" not in render.text
+    assert "твоя AI-студия" in render.text
+    assert "Выбирай, с чего начнём" in render.text
+    assert "У тебя есть активная серия" not in render.text
 
 
 def test_wan_image_quality_defaults_to_2k_and_keeps_manual_4k() -> None:
@@ -281,8 +281,10 @@ def test_prompt_use_model_kb_reference_only_filters_text_models() -> None:
     buttons = flatten_buttons(prompt_use_model_kb(42, costs, reference_only=True))
     callbacks = {button.callback_data for button in buttons}
 
-    assert "prompt_pick_model:42:gpt-image-2-text-to-image" not in callbacks
-    assert "prompt_pick_model:42:gpt-image-2-image-to-image" in callbacks
+    assert "prompt_pick_model:42:gpt-image-2-text-to-image" in callbacks
+    assert "prompt_pick_model:42:gpt-image-2-image-to-image" not in callbacks
+    from api.image_service import ImageModel, _effective_model_for_request
+    assert _effective_model_for_request(ImageModel.GPT_IMAGE_2_T2I, "https://example.test/ref.png") == ImageModel.GPT_IMAGE_2_I2I
 
 
 def test_video_menu_has_gemini_omni_group_and_tools() -> None:
@@ -436,8 +438,8 @@ def test_help_text_contains_support_contact() -> None:
 
 def test_help_text_explains_settings_plainly() -> None:
     text = _help_text("ru")
-    assert "короткие и понятные промпты" in text
-    assert "бот сам покажет их по ходу выбора" in text
+    assert "проверь параметры и стоимость" in text
+    assert "Отдельную модель Edit выбирать не нужно" in text
 
 
 def test_topup_keyboard_keeps_decimal_price() -> None:
@@ -465,3 +467,11 @@ def test_rub_methods_keyboard_shows_tribute_when_configured(monkeypatch) -> None
     buttons = flatten_buttons(rub_methods_kb())
 
     assert any(button.callback_data == "topup:tribute" for button in buttons)
+
+
+def test_legacy_and_primary_home_have_identical_navigation():
+    for active in (False, True):
+        for admin in (False, True):
+            image_session = SimpleNamespace(model="nano-banana-pro", quality="2K", aspect_ratio="1:1", count=1) if active else None
+            context = SimpleNamespace(balance=100, active_image_session=image_session, is_admin=admin)
+            assert main_menu_kb(balance=100, has_active_image_session=active, is_admin=admin).model_dump() == render_main_menu(context).reply_markup.model_dump()

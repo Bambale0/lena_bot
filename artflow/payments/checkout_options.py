@@ -27,7 +27,7 @@ def payment_options_for_plan(plan: PricePlan) -> list[CheckoutPaymentOption]:
     if settings.CRYPTOBOT_TOKEN:
         options.append({"provider": "crypto", "amount": crypto_amount_usdt(plan.price_rub), "currency": "USDT"})
     if settings.TRIBUTE_API_KEY:
-        product = tribute.digital_product_for_plan(plan.key)
+        product = tribute.digital_product_for_plan(plan)
         if product is not None and product.currency == "usd":
             options.append({"provider": "tribute", "amount": product.amount_major, "currency": "USD"})
     if settings.LAVA_API_KEY and settings.lava_offer_id_for_plan(plan.key):
