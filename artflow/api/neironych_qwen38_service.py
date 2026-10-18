@@ -13,6 +13,7 @@ from typing import Any
 
 import httpx
 
+from api.neironych_admission import rejected_before_acceptance
 from core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -95,6 +96,10 @@ class NeironychQwen38Service:
                     )
             status = response.status_code
             if status >= 400:
+                if rejected_before_acceptance(
+                    response, client_request_id=request_id, idempotency_key=request_id,
+                ):
+                    raise Qwen38ProviderError("admission_rejected", ambiguous=False, status=status)
                 raise Qwen38ProviderError("http_error", ambiguous=status >= 500 or status in {408, 409, 425, 429}, status=status)
             try:
                 data = response.json()

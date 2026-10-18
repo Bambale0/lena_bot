@@ -17,6 +17,7 @@ async def submit_seedance(
     *,
     kie: Callable[[], Awaitable[Result]],
     neironych: Callable[[], Awaitable[Result]],
+    before_kie_fallback: Callable[[], Awaitable[None]] | None = None,
 ) -> Result:
     """Route each paid request independently, never via another task's circuit.
 
@@ -44,6 +45,8 @@ async def submit_seedance(
             product_model, primary, secondary, primary_exc,
         )
         try:
+            if secondary == "kieai" and before_kie_fallback is not None:
+                await before_kie_fallback()
             return await providers[secondary]()
         except (NeironychSubmissionUnknown, NeironychPreSubmitFailure,
                 KieSubmissionOutcomeUnknown):

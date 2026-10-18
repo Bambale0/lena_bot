@@ -13,6 +13,7 @@ from typing import Any
 
 import httpx
 
+from api.neironych_admission import rejected_before_acceptance
 from core.neironych_seedance_contract import (
     SEEDANCE_MODELS,
     SeedanceContractError,
@@ -431,7 +432,9 @@ class NeironychSeedanceClient:
         try:
             response = await self._client.post("/v1/videos/generations", headers=headers, json=body)
             if not response.is_success:
-                if _definite_rejection(response):
+                if _definite_rejection(response) or rejected_before_acceptance(
+                    response, client_request_id=rid, idempotency_key=idem,
+                ):
                     raise _safe_error(response)
                 raise NeironychSubmissionUnknown(rid, idem)
             response_payload = response.json()

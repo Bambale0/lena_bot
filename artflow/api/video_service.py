@@ -355,7 +355,10 @@ async def generate_video(
                 callback_url=callback_url,
             )
 
-        return await submit_seedance(model.value, kie=submit_kie, neironych=submit_neironych)
+        return await submit_seedance(
+            model.value, kie=submit_kie, neironych=submit_neironych,
+            before_kie_fallback=(neironych_submission.before_kie_submit if neironych_submission else None),
+        )
 
     image_url = await _prepare_video_reference_urls(image_url)
     last_frame_url = await _prepare_video_reference_url(last_frame_url)

@@ -177,7 +177,7 @@ async def test_feed_video_intent_reaches_provider_appropriate_mode_contract(seed
     from api import neironych_seedance_runtime
 
     captured = {}
-    async def select_provider(_model, *, kie, neironych):
+    async def select_provider(_model, *, kie, neironych, before_kie_fallback=None):
         return await (kie() if provider == "kie" else neironych())
     monkeypatch.setattr(video_runtime_fixes, "submit_seedance", select_provider)
     monkeypatch.setattr(video_runtime_fixes, "ensure_video_reference_aspect_url", lambda url, **kwargs: url)

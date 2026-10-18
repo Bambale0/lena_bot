@@ -102,6 +102,7 @@ jobs:
             tests/test_neironych_video_poll_gate.py \
             tests/test_seedance_neironych_mode_contract.py \
             tests/test_seedance_uncertain_submission.py \
+            tests/test_neironych_admission_rejection.py \
             tests/test_seedance_auto_timeout.py \
             tests/test_kie_seedance_callback.py \
             tests/test_video_progress_privacy.py \

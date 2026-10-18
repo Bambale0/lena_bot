@@ -426,7 +426,11 @@ def _install_seedance25_generate_wrapper(video_service: Any) -> None:
                 uses_webhook=bool(kwargs.get("callback_url")),
             )
 
-        return await submit_seedance(MODEL_KEY, kie=submit_kie, neironych=submit_neironych)
+        context = kwargs.get("neironych_submission")
+        return await submit_seedance(
+            MODEL_KEY, kie=submit_kie, neironych=submit_neironych,
+            before_kie_fallback=(context.before_kie_submit if context else None),
+        )
 
     video_service.generate_video = generate_video
     video_service._seedance25_generate_wrapper_installed = True
