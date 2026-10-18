@@ -69,3 +69,7 @@ Changes reach `main` through a reviewed PR with native squash auto-merge. On a s
 Secrets belong in the production `.env` and must not be committed. For configuration names and examples, use [.env.example](.env.example). The public health checks are `/health` and `/api/v1/health`.
 
 Audit follow-up: [verified fixes and explicitly open blockers](docs/audits/2026-10-16-remediation.md). The full pytest suite and payment findings are not closed by this release.
+
+## Seedance admission incident
+
+For the verified native 503 contract, durable Neironych-to-KIE fallback and verification boundaries, see [Seedance admission recovery](docs/seedance-admission-recovery.md). Generic provider failures still require reconciliation; HTTP health is not a live generation test.

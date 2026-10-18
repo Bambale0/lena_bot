@@ -13,6 +13,7 @@ from typing import Any
 
 import httpx
 
+from api.neironych_admission import pre_admission_unavailable_trace
 from core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -81,6 +82,7 @@ class NeironychQwen38Service:
         status: int | None = None
         request_id = str(uuid.uuid4())
         failure_kind = "none"
+        admission_trace: str | None = None
         try:
             async with asyncio.timeout(self.timeout_seconds):
                 async with httpx.AsyncClient(timeout=self.timeout_seconds, transport=self.transport) as client:
@@ -95,6 +97,9 @@ class NeironychQwen38Service:
                     )
             status = response.status_code
             if status >= 400:
+                admission_trace = pre_admission_unavailable_trace(response)
+                if admission_trace is not None:
+                    raise Qwen38ProviderError("admission_rejected", ambiguous=False, status=status)
                 raise Qwen38ProviderError("http_error", ambiguous=status >= 500 or status in {408, 409, 425, 429}, status=status)
             try:
                 data = response.json()
@@ -113,9 +118,9 @@ class NeironychQwen38Service:
         finally:
             # Do not log provider bodies, prompts, media URLs, tokens or request headers.
             logger.info(
-                "qwen38 provider=neironych model=%s mode=%s latency_ms=%d status=%s request_id=%s result=%s failure=%s",
+                "qwen38 provider=neironych model=%s mode=%s latency_ms=%d status=%s request_id=%s result=%s failure=%s admission_trace=%s",
                 self.model, mode, int((time.monotonic() - started) * 1000), status, request_id,
-                "success" if failure_kind == "none" else "failure", failure_kind,
+                "success" if failure_kind == "none" else "failure", failure_kind, admission_trace,
             )
         return result
 

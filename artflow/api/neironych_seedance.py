@@ -13,6 +13,7 @@ from typing import Any
 
 import httpx
 
+from api.neironych_admission import pre_admission_unavailable_trace
 from core.neironych_seedance_contract import (
     SEEDANCE_MODELS,
     SeedanceContractError,
@@ -76,6 +77,8 @@ _DEFINITE_REJECTIONS = {
 
 
 def _definite_rejection(response: httpx.Response) -> bool:
+    if pre_admission_unavailable_trace(response) is not None:
+        return True
     try:
         body = response.json()
     except ValueError:
@@ -431,6 +434,13 @@ class NeironychSeedanceClient:
         try:
             response = await self._client.post("/v1/videos/generations", headers=headers, json=body)
             if not response.is_success:
+                admission_trace = pre_admission_unavailable_trace(response)
+                if admission_trace is not None:
+                    logger.warning(
+                        "neironych_seedance_admission_rejected model=%s client_request_id=%s "
+                        "admission_trace=%s status=503 outcome=not_admitted",
+                        canonical_model, rid, admission_trace,
+                    )
                 if _definite_rejection(response):
                     raise _safe_error(response)
                 raise NeironychSubmissionUnknown(rid, idem)
