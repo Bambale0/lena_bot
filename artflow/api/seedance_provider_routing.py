@@ -67,6 +67,12 @@ async def journal_kie_fallback(context: "SubmissionContext | None") -> None:
     """
     if context is None or not context.started:
         return
-    if not callable(context.before_kie_submit):
-        raise NeironychPreSubmitFailure(context.client_request_id, "kie-fallback")
-    await context.before_kie_submit()
+    try:
+        if not callable(context.before_kie_submit):
+            raise NeironychPreSubmitFailure(context.client_request_id, "kie-fallback")
+        await context.before_kie_submit()
+    except NeironychPreSubmitFailure as exc:
+        # The primary journal already exists; the original pre-submit refund
+        # handler intentionally refuses started contexts. Route this failure
+        # through durable reconciliation, including an uncertain DB COMMIT.
+        raise NeironychSubmissionUnknown(context.client_request_id, "kie-fallback") from exc

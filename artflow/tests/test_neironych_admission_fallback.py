@@ -207,11 +207,16 @@ async def test_seedance_fallback_journal_precedes_kie_http_and_binds_result(
                     return await video_service.generate_video(video_service.VideoModel(model), "Use my reference", **kwargs)
 
             if backup_outcome == "journal_failure":
-                with pytest.raises(NeironychPreSubmitFailure):
+                with pytest.raises(NeironychSubmissionUnknown):
                     await invoke()
                 assert [provider for provider, _ in calls] == ["neironych"]
                 assert not context.kie_started
                 assert session.get(Generation, 73).task_id.startswith("neironych-submit:")
+                monkeypatch.setattr(reconciliation, "pause_neironych_route", AsyncMock())
+                assert await reconciliation.handle_submission_unknown(db, 73, context)
+                marker = json.loads(session.get(Generation, 73).input_params)
+                assert marker[repo.SEEDANCE_SUBMISSION_KEY]["state"] == "submission_unknown"
+                assert marker[reconciliation.RECONCILIATION_KEY]["required"] is True
                 assert session.get(User, 42).credits == 100
                 return
             if backup_outcome == "timeout":
@@ -234,3 +239,34 @@ async def test_seedance_fallback_journal_precedes_kie_http_and_binds_result(
         assert not await repo.begin_kie_video_submission(db, 73, context.client_request_id)
 
 
+
+
+@pytest.mark.asyncio
+async def test_lost_kie_journal_ack_preserves_kie_identity_for_reconciliation(kie_transaction_db):
+    import json
+
+    from sqlalchemy.orm import Session
+
+    from core import seedance_reconciliation as reconciliation
+    from db import repository as repo
+    from db.models import Generation, GenerationStatus, User
+    from tests.test_kie_seedance_callback import LocalAsyncSession
+
+    with Session(kie_transaction_db, expire_on_commit=False) as session:
+        row = session.get(Generation, 73)
+        row.task_id, row.input_params, row.status = None, "{}", GenerationStatus.pending
+        session.commit()
+        db = LocalAsyncSession(session)
+        assert await repo.register_kie_video_callback(db, 73, surface="miniapp")
+        context = reconciliation.make_submission_context(db, 73, row.model)
+        await context.before_submit("synthetic-video-73", "a" * 64)
+        # Simulate COMMIT success with the acknowledgment lost before the
+        # in-memory context could observe it. No provider HTTP has occurred.
+        assert await repo.begin_kie_video_submission(db, 73, context.client_request_id)
+        assert context.kie_started is False
+        assert await reconciliation.handle_submission_unknown(db, 73, context)
+        row = session.get(Generation, 73)
+        assert row.task_id == "kie-submit:73"
+        assert json.loads(row.input_params)[repo.KIE_VIDEO_SUBMISSION_KEY]["state"] == "submission_unknown"
+        assert not await repo.begin_kie_video_submission(db, 73, context.client_request_id)
+        assert session.get(User, 42).credits == 100

@@ -34,3 +34,11 @@ The legacy KIE-primary path is deliberately unchanged: it has no Neironych journ
 - Maintained backend local run: 2036 passed, 2 stopped by the test-database name safety guard. The disposable DB had a different name than the guard requires. A subsequent DB-setup command and a further local test command were blocked before execution and were not retried. Exact-head GitHub CI, using its existing dedicated PostgreSQL service, remains mandatory before merge.
 
 No live paid AI request or bank operation was performed. Supplier availability and a real completed render require separate runtime evidence; synthetic tests must not be reported as a live result. No schema migration or new business configuration is introduced.
+
+## PR review: failed handoff and uncertain journal commit
+
+Review identified that a KIE handoff failure initially propagated the pre-submit exception even though the Neironych attempt was already marked started. The normal pre-submit handler correctly refuses to refund a started context, so that path did not immediately record the recovery marker. The existing scheduler does select Neironych submission prefixes and has a bounded timeout, but explicit reconciliation state was missing.
+
+The fallback-only helper now routes failed admission persistence into the existing unknown-submission handler. That handler preserves a KIE journal when its COMMIT succeeded but the acknowledgement was lost, using the persisted exact generation/client identity instead of the in-memory flag. It never overwrites a bound or terminal task. Neither path launches another provider request or manually refunds an unverified attempt.
+
+RED/green evidence: all 3 real Seedance handoff tests first failed to reach the recovery path; a fourth test reproduced a committed KIE journal with lost acknowledgement. After the fix, 115 focused admission/unknown/handoff/callback tests passed. The new regression file now contains 35 cases. The first revision's four required GitHub checks all passed; the revised exact-head checks must run again before merge.
