@@ -187,7 +187,7 @@ async def test_source_dimensions_use_supported_ratios_and_quote_rounding(wire, w
 async def test_both_shared_service_wrappers_reach_real_neironych_client_with_reference(wire, monkeypatch, entrypoint):
     from api import seedance25_adapter, video_runtime_fixes, video_service
 
-    async def choose_neironych(_model, *, kie, neironych):
+    async def choose_neironych(_model, *, kie, neironych, before_kie_fallback=None):
         return await neironych()
 
     monkeypatch.setattr(video_runtime_fixes, "submit_seedance", choose_neironych)

@@ -34,6 +34,7 @@ async def test_text_uses_exact_chat_contract_and_extracts_blocks() -> None:
     assert request.url.path == "/v1/chat/completions"
     assert request.headers["authorization"] == "Bearer test-secret"
     assert request.headers["idempotency-key"] == request.headers["x-client-request-id"]
+    assert request.headers["x-submission-receipt"] == "v1"
     body = __import__("json").loads(request.content)
     assert body == {"model": "qwen3.8-max", "stream": False, "messages": [
         {"role": "system", "content": "Системный"}, {"role": "user", "content": "Привет"},

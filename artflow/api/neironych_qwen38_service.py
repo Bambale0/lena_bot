@@ -91,6 +91,7 @@ class NeironychQwen38Service:
                             "Authorization": f"Bearer {self.api_key}",
                             "Idempotency-Key": request_id,
                             "X-Client-Request-Id": request_id,
+                            "X-Submission-Receipt": "v1",
                         },
                         json={"model": self.model, "stream": False, "messages": messages},
                     )

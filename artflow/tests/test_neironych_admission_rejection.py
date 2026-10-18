@@ -48,6 +48,7 @@ async def test_correlated_capital_rejection_uses_existing_fallback_once(monkeypa
         backup = AsyncMock(return_value="kie-task")
         assert await submit_seedance("bytedance/seedance-2-5", kie=backup, neironych=primary) == "kie-task"
         assert len(calls) == 1
+        assert calls[0].headers.get("X-Submission-Receipt") == "v1"
         backup.assert_awaited_once()
 
 

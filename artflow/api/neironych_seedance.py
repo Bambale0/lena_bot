@@ -416,6 +416,7 @@ class NeironychSeedanceClient:
             "Content-Type": "application/json",
             "Idempotency-Key": idem,
             "X-Client-Request-Id": rid,
+            "X-Submission-Receipt": "v1",
         }
         payload_sha256 = hashlib.sha256(
             json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
