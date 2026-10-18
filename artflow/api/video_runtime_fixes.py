@@ -310,7 +310,7 @@ async def _seedance_generate(video_service: Any, prompt: str, args: tuple[Any, .
     context = kwargs.get("neironych_submission")
     return await submit_seedance(
         seedance25.MODEL_KEY, kie=submit_kie, neironych=submit_neironych,
-        before_kie_fallback=(context.before_kie_submit if context else None),
+        before_kie_fallback=(context.prepare_kie_fallback if context else None),
     )
 
 

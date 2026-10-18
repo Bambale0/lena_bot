@@ -194,3 +194,63 @@ async def test_photo_prompt_receipt_uses_configured_backup_once(monkeypatch):
     result = await photo_prompt_service.generate_prompt_from_photo_result(image.getvalue(), "image/png")
     assert result.provider == "kie" and "synthetic" in result.text
     backup.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_fallback_intent_failure_after_receipt_refunds_once_without_any_kie_post(kie_transaction_db, monkeypatch):
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session
+
+    from api import neironych_seedance_runtime, video_service
+    from api.neironych_seedance import NeironychPreSubmitFailure
+    from core.seedance_reconciliation import handle_submission_not_sent, make_submission_context
+    from db import repository as repo
+    from db.models import CreditLedgerEntry, Generation, User
+
+    monkeypatch.setattr(settings, "SEEDANCE_PRIMARY_PROVIDER", "neironych")
+    failed_journal = AsyncMock(side_effect=RuntimeError("synthetic intent storage failure"))
+    kie_post = AsyncMock()
+    monkeypatch.setattr(repo, "begin_kie_video_submission", failed_journal)
+    monkeypatch.setattr(video_service.kieai_client, "create_task", kie_post)
+    with Session(kie_transaction_db, expire_on_commit=False) as sync:
+        row = sync.get(Generation, 73)
+        row.task_id = None
+        sync.commit()
+        db = LocalAsyncSession(sync)
+        assert await repo.register_kie_video_callback(db, 73, surface="telegram_bot")
+        context = make_submission_context(db, 73, row.model, surface="telegram_bot")
+        async with httpx.AsyncClient(transport=httpx.MockTransport(rejection), base_url="https://provider.test") as http:
+            client = NeironychSeedanceClient("test-key", "https://provider.test", client=http)
+            monkeypatch.setattr(neironych_seedance_runtime, "_client", lambda: client)
+            with pytest.raises(NeironychPreSubmitFailure):
+                await video_service.generate_video(video_service.VideoModel(row.model), "animate scene",
+                    duration=5, resolution="720p", idempotency_key=IDEM, neironych_submission=context)
+        kie_post.assert_not_awaited()
+        assert await handle_submission_not_sent(db, 73, context)
+        assert sync.get(User, 42).credits == 140
+        assert sync.get(Generation, 73).status.value == "failed"
+        assert not await handle_submission_not_sent(db, 73, context)
+        ledger = list(sync.scalars(select(CreditLedgerEntry)))
+        assert len(ledger) == 1 and ledger[0].delta == 40
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bound_task", ["kie-submit:73", "accepted-kie-task"])
+async def test_rejection_cannot_refund_a_different_or_durable_kie_identity(kie_transaction_db, bound_task):
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session
+
+    from api.neironych_seedance_runtime import SubmissionContext
+    from core.seedance_reconciliation import handle_submission_not_sent
+    from db.models import CreditLedgerEntry, Generation, User
+
+    with Session(kie_transaction_db, expire_on_commit=False) as sync:
+        row = sync.get(Generation, 73)
+        row.task_id = bound_task
+        sync.commit()
+        context = SubmissionContext(client_request_id=RID, before_submit=AsyncMock(),
+            started=True, neironych_rejected=True)
+        assert not await handle_submission_not_sent(LocalAsyncSession(sync), 73, context)
+        assert row.task_id == bound_task and row.status.value == "processing"
+        assert sync.get(User, 42).credits == 100
+        assert list(sync.scalars(select(CreditLedgerEntry))) == []

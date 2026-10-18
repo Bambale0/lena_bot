@@ -4,7 +4,7 @@
 
 On 18 October 2026, production logs correlated Seedance 2.5 and Qwen photo-to-prompt failures with the native gateway's `provider_capital` stage. The gateway rejected these requests before creating/dispatching generation work, but an ordinary HTTP 503 was indistinguishable from a lost response after paid acceptance. APIX conservatively held video tasks for reconciliation and did not use the configured Qwen backup.
 
-The native gateway now emits a receipt only after rollback of a typed capital-stage admission rejection:
+The native gateway emits a receipt only after rollback and durable fencing of a typed pre-acceptance rejection:
 
 - HTTP 503 with exactly `{"detail":"provider_temporarily_unavailable"}`;
 - `X-Submission-State: not-accepted-v1`;
@@ -24,3 +24,5 @@ No schema migration, production price edit, historical wallet repair or paid pro
 ## Concurrent retry safety
 
 The client explicitly opts into terminal rejection semantics with `X-Submission-Receipt: v1`. The gateway rolls back the rejected admission, re-locks the existing partner/idempotency boundary and checks again. If a concurrent request was accepted, it returns that accepted identity without a rejection receipt. Otherwise it commits an unbilled terminal idempotency tombstone before emitting the receipt; that logical key can never later create paid work. A new user action uses a new logical key. Legacy consumers without the opt-in retain the original retryable rejection contract. The receipt is provider-agnostic for typed pre-acceptance service-unavailable failures, not a disclosure of a procurement stage.
+
+If the KIE intent cannot be stored after a confirmed primary rejection, the submission context retains that rejection fact. The existing locked refund helper can then close and refund the still-matching Neironych intent once without waiting for SLA. It refuses to refund if KIE already started, another task identity was bound, or journal persistence had an ambiguous committed outcome. This is not permission to refund an unknown primary submission or a potentially accepted backup.

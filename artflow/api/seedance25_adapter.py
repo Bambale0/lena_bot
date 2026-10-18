@@ -429,7 +429,7 @@ def _install_seedance25_generate_wrapper(video_service: Any) -> None:
         context = kwargs.get("neironych_submission")
         return await submit_seedance(
             MODEL_KEY, kie=submit_kie, neironych=submit_neironych,
-            before_kie_fallback=(context.before_kie_submit if context else None),
+            before_kie_fallback=(context.prepare_kie_fallback if context else None),
         )
 
     video_service.generate_video = generate_video

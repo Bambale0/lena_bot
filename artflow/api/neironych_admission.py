@@ -12,8 +12,8 @@ def rejected_before_acceptance(
 ) -> bool:
     """Trust only the provider's versioned, invocation-bound rollback receipt.
 
-    The native gateway emits this after checking existing request identity and
-    rolling back a capital-stage rejection. Other 5xx responses may follow an
+    The native gateway emits this after rolling back a typed rejection and
+    durably fencing the logical key against any overlapping/later acceptance. Other 5xx responses may follow an
     accepted POST and remain ambiguous, including responses from older servers.
     """
     if (
