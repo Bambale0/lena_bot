@@ -71,6 +71,9 @@ jobs:
           grep -Fq 'docker compose run --rm -T app alembic upgrade head </dev/null' scripts/deploy-production.sh
           grep -Fq 'verifying Seedance 2.5 feed-repeat runtime and Telegram webhook' scripts/deploy-production.sh
 
+      - name: Native admission fallback regressions
+        run: pytest -q tests/test_neironych_admission_fallback.py tests/test_neironych_qwen38_service.py
+
       - name: Pytest full release gate
         run: pytest -q
 
