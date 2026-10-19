@@ -476,3 +476,46 @@ async def test_telegram_confirmation_quotes_restored_settings_not_ui_defaults(ha
     harness.charge.assert_not_awaited()
     harness.submit.assert_not_awaited()
     assert SECRET not in str(message.answer.await_args)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model", sorted(WAN30_MODELS))
+@pytest.mark.parametrize("snapshot", [None, {}, {"wan30_request": "broken"}])
+@pytest.mark.parametrize("surface", ["v1", "web"])
+async def test_unknown_wan_source_never_quotes_rendered_output(harness, model, snapshot, surface):
+    recipe(harness, model)
+    harness.source.input_params = snapshot
+    harness.durations[OUTPUT] = 5
+    body = {"model": model, "image_url": PHOTO, "video_url": OUTPUT, "quoted_credits": 40}
+    for suffix in ("/quote", ""):
+        response = await harness.client.post(f"/api/{surface}/feed/77/remix" + suffix, json=body)
+        assert response.status_code == 422, response.text
+    assert not harness.events
+    harness.charge.assert_not_awaited()
+    harness.submit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model", sorted(WAN30_MODELS))
+@pytest.mark.parametrize("snapshot", [None, {}, {"wan30_request": "broken"}])
+async def test_bot_unknown_wan_source_does_not_substitute_output(
+    harness, monkeypatch, model, snapshot
+):
+    from bot.handlers import video_gen
+    from core.feed_remix_prompt import FeedRemixUnavailable
+
+    recipe(harness, model)
+    harness.source.input_params = snapshot
+    monkeypatch.setattr(video_gen, "_external_source_feed_id", AsyncMock(return_value=77))
+    with pytest.raises(FeedRemixUnavailable):
+        await video_gen._prepare_feed_video_inputs(
+            session=harness.session,
+            db_user=harness.user,
+            source_feed_gen_id=77,
+            model_key=model,
+            prompt=SECRET,
+            image_url=PHOTO,
+            data={"mode": "video", "reference_video_url": OUTPUT},
+        )
+    harness.charge.assert_not_awaited()
+    harness.submit.assert_not_awaited()

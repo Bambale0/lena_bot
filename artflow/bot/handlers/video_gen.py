@@ -756,6 +756,10 @@ async def _prepare_feed_video_inputs(
     refs = list(dict.fromkeys(_url_list(image_url)))
     if source_type == "video":
         original_videos = original_feed_video_references(source)
+        if model_key in WAN30_MODELS and original_videos is None:
+            raise FeedRemixUnavailable(
+                "Исходные параметры Wan не сохранены. Готовое видео не заменяет оригинал; кредиты не списаны."
+            )
         if original_videos is not None:
             restored = {}
             if model_key in WAN30_MODELS:

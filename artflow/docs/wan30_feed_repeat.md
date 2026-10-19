@@ -25,3 +25,7 @@ The website and Mini App use the same handlers and schema. Telegram public-feed 
 - Full Ruff passed. OpenAPI export still matches the committed 195-path schema. Provider inventory/readiness/dry smoke manifest remains valid for 98 contracts, no paid execution.
 
 No migration, new business configuration, price/model routing change, customer compensation or manual production update is required. Ship only via reviewed PR and the normal protected-main autodeploy. Production identity/health and a new real paid render are distinct verification steps; a paid render was not executed by this work.
+
+## Review amendment: unknown source provenance
+
+Independent review found that a public legacy Wan video without a recognizable input snapshot could enter the generic public-output editing fallback. Both API quote/launch and Telegram preparation now reject this case before probing, quoting or charging instead of silently substituting the rendered output. Known canonical recipes (including source 61270) and recognizable stored inputs still use the normal path; own-history operations are unchanged. Eighteen RED cases covered both Wan models, both HTTP surfaces, Telegram and missing/empty/malformed snapshots; all pass after the guard. New regression total: 48. Related post-amendment suite: 232 passed. No paid generation or customer balance mutation.

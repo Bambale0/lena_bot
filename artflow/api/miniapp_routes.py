@@ -4026,6 +4026,11 @@ def _prepare_feed_remix_inputs(
     # use the source generation's INPUT recipe, not the published MP4.
     if source_type == "video":
         original_videos = original_feed_video_references(source)
+        if body.model in WAN30_MODELS and original_videos is None:
+            raise HTTPException(
+                status_code=422,
+                detail="Исходные параметры Wan не сохранены. Готовое видео не заменяет оригинал; кредиты не списаны.",
+            )
         if original_videos is not None:
             if body.model not in VIDEO_CAPS or body.model != getattr(source, "model", None):
                 raise HTTPException(status_code=422, detail="Для точного повтора выбери модель автора")
