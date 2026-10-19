@@ -519,3 +519,47 @@ async def test_bot_unknown_wan_source_does_not_substitute_output(
         )
     harness.charge.assert_not_awaited()
     harness.submit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model", sorted(WAN30_MODELS))
+@pytest.mark.parametrize("error_type", [OSError, RuntimeError])
+async def test_bot_probe_failure_is_actionable_and_never_charges(
+    harness, monkeypatch, model, error_type
+):
+    from bot.handlers import video_gen
+
+    recipe(harness, model)
+    state = AsyncMock()
+    state.get_data.return_value = {
+        "model_key": model,
+        "mode": "image",
+        "duration": 5,
+        "aspect_ratio": "16:9",
+        "resolution": "720p",
+        "reference_video_url": OUTPUT,
+    }
+    monkeypatch.setattr(video_gen, "_external_source_feed_id", AsyncMock(return_value=77))
+    monkeypatch.setattr(video_gen, "_video_reference_image_url", AsyncMock(return_value=PHOTO))
+    monkeypatch.setattr(
+        wan30_launch,
+        "_duration_for_owned_media",
+        AsyncMock(side_effect=error_type("synthetic failure")),
+    )
+    message = AsyncMock()
+    assert not await video_gen._launch_video_generation_from_state(
+        source_message=message,
+        state=state,
+        session=harness.session,
+        db_user=harness.user,
+        bot=AsyncMock(),
+        prompt=SECRET,
+        source_feed_gen_id=77,
+        hidden_feed_prompt=True,
+    )
+    text = message.answer.await_args.args[0]
+    assert "не списаны" in text and "позже" in text
+    assert SECRET not in text and VIDEO not in text
+    harness.charge.assert_not_awaited()
+    harness.submit.assert_not_awaited()
+    harness.save.assert_not_awaited()

@@ -2805,6 +2805,13 @@ async def _launch_video_generation_from_state(
                 reply_markup=_video_params_reply_markup(model_key, data),
             )
             return False
+        except (OSError, RuntimeError) as exc:
+            logger.warning("Wan pre-charge media probe unavailable model=%s error_type=%s", model_key, type(exc).__name__)
+            await source_message.answer(
+                "Не удалось проверить исходные материалы Wan; кредиты не списаны. Попробуй позже.",
+                reply_markup=_video_params_reply_markup(model_key, data),
+            )
+            return False
 
     has_gemini_omni_video_input = _has_gemini_omni_video_input(model_key, data)
     model_cost = await _resolve_video_model_cost(
