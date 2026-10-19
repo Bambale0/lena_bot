@@ -840,6 +840,11 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
             # Keep the charge and generation active for safe manual recovery.
             return gen
     task_id = provider_task_id(stored_task_id)
+    if gen.gen_type == GenerationType.video and task_id.startswith("kie-submit:"):
+        # A submission journal marker is not a provider task ID. A delayed
+        # signed webhook may still bind it; never poll KIE with this marker
+        # or issue a second paid submission.
+        return gen
     if not task_id:
         if (
             gen.gen_type == GenerationType.video
