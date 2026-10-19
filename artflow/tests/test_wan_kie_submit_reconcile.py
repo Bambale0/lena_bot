@@ -2,9 +2,12 @@
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+
 import pytest
+
 from api import miniapp_routes
 from db.models import GenerationStatus, GenerationType
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('task_id', ['kie-submit:61578', 'web:kie-submit:61578'])
