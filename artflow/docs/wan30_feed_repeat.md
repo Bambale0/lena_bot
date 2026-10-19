@@ -31,3 +31,13 @@ No migration, new business configuration, price/model routing change, customer c
 Independent review found that a public legacy Wan video without a recognizable input snapshot could enter the generic public-output editing fallback. Both API quote/launch and Telegram preparation now reject this case before probing, quoting or charging instead of silently substituting the rendered output. Known canonical recipes (including source 61270) and recognizable stored inputs still use the normal path; own-history operations are unchanged. Eighteen RED cases covered both Wan models, both HTTP surfaces, Telegram and missing/empty/malformed snapshots; all pass after the guard. New regression total: 48. Related post-amendment suite: 232 passed. No paid generation or customer balance mutation.
 
 The second review finding (Telegram transient media-probe errors) is fixed with the same safe pre-charge retry outcome as HTTP. Four RED/green cases cover OSError and RuntimeError on both Wan variants; the bot returns a retry message without spending, saving a generation or calling a supplier. The regression module now has 52 cases. No exception body/private media URL is included in the new log line.
+
+### KIE submission marker reconciliation (2026-10-19)
+
+The `kie-submit:<generation_id>` journal marker (including `web:`-prefixed
+variants) is **not** a provider task ID. Status reconciliation must keep the
+paid order pending until the canonical provider task ID is bound by the
+submission response or signed callback. Never call KIE status polling with
+this marker, never resubmit paid work merely because the marker is pending,
+and do not refund on a malformed status response. Regression coverage:
+`tests/test_wan_kie_submit_reconcile.py`.
