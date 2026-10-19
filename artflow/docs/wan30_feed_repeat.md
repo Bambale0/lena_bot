@@ -70,3 +70,8 @@ Ruff passes. Both Telegram launch sites already use that predicate; no bot
 code change is necessary. Late callbacks and persistence failures remain
 single-purchase, recoverable operations. Paid production verification and
 exact merge/deploy receipts are recorded in the follow-up pull request.
+
+The full local Python suite for this follow-up completed with 3498 passed,
+64 environment-dependent skips and 3 warnings. It used dummy credentials,
+not production data. Exact-head CI remains mandatory for the skipped
+PostgreSQL/Nginx integrations; local results never bypass protected checks.
