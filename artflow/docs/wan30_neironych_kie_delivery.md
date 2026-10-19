@@ -83,3 +83,11 @@ contract gateway: its legacy duration-only pricing ignores input video
 reference seconds. Wan3 contract entries remain in the audit inventory
 and non-paid smoke manifest. A separate generic route can be enabled only
 after its billing and durable provider identity match the quoted checkout.
+
+## Public-feed repeat correction (19 October 2026)
+
+The public-feed generic path previously omitted the typed quoted Wan request.
+It now shares strict pre-charge pricing and canonical recipe restoration with
+normal Wan checkout; Telegram also preserves source mode/settings before its
+confirmation. See [Wan feed repeats](wan30_feed_repeat.md) for the incident,
+input/privacy guarantees, regression evidence and live-verification boundaries.

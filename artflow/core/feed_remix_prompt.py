@@ -337,6 +337,16 @@ def original_feed_video_inputs(source) -> dict | None:
             return None
     if not isinstance(params, dict):
         return None
+    from api.wan30_contract import WAN30_MODELS
+
+    wan = params.get("wan30_request")
+    if getattr(source, "model", None) in WAN30_MODELS and isinstance(wan, dict):
+        # Canonical persisted Wan inputs include multiple video refs, unlike
+        # the generic first-reference alias. Never substitute the output MP4.
+        videos = wan.get("reference_video_urls") or []
+        return {**params, **{k: wan.get(k) for k in ("duration", "resolution", "aspect_ratio")},
+                "reference_video_url": videos[0] if isinstance(videos, list) and videos else None,
+                "reference_video_urls": videos}
     if "reference_video_url" not in params and "reference_video_urls" not in params:
         return None
     return params

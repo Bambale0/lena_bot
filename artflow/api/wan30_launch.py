@@ -110,6 +110,10 @@ async def create_wan30_request(
         "reference" if all_images or videos or audios else
         "file" if files else "link" if links else "text"
     )
+    # Restored server-owned recipes retain reference/edit/frame semantics.
+    # This internal option is not accepted as a public API field; validation
+    # below still rejects incompatible/missing media.
+    actual_mode = opts.get("source_mode") or actual_mode
     task = Wan30Request(
         model=model, prompt=prompt,
         mode=actual_mode,

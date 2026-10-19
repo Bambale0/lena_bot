@@ -98,6 +98,7 @@ from core.feed_remix_prompt import (
     generation_prompt_is_protected,
     legacy_feed_edit_unavailable,
     order_feed_image_references,
+    original_feed_video_inputs,
     original_feed_video_references,
     supports_feed_source_media,
     trusted_feed_prompt,
@@ -735,6 +736,9 @@ async def _prepare_feed_video_inputs(
     model_key: str, prompt: str, image_url: str | list[str] | None, data: dict,
     parent_generation_id: int | None = None,
 ) -> tuple[str, str | list[str] | None, dict, int | None]:
+    from api.wan30_contract import WAN30_MODELS
+    from api.wan30_feed_recipe import restore_feed_recipe
+
     source_feed_gen_id = await _external_source_feed_id(
         session=session, db_user=db_user, source_feed_gen_id=source_feed_gen_id,
     )
@@ -753,6 +757,14 @@ async def _prepare_feed_video_inputs(
     if source_type == "video":
         original_videos = original_feed_video_references(source)
         if original_videos is not None:
+            restored = {}
+            if model_key in WAN30_MODELS:
+                if model_key != getattr(source, "model", None):
+                    raise FeedRemixUnavailable("Для точного повтора выбери модель автора.")
+                try:
+                    restored = restore_feed_recipe(model_key, original_feed_video_inputs(source) or {}, refs)
+                except ValueError as exc:
+                    raise FeedRemixUnavailable(str(exc)) from exc
             if prompt.strip() != str(source.prompt or "").strip():
                 raise legacy_feed_edit_unavailable()
             caps = VIDEO_CAPS.get(model_key, {})
@@ -765,7 +777,7 @@ async def _prepare_feed_video_inputs(
                 raise FeedRemixUnavailable("Для повторной генерации нет совместимых входов.")
             if original_videos and not supports_feed_source_media(caps, "video"):
                 raise FeedRemixUnavailable("Эта модель не поддерживает исходные видео-референсы.")
-            if len(original_videos) > 1 and model_key != SEEDANCE25_MODEL_KEY:
+            if len(original_videos) > 1 and model_key not in (WAN30_MODELS | {SEEDANCE25_MODEL_KEY}):
                 raise FeedRemixUnavailable("Эта модель не поддерживает несколько исходных видео.")
             limit = int(caps.get("max_refs", 1) or 1)
             if original_videos and caps.get("max_refs_with_video") is not None:
@@ -781,10 +793,13 @@ async def _prepare_feed_video_inputs(
                 token for token in _url_list(data.get("audio_ids"))
                 if not token.startswith(f"{SEEDANCE25_CONTROL_PREFIX}video_ref=")
             ]
-            if viewer_audio or data.get("character_ids") or data.get("seed") is not None:
+            seed_changed = data.get("seed") is not None and (
+                not restored or data.get("seed") != restored.get("seed")
+            )
+            if viewer_audio or data.get("character_ids") or seed_changed:
                 raise FeedRemixUnavailable("Точный повтор не принимает дополнительные аудио и персонажи.")
             audio_ids: list[str] = []
-            if len(original_videos) > 1:
+            if model_key == SEEDANCE25_MODEL_KEY and len(original_videos) > 1:
                 audio_ids.extend(f"{SEEDANCE25_CONTROL_PREFIX}video_ref={url}" for url in original_videos[1:])
             data = {
                 **data,
@@ -796,6 +811,7 @@ async def _prepare_feed_video_inputs(
                 ),
                 FEED_REMIX_CONTEXT_KEY: feed_remix_context(source_feed_gen_id, source.prompt),
             }
+            data.update(restored)
             logger.info(
                 "feed_creator_replay source_gen=%s model=%s photo_refs=%s original_video_refs=%s",
                 source_feed_gen_id, model_key, len(refs), len(original_videos),
@@ -2629,6 +2645,13 @@ async def _launch_video_generation_from_state(
         await source_message.answer(str(exc), reply_markup=main_menu_kb())
         return False
 
+    # Source reconstruction happens after reading the UI draft. Quote/submit
+    # the restored Wan settings, not stale local defaults from that draft.
+    if model_key in {VideoModel.WAN_30.value, VideoModel.WAN_30_PRIME.value}:
+        duration = data.get("duration", duration)
+        resolution = data.get("resolution", resolution)
+        aspect_ratio = data.get("aspect_ratio", aspect_ratio)
+
     content_edit = model_key == SEEDANCE25_MODEL_KEY and data.get("flow_id") == "genjutsu_face_clothing"
     seedance_kwargs = {}
     if content_edit:
@@ -2758,6 +2781,7 @@ async def _launch_video_generation_from_state(
                 resolution=resolution or "720p",
                 aspect_ratio=aspect_ratio,
                 options={
+                    "source_mode": data.get("wan_source_mode"),
                     "audio": data.get("wan_audio", True),
                     "seed": data.get("seed"),
                     "nsfw_checker": data.get("wan_nsfw_checker", True),

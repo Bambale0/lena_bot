@@ -84,6 +84,8 @@ from api.video_prompt_service import (
 from api.video_reference_billing import VideoSeconds, measured_video_seconds
 from api.video_runtime_fixes import seedance25_edit_billing_duration
 from api.video_service import VideoModel
+from api.wan30_contract import WAN30_MODELS
+from api.wan30_feed_recipe import recipe_options, restore_feed_recipe
 from bot.keyboards.models import (
     _IMAGE_MODEL_ORDER,
     _VIDEO_MODEL_ORDER,
@@ -3227,9 +3229,19 @@ async def _video_cost_quote(
     return model_cost, seconds, total
 
 
+def _wan30_billable_seconds(quote) -> VideoSeconds:
+    return VideoSeconds(
+        output=quote.request.duration,
+        references=math.ceil(sum(quote.request.reference_video_durations)),
+        billable=quote.billable_seconds,
+        reference_count=len(quote.request.reference_video_urls),
+    )
+
+
 async def _wan30_checkout_quote(
-    body: VideoGenRequest, prompt: str,
+    body: VideoGenRequest | FeedRemixRequest, prompt: str,
     normalized: dict[str, Any], session: AsyncSession,
+    *, options: dict[str, Any] | None = None,
 ):
     """One strict paid Wan quote shared by read-only preflight and checkout."""
     from api.wan30_launch import create_wan30_request, get_wan30_quote
@@ -3242,7 +3254,7 @@ async def _wan30_checkout_quote(
             duration=normalized["duration"],
             resolution=normalized["resolution"] or "720p",
             aspect_ratio=normalized["aspect_ratio"],
-            options={
+            options=options if options is not None else {
                 "audio": body.wan_audio,
                 "nsfw_checker": body.wan_nsfw_checker,
                 "seed": normalized["seed"],
@@ -3257,6 +3269,11 @@ async def _wan30_checkout_quote(
         quote = await get_wan30_quote(session, request)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except (OSError, RuntimeError) as exc:
+        logger.warning("Wan media preflight unavailable model=%s error_type=%s", body.model, type(exc).__name__)
+        raise HTTPException(
+            status_code=503, detail="Не удалось проверить исходные материалы Wan; кредиты не списаны. Попробуй позже.",
+        ) from exc
     return request, quote
 
 
@@ -4034,7 +4051,7 @@ def _prepare_feed_remix_inputs(
                 raise HTTPException(status_code=422, detail="Для повтора нет совместимых входных референсов")
             if original_videos and not supports_feed_source_media(caps, "video"):
                 raise HTTPException(status_code=422, detail="Модель не поддерживает исходный видео-референс автора")
-            if len(original_videos) > 1 and body.model != SEEDANCE25_MODEL_KEY:
+            if len(original_videos) > 1 and body.model not in (WAN30_MODELS | {SEEDANCE25_MODEL_KEY}):
                 raise HTTPException(status_code=422, detail="Модель не поддерживает несколько исходных видео")
             limit = int(caps.get("max_refs", 1) or 1)
             if original_videos and caps.get("max_refs_with_video") is not None:
@@ -4044,7 +4061,7 @@ def _prepare_feed_remix_inputs(
             video_url = original_videos[0] if original_videos else None
             extra_videos = [
                 f"__apix_seedance25:video_ref={url}" for url in original_videos[1:]
-            ]
+            ] if body.model == SEEDANCE25_MODEL_KEY else []
             multimodal = bool(caps.get("auto_route_by_inputs") and "multimodal" in caps.get("modes", []))
             creator_inputs = original_feed_video_inputs(source) or {}
             replay_settings = {}
@@ -4211,8 +4228,21 @@ async def _feed_recipe_source(session: AsyncSession, source: Generation, model_k
 
 async def _normalize_feed_video_inputs(
     body: FeedRemixRequest, prompt: str, refs: list[str],
+    *, source: Generation | None = None,
 ) -> dict[str, Any]:
     """Use the installed model normalizer and identical pre-charge edit billing."""
+    restored = {}
+    if body.model in WAN30_MODELS and source is not None:
+        inputs = original_feed_video_inputs(source)
+        if inputs is not None:
+            try:
+                restored = restore_feed_recipe(body.model, inputs, refs)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            body = body.model_copy(update={
+                **{k: restored[k] for k in ("mode", "duration", "resolution", "aspect_ratio", "seed") if k in restored},
+                **({"video_url": restored["reference_video_url"]} if restored else {}),
+            })
     normalized = _normalize_video_request(
         model_key=body.model, mode=body.mode, duration=body.duration,
         aspect_ratio=body.aspect_ratio, resolution=body.resolution,
@@ -4221,6 +4251,8 @@ async def _normalize_feed_video_inputs(
         audio_ids=body.audio_ids, character_ids=body.character_ids,
         seed=body.seed, grok_mode=body.grok_mode,
     )
+    if body.model in WAN30_MODELS:
+        normalized.update(restored)
     if body.model == SEEDANCE25_MODEL_KEY:
         identity_transfer = bool(seedance25_adapter._control_payload(
             [str(item) for item in (normalized.get("audio_ids") or [])]
@@ -4303,6 +4335,8 @@ async def quote_feed_remix(
     gen_type: str
     count = 1
     edit_quote = {}
+    wan_quote = None
+    cost_row = None
 
     if body.model in (_MJ_STUDIO_IMAGE_MODELS | _MJ_VIDEO_MODELS):
         gen_type = "video" if body.model in _MJ_VIDEO_MODELS else "image"
@@ -4323,16 +4357,21 @@ async def quote_feed_remix(
 
         if gen_type == "video":
             video_refs = repeat_refs
-            normalized = await _normalize_feed_video_inputs(body, repeat_prompt, video_refs)
+            normalized = await _normalize_feed_video_inputs(body, repeat_prompt, video_refs, source=source)
             has_video_input = (
                 body.model == GEMINI_OMNI_VIDEO_MODEL
                 and bool(normalized["reference_video_url"])
             )
-            cost_row = await repo.resolve_video_model_cost(
-                session, body.model,
-                duration=None if has_video_input else normalized["duration"],
-                resolution=normalized["resolution"],
-            )
+            if body.model in WAN30_MODELS:
+                _, wan_quote = await _wan30_checkout_quote(
+                    body, repeat_prompt, normalized, session, options=recipe_options(normalized),
+                )
+            else:
+                cost_row = await repo.resolve_video_model_cost(
+                    session, body.model,
+                    duration=None if has_video_input else normalized["duration"],
+                    resolution=normalized["resolution"],
+                )
             count = int(normalized["duration"])
             if normalized.get("seedance_video_edit"):
                 edit_quote = {"source_video_edit": True, "effective_duration_seconds": count}
@@ -4350,19 +4389,22 @@ async def quote_feed_remix(
             cost_row = await repo.resolve_image_model_cost(session, body.model, quality=quality)
             count = body.count
 
-    if cost_row is None or not bool(getattr(cost_row, "is_active", True)):
+    if wan_quote is None and (cost_row is None or not bool(getattr(cost_row, "is_active", True))):
         raise HTTPException(status_code=422, detail="Model not available")
 
-    nominal = float(cost_row.credits)
+    nominal = wan_quote.credits if wan_quote else float(cost_row.credits)
     if gen_type == "video" and body.model not in _MJ_VIDEO_MODELS:
-        billing_seconds, nominal = await _video_reference_price(
-            normalized, VIDEO_CAPS.get(body.model, {}), nominal,
-        )
+        if wan_quote:
+            billing_seconds = _wan30_billable_seconds(wan_quote)
+        else:
+            billing_seconds, nominal = await _video_reference_price(
+                normalized, VIDEO_CAPS.get(body.model, {}), nominal,
+            )
         edit_quote.update({
             "output_seconds": billing_seconds.output,
             "reference_seconds": billing_seconds.references,
             "billable_seconds": billing_seconds.billable,
-            "rate_credits_per_second": float(cost_row.credits) if _is_per_second_video_model(VIDEO_CAPS.get(body.model, {})) else None,
+            "rate_credits_per_second": wan_quote.rate if wan_quote else float(cost_row.credits) if _is_per_second_video_model(VIDEO_CAPS.get(body.model, {})) else None,
         })
     elif gen_type == "image" and body.model not in _MJ_STUDIO_IMAGE_MODELS:
         nominal *= count
@@ -4560,23 +4602,30 @@ async def remix_feed_post(
             raise HTTPException(status_code=422, detail=f"Unknown model: {body.model!r}")
 
     normalized_video: dict[str, Any] | None = None
+    wan_quote = None
+    model_cost = None
     normalized_image_url: str | None = None
     normalized_ratio = body.aspect_ratio
     normalized_quality = body.quality or "basic"
 
     if gen_type == "video":
         video_refs = repeat_refs
-        normalized_video = await _normalize_feed_video_inputs(body, repeat_prompt, video_refs)
+        normalized_video = await _normalize_feed_video_inputs(body, repeat_prompt, video_refs, source=source)
         has_gemini_omni_video_input = (
             body.model == GEMINI_OMNI_VIDEO_MODEL
             and bool(normalized_video["reference_video_url"])
         )
-        model_cost = await repo.resolve_video_model_cost(
-            session,
-            body.model,
-            duration=None if has_gemini_omni_video_input else normalized_video["duration"],
-            resolution=normalized_video["resolution"],
-        )
+        if body.model in WAN30_MODELS:
+            _, wan_quote = await _wan30_checkout_quote(
+                body, repeat_prompt, normalized_video, session, options=recipe_options(normalized_video),
+            )
+        else:
+            model_cost = await repo.resolve_video_model_cost(
+                session,
+                body.model,
+                duration=None if has_gemini_omni_video_input else normalized_video["duration"],
+                resolution=normalized_video["resolution"],
+            )
     else:
         image_refs = repeat_refs
         if image_refs:
@@ -4594,7 +4643,7 @@ async def remix_feed_post(
             raise HTTPException(status_code=422, detail=f"Model supports at most {max_refs} reference image(s)")
         model_cost = await repo.resolve_image_model_cost(session, body.model, quality=normalized_quality)
 
-    if not model_cost:
+    if not model_cost and wan_quote is None:
         raise HTTPException(status_code=422, detail="Model not available")
     image_primary = (
         (await get_nano21_route(session)).primary_provider
@@ -4603,15 +4652,22 @@ async def remix_feed_post(
     )
 
     if gen_type == "video":
-        billing_seconds, nominal_credits = await _video_reference_price(
-            normalized_video, VIDEO_CAPS.get(body.model, {}), model_cost.credits,
-        )
-        _require_video_price_confirmation(body.quoted_credits, nominal_credits, billing_seconds)
+        if wan_quote:
+            billing_seconds = _wan30_billable_seconds(wan_quote)
+            nominal_credits = wan_quote.credits
+            normalized_video.update(wan_quote.stored_params())
+            if body.quoted_credits is None or round(float(body.quoted_credits), 6) != round(nominal_credits, 6):
+                raise HTTPException(status_code=409, detail="Цена Wan изменилась или не подтверждена. Проверь сумму и подтверди запуск.")
+        else:
+            billing_seconds, nominal_credits = await _video_reference_price(
+                normalized_video, VIDEO_CAPS.get(body.model, {}), model_cost.credits,
+            )
+            _require_video_price_confirmation(body.quoted_credits, nominal_credits, billing_seconds)
         normalized_video.update({
             "billing_output_seconds": billing_seconds.output,
             "billing_reference_seconds": billing_seconds.references,
             "billing_total_seconds": billing_seconds.billable,
-            "billing_rate": float(model_cost.credits),
+            "billing_rate": wan_quote.rate if wan_quote else float(model_cost.credits),
         })
     else:
         nominal_credits = float(model_cost.credits) * body.count
@@ -4726,6 +4782,7 @@ async def remix_feed_post(
                 ),
                 idempotency_key=f"apix-video-{gen.id}",
                 **({"neironych_submission": submission_context} if submission_context else {}),
+                **({"wan_request": wan_quote.request} if wan_quote else {}),
             )
         else:
             result = await image_service.generate_image(
