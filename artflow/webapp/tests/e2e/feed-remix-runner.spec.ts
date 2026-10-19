@@ -1120,3 +1120,61 @@ test("gallery portal closes with Escape and native Back dismisses the repeat she
   await expect(viewer).toHaveCount(0);
   expect(submissions).toBe(0);
 });
+
+for (const modelKey of ["wan/3-0-video", "wan/3-0-video-prime"]) {
+  test(`Wan public repeat confirms server quote before launch: ${modelKey}`, async ({ page }) => {
+    await mockMiniAppApi(page);
+    const model = {
+      key: modelKey, display_name: modelKey.endsWith("prime") ? "Wan 3.0 Prime" : "Wan 3.0",
+      credits: 4, modes: ["text", "image", "video"],
+      aspect_ratios: ["adaptive", "16:9", "9:16"], durations: [5, 10, 15, 30],
+      resolutions: ["480p", "720p", "1080p"], max_refs: 10, supports_video_input: true,
+    };
+    const source = {
+      id: 201, model: modelKey, gen_type: "video", prompt: "", prompt_hidden: true,
+      source_has_video_reference: true, original_duration: 15,
+      original_aspect_ratio: "9:16", original_resolution: "480p",
+      result_url: "https://example.test/rendered.mp4", result_urls: ["https://example.test/rendered.mp4"],
+      author: "Wan Creator", likes_count: 0, shares_count: 0, remixes: 0, is_mine: false,
+    };
+    await page.route("**/api/v1/feed?**", route => route.fulfill({ json: [source] }));
+    await page.route("**/api/v1/feed/201", route => route.fulfill({ json: source }));
+    await page.route("**/api/v1/models/video", route => route.fulfill({ json: [model] }));
+    const quotes: Record<string, unknown>[] = [];
+    await page.route("**/api/v1/feed/201/remix/quote", route => {
+      quotes.push(route.request().postDataJSON() as Record<string, unknown>);
+      return route.fulfill({ json: {
+        cost_credits: 84, balance_credits: 100, can_run: true, deficit_credits: 0,
+        output_seconds: 15, reference_seconds: 6, billable_seconds: 21,
+      } });
+    });
+    const launches: Record<string, unknown>[] = [];
+    await page.route("**/api/v1/feed/201/remix", route => {
+      launches.push(route.request().postDataJSON() as Record<string, unknown>);
+      return route.fulfill({ status: 202, json: {
+        id: 9207, model: modelKey, gen_type: "video", status: "pending", prompt: "", prompt_hidden: true,
+        result_url: null, result_urls: [], credits_spent: 84, created_at: new Date().toISOString(),
+      } });
+    });
+    await page.goto("/?tgWebAppData=test&feed=201");
+    const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByLabel("Модель")).toBeDisabled();
+    expect(launches).toHaveLength(0);
+    await dialog.locator("input[type=file]").setInputFiles({
+      name: "reader.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
+    });
+    await expect(dialog.getByText("Стоимость: 84 💋").first()).toBeVisible();
+    await expect.poll(() => quotes.length).toBeGreaterThan(0);
+    expect(launches).toHaveLength(0);
+    await dialog.getByRole("button", { name: /Запустить повтор/ }).click();
+    await expect(page.getByRole("dialog", { name: /Задача #9207/ })).toBeVisible();
+    expect(launches).toHaveLength(1);
+    expect(launches[0]).toMatchObject({
+      model: modelKey, image_url: "https://example.test/uploaded-ref.png",
+      duration: 15, resolution: "480p", aspect_ratio: "9:16", quoted_credits: 84, change_request: "",
+    });
+    expect(launches[0]).not.toHaveProperty("wan30_request");
+    expect(launches[0]).not.toHaveProperty("prompt");
+  });
+}

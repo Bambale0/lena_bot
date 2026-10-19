@@ -133,6 +133,9 @@ jobs:
       - name: Native admission fallback and durable handoff
         run: pytest -q tests/test_neironych_admission_fallback.py tests/test_neironych_qwen38_service.py
 
+      - name: Wan feed repeat quote and submission parity
+        run: pytest -q tests/test_wan30_feed_repeat.py tests/test_wan30_repeat_modes.py tests/test_wan30_durable_fallback.py
+
       - name: Provider contract tests
         run: |
           pytest -q \

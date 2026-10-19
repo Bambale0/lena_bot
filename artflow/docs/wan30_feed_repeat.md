@@ -1,0 +1,33 @@
+# Wan 3.0 / Prime public-feed repeats
+
+## Incident and repaired path (19 October 2026)
+
+Baseline `f1cfa8eb2797d825389df4c5819ed504956adae8` allowed the public-feed path to price/debit a generic video request, then call the Wan service without its required `Wan30Request`. The service correctly rejected before a supplier call. The reported source was 61270; previous diagnostics found failed repeats for a different account, not proven paid failures by the requested reader. This repair is model-wide; no account IDs, special-case source IDs or production media are embedded in the code/tests.
+
+Both `/api/v1/feed/{id}/remix/quote` and the corresponding web proxy now use the existing strict Wan constructor and exact active quality tariff. The paid endpoint remeasures the same local inputs, rechecks that tariff and requires the displayed quote to match **before debit**, even without input-video references. Missing input, disabled quality/base pricing, invalid media/combined duration and changed/missing quote cannot reach spending or the provider. Storage/probe failure is a retryable 503, not a charged generation.
+
+The accepted request and billing snapshot are persisted before provider submission. `wan_request` reaches the existing service; its defensive guard, signed callbacks, durable Neironych/KIE journals, unknown-outcome recovery and idempotency behavior are retained. No new provider route or paid retry was added. The request is never reconstructed from a supplier GET.
+
+## Recipe and surface parity
+
+`wan30_request` is authoritative for a known public Wan video. All original video references and timed audio are remeasured, ordered and deduplicated by the shared constructor. Original mode, resolution, ratio, fixed duration, audio flag, seed (including zero) and safety setting are retained. Reader photos replace creator image/frame identity inputs. First/last-frame recipes require exactly their original frame count; reference recipes do not silently become first-frame mode just because only one photo was uploaded. The source's published output MP4 is never substituted for its original input recipe.
+
+Source reference audio/file/link fields remain server-side. Public quote/results contain no creator prompt or private reference URLs. Existing publication/model/reader-photo authorization rules remain in place. Legacy generic inputs still pass the strict Wan constructor; missing or unsupported provenance is not fetched from the supplier or invented.
+
+The website and Mini App use the same handlers and schema. Telegram public-feed preparation uses the same pure recipe restoration helper, then the existing one-time quote confirmation and launch. Local values captured from the old UI draft are refreshed before quoting. Re-entering confirmation preserves the original seed instead of treating it as a new user control. Own-history repeats and non-Wan models retain their existing paths.
+
+## Verification and delivery boundaries
+
+- HTTP regressions first reproduced the exact original `wan_request` exception for normal Wan and Prime. Separate RED cases reproduced missing immediate pre-charge I/O handling and incorrect Telegram `multimodal` restoration.
+- 30 new backend cases exercise real HTTP routes, normalizer, Wan builder, strict tariff lookup and video service; external media probes, persistence and supplier calls are synthetic. Coverage includes web/Mini App, Telegram preparation/visible confirmation, private prompt/reference exclusion, edit/reference/frame/file/link modes, multiple measured/deduplicated inputs, stale prices and unknown paid outcomes without refund/replay.
+- Initial full local suite: 3459 passed, 64 environment-dependent skips, zero failures. The added final three tests also pass. The normal exact-head GitHub backend job must run its dedicated PostgreSQL/Nginx tests; skips are not proof of those integrations.
+- Frontend unit: 114 passed. Fresh typecheck/production build and 8 new Wan/Prime browser scenarios passed in iPhone SE/iPhone 13/Pixel 5/Desktop Chromium emulation. Browser endpoints are mocked; this is not a paid render or a physical-device test.
+- Full Ruff passed. OpenAPI export still matches the committed 195-path schema. Provider inventory/readiness/dry smoke manifest remains valid for 98 contracts, no paid execution.
+
+No migration, new business configuration, price/model routing change, customer compensation or manual production update is required. Ship only via reviewed PR and the normal protected-main autodeploy. Production identity/health and a new real paid render are distinct verification steps; a paid render was not executed by this work.
+
+## Review amendment: unknown source provenance
+
+Independent review found that a public legacy Wan video without a recognizable input snapshot could enter the generic public-output editing fallback. Both API quote/launch and Telegram preparation now reject this case before probing, quoting or charging instead of silently substituting the rendered output. Known canonical recipes (including source 61270) and recognizable stored inputs still use the normal path; own-history operations are unchanged. Eighteen RED cases covered both Wan models, both HTTP surfaces, Telegram and missing/empty/malformed snapshots; all pass after the guard. New regression total: 48. Related post-amendment suite: 232 passed. No paid generation or customer balance mutation.
+
+The second review finding (Telegram transient media-probe errors) is fixed with the same safe pre-charge retry outcome as HTTP. Four RED/green cases cover OSError and RuntimeError on both Wan variants; the bot returns a retry message without spending, saving a generation or calling a supplier. The regression module now has 52 cases. No exception body/private media URL is included in the new log line.
