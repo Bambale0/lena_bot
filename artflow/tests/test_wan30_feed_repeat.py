@@ -563,3 +563,62 @@ async def test_bot_probe_failure_is_actionable_and_never_charges(
     harness.charge.assert_not_awaited()
     harness.submit.assert_not_awaited()
     harness.save.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model", sorted(WAN30_MODELS))
+@pytest.mark.parametrize("surface", ["v1", "web"])
+@pytest.mark.parametrize("binding_outcome", ["bound", "deferred", "error"])
+async def test_wan_feed_kie_only_submission_binds_durable_identity(
+    harness, monkeypatch, model, surface, binding_outcome,
+):
+    """A KIE-only paid POST sets kie_started, never Neironych's started flag."""
+    from core.seedance_reconciliation import persist_submission_result
+
+    recipe(harness, model)
+    context = SimpleNamespace(started=False, kie_started=False)
+    monkeypatch.setattr(routes, "make_submission_context", lambda *a, **k: context)
+    monkeypatch.setattr(routes, "persist_submission_result", persist_submission_result)
+    mark_unknown = AsyncMock(return_value=True)
+    monkeypatch.setattr(routes, "handle_submission_unknown", mark_unknown)
+    marker = ("web:" if surface == "web" else "") + "kie-submit:99"
+    canonical = ("web:" if surface == "web" else "") + "synthetic-wan-task"
+
+    async def paid_submit(request, **kwargs):
+        context.kie_started = True
+        harness.record.task_id = marker
+        harness.record.status = GenerationStatus.processing
+        return SimpleNamespace(task_id="synthetic-wan-task", provider="kieai")
+
+    harness.submit.side_effect = paid_submit
+
+    async def bind(session, gen_id, provider_task_id):
+        assert session is harness.session
+        assert gen_id == harness.record.id
+        assert provider_task_id == "synthetic-wan-task"
+        assert harness.record.task_id == marker
+        if binding_outcome == "error":
+            raise RuntimeError("Synthetic commit acknowledgement lost")
+        if binding_outcome == "deferred":
+            return None
+        harness.record.task_id = canonical
+        return harness.record
+
+    binder = AsyncMock(side_effect=bind)
+    monkeypatch.setattr(routes.repo, "bind_kie_video_callback", binder)
+    response = await harness.client.post(
+        f"/api/{surface}/feed/77/remix",
+        json={"model": model, "image_url": PHOTO, "quoted_credits": 84},
+    )
+    assert response.status_code == 202, response.text
+    binder.assert_awaited_once_with(harness.session, harness.record.id, "synthetic-wan-task")
+    assert harness.record.task_id == (canonical if binding_outcome == "bound" else marker)
+    assert context.started is False and context.kie_started is True
+    harness.submit.assert_awaited_once()
+    harness.charge.assert_awaited_once()
+    harness.refund.assert_not_awaited()
+    routes.repo.update_generation_task.assert_not_awaited()
+    if binding_outcome == "error":
+        mark_unknown.assert_awaited_once_with(harness.session, harness.record.id, context)
+    else:
+        mark_unknown.assert_not_awaited()
