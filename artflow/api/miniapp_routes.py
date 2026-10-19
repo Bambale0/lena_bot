@@ -4899,7 +4899,7 @@ async def remix_feed_post(
                 result_urls=_generation_result_urls(gen),
                 surface=surface,
             )
-    elif submission_context and submission_context.started:
+    elif has_paid_submission_journal(submission_context):
         try:
             saved = await persist_submission_result(
                 session, gen.id, submission_context, result.task_id or "", surface=surface,

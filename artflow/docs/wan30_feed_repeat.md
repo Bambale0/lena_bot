@@ -41,3 +41,37 @@ submission response or signed callback. Never call KIE status polling with
 this marker, never resubmit paid work merely because the marker is pending,
 and do not refund on a malformed status response. Regression coverage:
 `tests/test_wan_kie_submit_reconcile.py`.
+
+### Follow-up: bind KIE-only successful feed submissions
+
+Baseline: `362069e887bd3c289a3a6af32eb946481f1c588f`. The authorized
+production repeat smoke exposed a second, independent omission: the feed
+success path checked only the Neironych `started` flag. A KIE-only submission
+sets `kie_started`, so its response went through the legacy empty-ID update
+instead of the durable KIE binder. The paid task remained recoverable by its
+signed callback, but polling could not start until that callback arrived.
+
+Acceptance: both Wan models on web and Mini App must bind the successful KIE
+response immediately through `has_paid_submission_journal` and the existing
+`persist_submission_result`; deferred/failed binding must never resubmit or
+refund paid work. Telegram and ordinary video creation already use this
+shared guard. No pricing, provider, migration or authorization change.
+
+Execution: add failing route regressions for both models and HTTP surfaces,
+including deferred and failed identity persistence; apply the minimal guard
+correction; run regression/CI gates; deliver through protected-main auto-
+deploy; verify canonical task binding and actual paid render completion.
+
+Verification: all 12 new model/surface/binding-outcome cases failed on the
+baseline because the durable binder was never called. After replacing the
+one success-path condition with the existing shared journal predicate,
+233 Wan/fallback/callback/delivery/refund tests pass and full application
+Ruff passes. Both Telegram launch sites already use that predicate; no bot
+code change is necessary. Late callbacks and persistence failures remain
+single-purchase, recoverable operations. Paid production verification and
+exact merge/deploy receipts are recorded in the follow-up pull request.
+
+The full local Python suite for this follow-up completed with 3498 passed,
+64 environment-dependent skips and 3 warnings. It used dummy credentials,
+not production data. Exact-head CI remains mandatory for the skipped
+PostgreSQL/Nginx integrations; local results never bypass protected checks.
