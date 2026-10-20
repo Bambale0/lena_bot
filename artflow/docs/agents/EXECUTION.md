@@ -1815,6 +1815,8 @@ Acceptance: opening/editing repeat sends valid escaped HTML within Telegram's 40
 
 Parity: telegram_bot fixed here; site (`landing/js/prototype-premium.js` repeat/variant action) and mini_app repeat setup render browser text, not this Telegram confirmation, so this protocol limit is inapplicable. No schema, integration, credential, business configuration, balance mutation or paid provider request. Message length is a protocol constraint. Existing error logging remains the signal; no prompts logged.
 
-Steps: 1. [x] runtime/code/tests/CI audit; 2. [x] RED: original 2 short cases pass, 4 oversized Cyrillic/emoji cases fail at the parsed-message length assertion; 3. [x] bounded previews and Unicode/feed-edit/full-launch/hidden regressions (23 handler tests pass); 4. [x] 476 focused repeat/reference/ownership/identity/Wan tests pass, full Ruff, py_compile and diff checks pass; [ ] independent review; 5. [ ] required CI, native auto-merge, exact-SHA autodeploy and health.
+Steps: 1. [x] runtime/code/tests/CI audit; 2. [x] RED: original 2 short cases pass, 4 oversized Cyrillic/emoji cases fail at the parsed-message length assertion; 3. [x] bounded previews and Unicode/feed-edit/full-launch/hidden regressions (23 handler tests pass); 4. [x] 476 focused repeat/reference/ownership/identity/Wan tests pass, full Ruff, py_compile and diff checks pass; [x] independent reviewer found no actionable defects and independently reran all 23 handler tests; 5. [ ] required CI, native auto-merge, exact-SHA autodeploy and health.
 
 Skills: `.clinerules` systematic-debugging/requesting-code-review; Bambale0/skills TDD; claw QA checklist; wondelai working-with-legacy-code test seams. Anthropic webapp-testing inspected, inapplicable to Telegram rendering. Existing handler test seams are within the user's fix authorization.
+
+Delivery: PR #286, implementation commit `922167d`; exact-head CI/merge/deploy evidence pending.
