@@ -10,6 +10,7 @@ from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.utils.formatting import Bold, Text, as_list
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -145,35 +146,53 @@ def _confirmation_text(data: dict[str, Any]) -> str:
     refs = _unique_urls(data.get("repeat_reference_images"))
     missing = _unique_urls(data.get("repeat_missing_references"))
     cost = float(data.get("repeat_cost") or 0)
-    prompt = str(data.get("repeat_prompt") or "").strip()
     protected_feed = bool(data.get("repeat_source_feed_gen_id"))
-    prompt_line = (
-        "🔒 Скрытый промпт автора" if protected_feed
-        else "🔒 Скрытый трендовый промпт" if data.get("repeat_prompt_hidden") else html.escape(prompt)
-    )
+    hidden = protected_feed or bool(data.get("repeat_prompt_hidden"))
+    prompt_label = "🔒 Скрытый промпт автора" if protected_feed else "🔒 Скрытый трендовый промпт"
     price_label = "бесплатно" if cost <= 0 else f"{cost:g} 💋"
-    lines = [
-        "🔁 <b>Повторить эту генерацию?</b>",
+    lines: list[str | Text] = [
+        Text("🔁 ", Bold("Повторить эту генерацию?")),
         "",
-        f"• Модель: <b>{html.escape(image_gen.get_image_model_label(str(data.get('repeat_model_key') or '')))}</b>",
-        f"• Формат: <b>{html.escape(str(data.get('repeat_aspect_ratio') or 'авто'))}</b>",
-        f"• Качество: <b>{html.escape(str(data.get('repeat_quality') or 'по умолчанию'))}</b>",
-        f"• Референсы: <b>{len(refs)}</b>",
-        f"• Цена: <b>{price_label}</b>",
+        Text("• Модель: ", Bold(image_gen.get_image_model_label(str(data.get("repeat_model_key") or "")))),
+        Text("• Формат: ", Bold(str(data.get("repeat_aspect_ratio") or "авто"))),
+        Text("• Качество: ", Bold(str(data.get("repeat_quality") or "по умолчанию"))),
+        Text("• Референсы: ", Bold(str(len(refs)))),
+        Text("• Цена: ", Bold(price_label)),
         "",
-        f"📝 {prompt_line}",
+    ]
+    preview_index = len(lines)
+    preview_prefix = "📝 "
+    preview = "" if hidden else str(data.get("repeat_prompt") or "").strip()
+    lines.extend([
+        Text(preview_prefix, prompt_label if hidden else ""),
         "",
         "💋 Списание произойдёт только после подтверждения запуска.",
-    ]
+    ])
     if protected_feed and data.get("repeat_feed_change_request"):
-        lines.extend(["", "✏️ Изменения: " + html.escape(str(data["repeat_feed_change_request"]))])
+        lines.append("")
+        preview_index = len(lines)
+        preview_prefix = "✏️ Изменения: "
+        preview = str(data["repeat_feed_change_request"])
+        lines.append(preview_prefix)
     if missing:
         lines.extend(["", "⚠️ Часть старых фото уже очищена. Добавьте фото заново."])
     if data.get("repeat_reference_required") and not refs:
         lines.extend(["", "⚠️ Для этой модели сначала отправьте фото."])
     if data.get("repeat_is_pinterest"):
         lines.extend(["", "📌 Pinterest: сцена и личность сохраняются как разные роли."])
-    return "\n".join(lines)
+
+    # Budget parsed text in UTF-16 units, including metadata and all notices.
+    # Only the preview changes: the full prompt/edit remains in the FSM.
+    if preview:
+        scaffold = as_list(*lines).render()[0]
+        budget = 4096 - len(scaffold.encode("utf-16-le")) // 2
+        encoded = preview.encode("utf-16-le")
+        if len(encoded) // 2 > budget:
+            suffix = "… (текст сокращён)"
+            prefix_budget = max(0, budget - len(suffix.encode("utf-16-le")) // 2)
+            preview = encoded[:prefix_budget * 2].decode("utf-16-le", errors="ignore") + suffix
+        lines[preview_index] = Text(preview_prefix, preview)
+    return as_list(*lines).as_html()
 
 
 async def _source_session_snapshot(
