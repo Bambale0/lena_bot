@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from core.provider_errors import known_generation_user_error
 
+
+class ImageReferenceUnavailable(ValueError):
+    """Reference admission failed before any paid generation was submitted."""
+
 _SAFETY_MARKERS = (
     "image_safety",
     "prohibited_content",

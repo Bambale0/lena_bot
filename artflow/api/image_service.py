@@ -31,8 +31,8 @@ from api import (
     kieai_client,
     neironych_image_adapter,
     nexus_image_adapter,
-    public_files,
 )
+from api.image_errors import ImageReferenceUnavailable
 from api.kie_model_specs import IMAGE_SPECS, build_kie_input, resolve_model_for_reference
 from api.public_files import ensure_provider_safe_png_url, local_upload_path_from_url
 from core.config import settings
@@ -311,10 +311,22 @@ async def _upload_local_kie_reference(url: str, *, model_key: str) -> str | None
     if not path or not path.exists() or not path.is_file():
         return None
     _validate_local_reference(model_key, path)
+    seedream = model_key in {ImageModel.SEEDREAM_5_PRO_I2I.value, ImageModel.SEEDREAM_45_EDIT.value}
+    if seedream and path.stat().st_size > 30 * 1024 * 1024:
+        raise ImageReferenceUnavailable("Не удалось загрузить исходное изображение. Загрузи фото заново.")
+    data = path.read_bytes()
+    content_type = _content_type_for_path(path)
+    filename = path.name
+    if seedream:
+        try:
+            content_type, extension = await asyncio.to_thread(_reference_image_type, data)
+            filename = f"{path.stem}.{extension}"
+        except Exception as exc:
+            raise ImageReferenceUnavailable("Не удалось загрузить исходное изображение. Загрузи фото заново.") from exc
     return await kieai_client.upload_file_stream(
-        path.read_bytes(),
-        filename=path.name,
-        content_type=_content_type_for_path(path),
+        data,
+        filename=filename,
+        content_type=content_type,
         upload_path="images/apix-refs",
     )
 
@@ -323,23 +335,19 @@ def _reference_image_type(data: bytes) -> tuple[str, str]:
     with Image.open(io.BytesIO(data)) as image:
         if image.format not in {"JPEG", "PNG", "WEBP"}:
             raise ValueError("Unsupported reference image format")
+        if Image.MAX_IMAGE_PIXELS and image.width * image.height > Image.MAX_IMAGE_PIXELS:
+            raise ValueError("Reference image dimensions are unsafe")
         content_type = Image.MIME[image.format]
         extension = {"JPEG": "jpg", "PNG": "png", "WEBP": "webp"}[image.format]
         image.verify()
+    with Image.open(io.BytesIO(data)) as image:
+        image.load()
     return content_type, extension
 
 
 async def _upload_external_seedream_reference(url: str, *, model_key: str) -> str:
     try:
-        # Never follow an untrusted reference redirect to an internal service.
-        data, _ = await public_files.download_public_url(
-            url, follow_redirects=False, max_bytes=30 * 1024 * 1024,
-        )
-        content_type, extension = await asyncio.to_thread(_reference_image_type, data)
-        uploaded = await kieai_client.upload_file_stream(
-            data, filename=f"reference.{extension}", content_type=content_type,
-            upload_path="images/apix-refs",
-        )
+        uploaded = await kieai_client.upload_reference_image_url(url)
         if not uploaded:
             raise ValueError("Empty provider upload URL")
         return uploaded
@@ -348,7 +356,7 @@ async def _upload_external_seedream_reference(url: str, *, model_key: str) -> st
             "Seedream reference admission failed model=%s error_type=%s",
             model_key, type(exc).__name__,
         )
-        raise ValueError(
+        raise ImageReferenceUnavailable(
             "Не удалось загрузить исходное изображение. Загрузи фото заново и повтори запрос."
         ) from exc
 
@@ -376,10 +384,17 @@ async def _prepare_reference_urls_for_model(
             prepared.append(url)
             continue
         if not local_path.is_file():
-            raise ValueError("Исходное изображение больше недоступно. Загрузи фото заново.")
+            raise ImageReferenceUnavailable("Исходное изображение больше недоступно. Загрузи фото заново.")
         try:
             uploaded_url = await _upload_local_kie_reference(url, model_key=resolved_model)
+        except ImageReferenceUnavailable:
+            raise
         except Exception as exc:
+            if resolved_model in {ImageModel.SEEDREAM_5_PRO_I2I.value, ImageModel.SEEDREAM_45_EDIT.value}:
+                logger.warning("Seedream local reference admission failed error_type=%s", type(exc).__name__)
+                raise ImageReferenceUnavailable(
+                    "Не удалось загрузить исходное изображение. Загрузи фото заново.",
+                ) from exc
             if resolved_model in _STRICT_UPLOAD_MODELS:
                 raise RuntimeError(
                     f"Failed to upload {resolved_model} reference to KIE storage: {local_path.name}"

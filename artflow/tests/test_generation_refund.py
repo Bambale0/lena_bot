@@ -50,6 +50,54 @@ class _SessionStub:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("surface", ["web", "miniapp"])
+async def test_missing_reference_admission_refunds_atomically_once(monkeypatch, tmp_path, surface):
+    from fastapi import HTTPException
+
+    from api import miniapp_routes, public_files
+
+    generation = SimpleNamespace(
+        id=88, user_id=42, status=GenerationStatus.pending, credits_spent=2,
+        input_params="{}", error_msg=None, finished_at=None, task_id=None,
+    )
+    session = _SessionStub(generation, 53.0, generation)
+    monkeypatch.setattr(public_files, "UPLOAD_ROOT", tmp_path)
+    monkeypatch.setattr(repo, "_publish_generation_update", AsyncMock())
+    monkeypatch.setattr(miniapp_routes, "_reconcile_user_active_generations", AsyncMock())
+    monkeypatch.setattr(repo, "resolve_image_model_cost", AsyncMock(return_value=SimpleNamespace(credits=2)))
+    monkeypatch.setattr(repo, "count_user_active_generations", AsyncMock(return_value=0))
+    monkeypatch.setattr(repo, "charge_image_generation", AsyncMock(return_value=SimpleNamespace(allowed=True, charged_credits=2)))
+    monkeypatch.setattr(repo, "create_image_session", AsyncMock(return_value=SimpleNamespace(id=12)))
+    monkeypatch.setattr(repo, "create_generation", AsyncMock(return_value=generation))
+    split_refund = AsyncMock(side_effect=AssertionError("non-atomic reference refund"))
+    monkeypatch.setattr(repo, "fail_generation", split_refund)
+    monkeypatch.setattr(repo, "add_credits", split_refund)
+    create = AsyncMock(side_effect=AssertionError("missing media must not submit paid task"))
+    monkeypatch.setattr(miniapp_routes.image_service.kieai_client, "create_task", create)
+
+    with pytest.raises(HTTPException) as error:
+        await miniapp_routes.create_image_generation(
+            miniapp_routes.ImageGenRequest(
+                model="seedream/5-pro-image-to-image", prompt="test photo", quality="high",
+                reference_url="https://example.test/static/upload/missing.jpg",
+            ),
+            session=session, user=SimpleNamespace(id=42, credits=100), surface=surface,
+        )
+    assert error.value.status_code == 422
+    assert "Загрузи фото заново" in error.value.detail
+    assert generation.status == GenerationStatus.failed
+    assert json.loads(generation.input_params)["refund_applied"] is True
+    assert len(session.added) == 1
+    ledger = session.added[0]
+    assert (ledger.delta, ledger.source_type, ledger.source_id) == (2, "generation", "88")
+    session.commit.assert_awaited_once()
+    assert await repo.fail_generation_and_refund(session, 88, "duplicate") == (False, 0.0)
+    assert len(session.added) == 1
+    split_refund.assert_not_awaited()
+    create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_fail_generation_and_refund_credits_generation_once(monkeypatch) -> None:
     generation = SimpleNamespace(
         id=77,
