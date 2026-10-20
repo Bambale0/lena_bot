@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import io
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from PIL import Image
 
-from api import image_service, nexus_image_adapter
+from api import image_service, nexus_image_adapter, public_files
 from api.image_service import ImageModel
 from api.provider_contract_catalog import IMAGE_CONTRACTS
 from bot.keyboards.models import IMAGE_CAPS, NANA_BANANO_MODEL_CHOICES, image_nana_banano_kb
@@ -155,6 +157,11 @@ async def test_seedream_5_pro_routes_to_kie_not_nexus(monkeypatch, model: ImageM
     kie_create = AsyncMock(return_value={"code": 200, "data": {"taskId": "kie_seedream_task"}})
     monkeypatch.setattr(image_service.nexus_image_adapter, "create_nexus_image_task", nexus_create)
     monkeypatch.setattr(image_service.kieai_client, "create_task", kie_create)
+    image = io.BytesIO()
+    Image.new("RGB", (8, 8), "red").save(image, format="PNG")
+    monkeypatch.setattr(public_files, "download_public_url", AsyncMock(return_value=(image.getvalue(), "image/png")))
+    upload = AsyncMock(return_value="https://kie-files.test/staged.png")
+    monkeypatch.setattr(image_service.kieai_client, "upload_file_stream", upload)
 
     result = await image_service.generate_image(
         model,
@@ -176,7 +183,10 @@ async def test_seedream_5_pro_routes_to_kie_not_nexus(monkeypatch, model: ImageM
     assert payload["input"]["quality"] == "high"
     assert payload["input"]["output_format"] == "png"
     if refs:
-        assert payload["input"]["image_urls"] == refs
+        assert payload["input"]["image_urls"] == ["https://kie-files.test/staged.png"]
+        upload.assert_awaited_once()
+    else:
+        upload.assert_not_awaited()
 
 
 @pytest.mark.asyncio

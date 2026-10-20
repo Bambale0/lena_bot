@@ -115,6 +115,7 @@ from core.music_reconcile_scheduler import run_music_reconcile_scheduler
 from core.neironych_image_reconcile_scheduler import run_neironych_image_reconcile_scheduler
 from core.neironych_video_poll_gate import require_neironych_video_redis_ready
 from core.neironych_video_reconcile_scheduler import run_neironych_video_reconcile_scheduler
+from core.provider_errors import known_generation_user_error
 from core.provider_logging import callback_anomaly, safe_identifier
 from db import repository as repo
 from db.models import (
@@ -1829,7 +1830,9 @@ async def kie_webhook(
                 logger.info("KIE webhook ignoring non-terminal task_id=%s status update", safe_identifier(task_id))
                 return {"ok": True}
             err = extract_error(payload)
-            user_err = _sanitize_provider_error(None if generation_prompt_is_protected(gen) else err)
+            user_err = known_generation_user_error(err) or _sanitize_provider_error(
+                None if generation_prompt_is_protected(gen) else err,
+            )
             failed, refunded = await repo.fail_generation_and_refund(
                 session,
                 gen.id,

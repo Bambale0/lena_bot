@@ -270,6 +270,32 @@ async def test_kie_failure_callback_without_refund_does_not_promise_credits(monk
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("raw, expected", [
+    ("The request failed because the output image may be related to copyright restrictions.", "авторских прав"),
+    ("Image fetch failed. Check access settings or use our File Upload API instead.", "Загрузи фото заново"),
+])
+async def test_kie_image_rejection_notice_keeps_safe_reason_and_guarded_refund(monkeypatch, raw, expected):
+    bot = AsyncMock()
+    refund = _patch_kie_failure_webhook(monkeypatch, (True, 2.0), bot)
+    generation = _pending_video_generation(
+        gen_type=main.GenerationType.image, model="seedream/5-pro-text-to-image",
+        source_feed_gen_id=3,
+    )
+    monkeypatch.setattr(main.repo, "get_generation_by_task_id", AsyncMock(return_value=generation))
+    payload = _failed_payload()
+    payload["data"]["failMsg"] = raw + " private-recipe-must-not-leak"
+    async with AsyncClient(transport=ASGITransport(app=main.app), base_url="http://test") as client:
+        response = await client.post("/webhook/kie", json=payload)
+    assert response.status_code == 200
+    refund.assert_awaited_once()
+    assert refund.await_args.args[2] == payload["data"]["failMsg"]
+    text = bot.send_message.await_args.args[1]
+    assert expected in text
+    assert "private-recipe-must-not-leak" not in text
+    assert "Кредиты возвращены" in text
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("refunded", [1.5, 0.0])
 async def test_nexus_image_failure_uses_short_honest_message(monkeypatch, refunded) -> None:
     provider_error = (

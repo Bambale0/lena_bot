@@ -9,7 +9,7 @@ import shutil
 import socket
 from pathlib import Path
 from urllib.parse import unquote, urlparse
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 from PIL import Image, ImageFilter, ImageOps
 
@@ -456,14 +456,22 @@ def delete_public_file(url: str | None) -> bool:
     return True
 
 
-def _download_public_url(url: str) -> tuple[bytes, str | None]:
+class _NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _download_public_url(
+    url: str, *, follow_redirects: bool = True, max_bytes: int | None = None,
+) -> tuple[bytes, str | None]:
     _reject_private_url_targets(url)
     req = Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; APIXMirror/1.0)"})
-    with urlopen(req, timeout=25) as resp:
+    open_url = urlopen if follow_redirects else build_opener(_NoRedirect()).open
+    with open_url(req, timeout=25) as resp:
         final_url = getattr(resp, "url", "") or resp.geturl()
         content_type = resp.headers.get("Content-Type")
         _reject_private_url_targets(final_url)
-        max_bytes = _mirror_size_limit(content_type)
+        max_bytes = min(max_bytes, _mirror_size_limit(content_type)) if max_bytes is not None else _mirror_size_limit(content_type)
         content_length = resp.headers.get("Content-Length")
         if content_length and int(content_length) > max_bytes:
             raise ValueError("mirror URL response is too large")
@@ -481,11 +489,15 @@ def _download_public_url(url: str) -> tuple[bytes, str | None]:
     return data, content_type
 
 
-async def download_public_url(url: str) -> tuple[bytes, str | None]:
+async def download_public_url(
+    url: str, *, follow_redirects: bool = True, max_bytes: int | None = None,
+) -> tuple[bytes, str | None]:
     """Download one public URL with SSRF and size protections; raise on failure."""
     if not url:
         raise ValueError("download URL is required")
-    return await asyncio.to_thread(_download_public_url, url)
+    return await asyncio.to_thread(
+        _download_public_url, url, follow_redirects=follow_redirects, max_bytes=max_bytes,
+    )
 
 
 async def mirror_url(url: str, *, subdir: str | None = None) -> str:

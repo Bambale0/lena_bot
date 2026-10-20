@@ -260,6 +260,7 @@ async def test_confirmed_failed_video_user_receives_refund_notification(monkeypa
     gen = _video()
     gen.status = GenerationStatus.failed
     gen.credits_spent = 70
+    gen.error_msg = "provider_rejected_request"
     gen.input_params = json.dumps({"refund_applied": True})
     fake_bot = SimpleNamespace(
         send_message=AsyncMock(return_value=SimpleNamespace(message_id=31)),
@@ -269,6 +270,7 @@ async def test_confirmed_failed_video_user_receives_refund_notification(monkeypa
     assert await miniapp_routes._notify_reconciled_video_failure_in_bot(
         user=SimpleNamespace(tg_id=12345), gen=gen,
     )
+    assert "отклонил запрос" in fake_bot.send_message.await_args.kwargs["text"]
     kwargs = fake_bot.send_message.await_args.kwargs
     assert kwargs["chat_id"] == 12345
     assert "70 кредитов" in kwargs["text"]

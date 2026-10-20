@@ -7,6 +7,8 @@ substituted with a different model when their configured provider fails.
 """
 from __future__ import annotations
 
+import asyncio
+import io
 import json
 import logging
 import mimetypes
@@ -16,6 +18,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 import httpx
+from PIL import Image
 
 try:
     from enum import StrEnum
@@ -23,7 +26,13 @@ except ImportError:
     class StrEnum(str, Enum):
         pass
 
-from api import comet_fallback, kieai_client, neironych_image_adapter, nexus_image_adapter
+from api import (
+    comet_fallback,
+    kieai_client,
+    neironych_image_adapter,
+    nexus_image_adapter,
+    public_files,
+)
 from api.kie_model_specs import IMAGE_SPECS, build_kie_input, resolve_model_for_reference
 from api.public_files import ensure_provider_safe_png_url, local_upload_path_from_url
 from core.config import settings
@@ -310,6 +319,40 @@ async def _upload_local_kie_reference(url: str, *, model_key: str) -> str | None
     )
 
 
+def _reference_image_type(data: bytes) -> tuple[str, str]:
+    with Image.open(io.BytesIO(data)) as image:
+        if image.format not in {"JPEG", "PNG", "WEBP"}:
+            raise ValueError("Unsupported reference image format")
+        content_type = Image.MIME[image.format]
+        extension = {"JPEG": "jpg", "PNG": "png", "WEBP": "webp"}[image.format]
+        image.verify()
+    return content_type, extension
+
+
+async def _upload_external_seedream_reference(url: str, *, model_key: str) -> str:
+    try:
+        # Never follow an untrusted reference redirect to an internal service.
+        data, _ = await public_files.download_public_url(
+            url, follow_redirects=False, max_bytes=30 * 1024 * 1024,
+        )
+        content_type, extension = await asyncio.to_thread(_reference_image_type, data)
+        uploaded = await kieai_client.upload_file_stream(
+            data, filename=f"reference.{extension}", content_type=content_type,
+            upload_path="images/apix-refs",
+        )
+        if not uploaded:
+            raise ValueError("Empty provider upload URL")
+        return uploaded
+    except Exception as exc:
+        logger.warning(
+            "Seedream reference admission failed model=%s error_type=%s",
+            model_key, type(exc).__name__,
+        )
+        raise ValueError(
+            "Не удалось загрузить исходное изображение. Загрузи фото заново и повтори запрос."
+        ) from exc
+
+
 async def _prepare_reference_urls_for_model(
     model: ImageModel,
     image_url: str | list[str] | None,
@@ -326,9 +369,14 @@ async def _prepare_reference_urls_for_model(
     prepared: list[str] = []
     for url in urls:
         local_path = local_upload_path_from_url(url)
-        if not local_path or not local_path.exists() or not local_path.is_file():
+        if local_path is None:
+            if resolved_model in {ImageModel.SEEDREAM_5_PRO_I2I.value, ImageModel.SEEDREAM_45_EDIT.value}:
+                prepared.append(await _upload_external_seedream_reference(url, model_key=resolved_model))
+                continue
             prepared.append(url)
             continue
+        if not local_path.is_file():
+            raise ValueError("Исходное изображение больше недоступно. Загрузи фото заново.")
         try:
             uploaded_url = await _upload_local_kie_reference(url, model_key=resolved_model)
         except Exception as exc:

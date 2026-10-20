@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from core.provider_errors import known_generation_user_error
+
 _SAFETY_MARKERS = (
     "image_safety",
     "prohibited_content",
@@ -20,6 +22,9 @@ _NO_IMAGE_MARKERS = (
 
 
 def image_generation_user_error(error: BaseException | str) -> str:
+    known = known_generation_user_error(error)
+    if known:
+        return known
     raw = str(error or "").lower()
     if any(marker in raw for marker in _SAFETY_MARKERS):
         return (

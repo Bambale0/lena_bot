@@ -1204,8 +1204,12 @@ async def _notify_reconciled_video_failure_in_bot(*, user: User, gen) -> bool:
         if refunded and credits > 0
         else "💳 Состояние баланса можно проверить в истории."
     )
+    from core.provider_errors import known_generation_user_error
+
+    reason = known_generation_user_error(getattr(gen, "error_msg", None))
     text = (
         "❌ <b>Видео не удалось создать.</b>\n"
+        + (reason + "\n\n" if reason else "")
         + finance_text
         + provider_task_reference(getattr(gen, "task_id", None))
     )
