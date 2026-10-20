@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from html.parser import HTMLParser
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -107,12 +108,29 @@ def test_repeat_router_registers_exact_confirm_cancel_before_open_compat() -> No
     assert callbacks.index(repeat_safe.cancel_repeat) < callbacks.index(repeat_safe.open_repeat)
 
 
+class _TelegramHTMLText(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+
+    def handle_data(self, data: str) -> None:
+        self.parts.append(data)
+
+
+def _telegram_text(message: str) -> str:
+    parser = _TelegramHTMLText()
+    parser.feed(message)
+    return "".join(parser.parts)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("callback_data", ["repeat_image_img_abc", "repeat_result_img_abc"])
-async def test_old_and_new_repeat_callbacks_open_confirmation_without_launch(callback_data: str) -> None:
+@pytest.mark.parametrize("prompt", ["portrait prompt", "Я" * 5000, "😀<&>" * 2000], ids=["short", "long", "emoji-html"])
+async def test_old_and_new_repeat_callbacks_open_confirmation_without_launch(callback_data: str, prompt: str) -> None:
     state = FakeState()
     call = _call(callback_data)
     generation = _image_source(
+        prompt=prompt,
         credits_spent=2.5,
         image_session_id=None,
         source_feed_gen_id=None,
@@ -131,18 +149,30 @@ async def test_old_and_new_repeat_callbacks_open_confirmation_without_launch(cal
     launch.assert_not_awaited()
     call.message.answer.assert_awaited_once()
     assert state.data["repeat_source_generation_id"] == 42
-    assert state.data["repeat_prompt"] == "portrait prompt"
+    assert state.data["repeat_prompt"] == prompt
     assert state.data["repeat_cost"] == 2.5
+    message = call.message.answer.await_args.args[0]
+    visible = _telegram_text(message)
+    assert len(visible.encode("utf-16-le")) // 2 <= 4096
+    assert "Списание произойдёт только после подтверждения запуска." in visible
+    markup = call.message.answer.await_args.kwargs["reply_markup"]
+    assert any(button.callback_data.startswith("repeat_run_confirm_") for row in markup.inline_keyboard for button in row)
+    if prompt == "portrait prompt":
+        assert prompt in visible
+    else:
+        assert "сокращ" in visible.lower()
+        assert "<" not in message.replace("<b>", "").replace("</b>", "")
 
 
 @pytest.mark.asyncio
-async def test_confirm_launches_once_and_carries_repeat_parent_metadata() -> None:
+@pytest.mark.parametrize("prompt", ["portrait prompt", "😀<&>" * 2000], ids=["short", "long"])
+async def test_confirm_launches_once_and_carries_repeat_parent_metadata(prompt: str) -> None:
     state = FakeState(
         {
             "repeat_source_generation_id": 42,
             "repeat_raw_task_id": "img_abc",
             "repeat_model_key": "nano-banana-pro",
-            "repeat_prompt": "portrait prompt",
+            "repeat_prompt": prompt,
             "repeat_aspect_ratio": "9:16",
             "repeat_quality": "basic",
             "repeat_count": 1,
@@ -178,6 +208,7 @@ async def test_confirm_launches_once_and_carries_repeat_parent_metadata() -> Non
     launch_mock.assert_awaited_once()
     kwargs = captured["kwargs"]
     context = captured["context"]
+    assert kwargs["prompt"] == prompt
     assert kwargs["parent_generation_id"] == 42
     assert kwargs["source_feed_gen_id"] == 100
     assert kwargs["action_type"].value == "repeat"
@@ -268,3 +299,62 @@ async def test_admin_repeat_uses_zero_credit_override_only_after_confirm() -> No
         await repeat_safe.confirm_repeat(call, AsyncMock(), state, user, AsyncMock())
 
     assert captured["context"].credits_override == 0.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("protected_feed", [False, True], ids=["ordinary", "author-feed"])
+@pytest.mark.parametrize("prompt", ["<b>образ</b> & свет", "Я" * 4000, "😀<&>" * 1000], ids=["html", "long", "emoji-html"])
+async def test_edit_repeat_keeps_full_text_and_bounds_confirmation(prompt: str, protected_feed: bool) -> None:
+    state = FakeState({
+        "repeat_raw_task_id": "img_abc",
+        "repeat_model_key": "nano-banana-pro",
+        "repeat_source_feed_gen_id": 100 if protected_feed else None,
+        "repeat_prompt_hidden": protected_feed,
+        "repeat_cost": 2.5,
+        "repeat_reference_required": True,
+        "repeat_missing_references": ["https://example.test/missing.jpg"],
+    })
+    message = SimpleNamespace(text=prompt, answer=AsyncMock())
+
+    await repeat_safe.save_repeat_prompt(message, state)
+
+    message.answer.assert_awaited_once()
+    visible = _telegram_text(message.answer.await_args.args[0])
+    assert len(visible.encode("utf-16-le")) // 2 <= 4096
+    assert state.data["repeat_prompt"] == prompt
+    assert state.data["repeat_feed_change_request"] == (prompt if protected_feed else None)
+    assert "Списание произойдёт только после подтверждения запуска." in visible
+    assert "Часть старых фото уже очищена" in visible
+    assert "Для этой модели сначала отправьте фото" in visible
+    if protected_feed:
+        assert "🔒 Скрытый промпт автора" in visible
+        assert "✏️ Изменения:" in visible
+    if len(prompt) == 4000:
+        assert "сокращён" in visible
+    else:
+        assert prompt in visible
+        assert "<b>образ</b>" not in message.answer.await_args.args[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flow", [None, "pinterest"])
+async def test_repeat_confirmation_never_exposes_long_hidden_prompt(flow: str | None) -> None:
+    import json
+
+    secret = "SECRET AUTHOR PROMPT " * 500
+    generation = _image_source(
+        prompt=secret, image_session_id=None, source_feed_gen_id=None,
+        input_params=json.dumps({"hidden_prompt": True, "flow": flow}),
+    )
+    state = FakeState()
+    call = _call("repeat_image_img_abc")
+    with patch.object(repeat_safe, "get_repeat_task_by_any_id", AsyncMock(return_value=generation)), patch.object(
+        repeat_safe.repo, "resolve_image_model_cost", AsyncMock(return_value=SimpleNamespace(credits=2.5))
+    ), patch.object(repeat_safe, "_is_admin", return_value=False):
+        await repeat_safe.open_repeat(call, AsyncMock(), state, SimpleNamespace(id=5, tg_id=777), AsyncMock())
+
+    visible = _telegram_text(call.message.answer.await_args.args[0])
+    assert "SECRET" not in visible
+    assert "Скрытый трендовый промпт" in visible
+    assert state.data["repeat_prompt"] == secret
+    assert len(visible.encode("utf-16-le")) // 2 <= 4096

@@ -101,3 +101,11 @@ node --check landing/js/generation-parity.js
 ```
 
 Additional contract tests should assert that active backend capabilities have a representable UI/payload path on every supported surface.
+
+### Telegram repeat confirmation previews
+
+The text bot shows a shortened preview when a saved prompt or feed-edit instruction
+would exceed Telegram's message limit. The price, reference warnings and launch
+buttons stay available. The complete text is retained for generation; author and
+Pinterest prompts remain hidden. Site and Mini App repeat setup renders in the
+browser and is not subject to this Telegram message limit.

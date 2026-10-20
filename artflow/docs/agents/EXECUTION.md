@@ -1806,3 +1806,15 @@ PR #282 review amendment: reject unknown public Wan video input provenance befor
 Second independent P2 review finding fixed: Telegram Wan quote now catches OSError/RuntimeError from media preflight and returns a retry message before debit. Four failing-then-passing tests cover both models/error classes and no save/debit/supplier calls; 52 new cases total. Full Ruff passed, related Wan set85passed. These review amendments change only pre-charge failure handling, not payment execution or supplier retries.
 
 Final review-amended local full suite: 3484 passed / 64 dedicated-service skips / 0 failed; 3 existing warnings. These cover the final 52-case regression module. Exact-head GitHub CI must prove its actual PostgreSQL/Nginx checks before release.
+
+## 2026-10-20 — Telegram repeat confirmation length
+
+Baseline: `7277ea5`; branch `fix/telegram-repeat-message-length`, isolated worktree. Production traceback at 14:39:49 MSK shows `open_repeat -> _prepare_repeat -> answer(_confirmation_text)` rejected as `message is too long`. Renderer includes entire saved prompt; feed edits can also exceed the message budget. Existing handler tests mock Telegram and miss this constraint.
+
+Acceptance: opening/editing repeat sends valid escaped HTML within Telegram's 4096 UTF-16-unit text budget for supported model/settings. Short text stays complete; previews are marked when shortened. Full source/edited prompts stay in FSM and launch. Hidden author/Pinterest prompts, prices, reference warnings, authorization and idempotency remain intact.
+
+Parity: telegram_bot fixed here; site (`landing/js/prototype-premium.js` repeat/variant action) and mini_app repeat setup render browser text, not this Telegram confirmation, so this protocol limit is inapplicable. No schema, integration, credential, business configuration, balance mutation or paid provider request. Message length is a protocol constraint. Existing error logging remains the signal; no prompts logged.
+
+Steps: 1. [x] runtime/code/tests/CI audit; 2. [x] RED: original 2 short cases pass, 4 oversized Cyrillic/emoji cases fail at the parsed-message length assertion; 3. [x] bounded previews and Unicode/feed-edit/full-launch/hidden regressions (23 handler tests pass); 4. [x] 476 focused repeat/reference/ownership/identity/Wan tests pass, full Ruff, py_compile and diff checks pass; [ ] independent review; 5. [ ] required CI, native auto-merge, exact-SHA autodeploy and health.
+
+Skills: `.clinerules` systematic-debugging/requesting-code-review; Bambale0/skills TDD; claw QA checklist; wondelai working-with-legacy-code test seams. Anthropic webapp-testing inspected, inapplicable to Telegram rendering. Existing handler test seams are within the user's fix authorization.
