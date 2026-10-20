@@ -49,6 +49,8 @@ class Settings(BaseSettings):
 
     # kie.ai
     KIE_AI_KEY: str = ""
+    # Whole reference batch must finish before the shortest generation ingress timeout.
+    SEEDREAM_REFERENCE_TIMEOUT_SECONDS: float = Field(default=30.0, ge=1.0, le=45.0)
     SEEDANCE_PRIMARY_PROVIDER: Literal["kieai", "neironych"] = "neironych"
     SEEDANCE_UNCERTAIN_ROUTE_COOLDOWN_SECONDS: int = Field(default=1800, ge=180, le=86400)
     MUSIC_RECONCILE_INTERVAL_SECONDS: int = Field(default=300, ge=30, le=3600)

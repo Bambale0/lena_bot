@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import io
+
 import pytest
+from PIL import Image
 
 from api import image_service, public_files
 from api.image_service import ImageModel, _build_input, normalize_quality_for_aspect_ratio
 
-JPEG = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01"
+_jpeg = io.BytesIO()
+Image.new("RGB", (8, 8), "red").save(_jpeg, format="JPEG")
+JPEG = _jpeg.getvalue()
 
 
 def test_square_4k_preserves_gpt_but_normalizes_legacy_nano() -> None:

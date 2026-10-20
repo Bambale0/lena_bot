@@ -155,6 +155,8 @@ async def test_seedream_5_pro_routes_to_kie_not_nexus(monkeypatch, model: ImageM
     kie_create = AsyncMock(return_value={"code": 200, "data": {"taskId": "kie_seedream_task"}})
     monkeypatch.setattr(image_service.nexus_image_adapter, "create_nexus_image_task", nexus_create)
     monkeypatch.setattr(image_service.kieai_client, "create_task", kie_create)
+    upload = AsyncMock(return_value="https://kie-files.test/staged.png")
+    monkeypatch.setattr(image_service.kieai_client, "upload_reference_image_url", upload)
 
     result = await image_service.generate_image(
         model,
@@ -176,7 +178,10 @@ async def test_seedream_5_pro_routes_to_kie_not_nexus(monkeypatch, model: ImageM
     assert payload["input"]["quality"] == "high"
     assert payload["input"]["output_format"] == "png"
     if refs:
-        assert payload["input"]["image_urls"] == refs
+        assert payload["input"]["image_urls"] == ["https://kie-files.test/staged.png"]
+        upload.assert_awaited_once()
+    else:
+        upload.assert_not_awaited()
 
 
 @pytest.mark.asyncio

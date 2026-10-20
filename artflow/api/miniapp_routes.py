@@ -37,7 +37,7 @@ from api import (
     video_service,
 )
 from api.assistant_service import generate_assistant_reply, generate_prompt_moderation_decision
-from api.image_errors import image_generation_user_error
+from api.image_errors import ImageReferenceUnavailable, image_generation_user_error
 from api.image_http_failure import is_http_5xx, settle_image_http_5xx
 from api.image_service import ImageModel, normalize_quality_for_aspect_ratio
 from api.kie_webhook import extract_error, extract_status
@@ -1204,8 +1204,12 @@ async def _notify_reconciled_video_failure_in_bot(*, user: User, gen) -> bool:
         if refunded and credits > 0
         else "💳 Состояние баланса можно проверить в истории."
     )
+    from core.provider_errors import known_generation_user_error
+
+    reason = known_generation_user_error(getattr(gen, "error_msg", None))
     text = (
         "❌ <b>Видео не удалось создать.</b>\n"
+        + (reason + "\n\n" if reason else "")
         + finance_text
         + provider_task_reference(getattr(gen, "task_id", None))
     )
@@ -3064,6 +3068,12 @@ async def create_image_generation(
             primary_provider=image_primary,
             before_nexus_submit=persist_nexus_submission,
         )
+    except ImageReferenceUnavailable as exc:
+        await repo.fail_generation_and_refund(
+            session, gen.id, str(exc), refund_note="image:reference_admission_failed",
+            require_missing_task_id=True,
+        )
+        raise HTTPException(status_code=422, detail=image_generation_user_error(exc)) from exc
     except nexus_image_adapter.NexusImageSubmissionUnknown as exc:
         settlement = await settle_image_http_5xx(
             session, gen.id, exc, provider="nexus",

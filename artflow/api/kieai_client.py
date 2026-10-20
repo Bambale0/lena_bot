@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -249,6 +250,48 @@ async def upload_file_stream(
             logger.warning("kie.ai file upload error: %s (attempt %d)", e, attempt + 1)
         await asyncio.sleep(1.5 ** attempt)
     raise RuntimeError("kie.ai: max retries exceeded for file upload")
+
+
+async def upload_reference_image_url(url: str) -> str:
+    """Stage remote input via KIE's free URL Upload API, never fetch it on APIX.
+
+    Contract: https://docs.kie.ai/file-upload-api/upload-file-url
+    A successful upload is required before submitting any paid generation.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError("Invalid public reference URL")
+    for attempt in range(3):
+        try:
+            response = await get_upload_client().post(
+                "/api/file-url-upload",
+                json={"fileUrl": url, "uploadPath": "images/apix-refs"},
+            )
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, dict) or payload.get("code") != 200 or payload.get("success") is False:
+                raise ValueError("KIE reference URL upload rejected")
+            data = payload.get("data")
+            if not isinstance(data, dict):
+                raise ValueError("KIE reference URL upload metadata missing")
+            size = data.get("fileSize")
+            if (isinstance(size, bool) or not isinstance(size, int)
+                    or not 0 < size <= 30 * 1024 * 1024
+                    or data.get("mimeType") not in {"image/jpeg", "image/png", "image/webp"}):
+                raise ValueError("KIE reference image type or size invalid")
+            uploaded = data.get("downloadUrl")
+            if not isinstance(uploaded, str) or not uploaded.startswith("https://"):
+                raise ValueError("KIE reference URL upload returned no HTTPS URL")
+            return uploaded
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code < 500:
+                raise
+            logger.warning("KIE reference URL upload HTTP %s attempt=%s", exc.response.status_code, attempt + 1)
+        except httpx.RequestError as exc:
+            logger.warning("KIE reference URL upload transport=%s attempt=%s", type(exc).__name__, attempt + 1)
+        if attempt < 2:
+            await asyncio.sleep(1.5 ** attempt)
+    raise RuntimeError("KIE reference URL upload exhausted retries")
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
