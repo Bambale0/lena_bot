@@ -1,3 +1,4 @@
+import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
@@ -71,4 +72,30 @@ async def test_corrupt_local_image_never_reaches_upload_or_paid_task(monkeypatch
             image_url="https://example.test/static/upload/bad.png",
         )
     upload.assert_not_awaited()
+    create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_reference_staging_deadline_cancels_before_paid_submission(monkeypatch):
+    canceled = asyncio.Event()
+
+    async def stalled_upload(_url):
+        try:
+            await asyncio.Event().wait()
+        finally:
+            canceled.set()
+
+    monkeypatch.setattr(image_service.kieai_client, "upload_reference_image_url", stalled_upload)
+    # Test the real deadline while keeping the regression fast.
+    monkeypatch.setattr(image_service, "settings", image_service.settings.model_copy(
+        update={"SEEDREAM_REFERENCE_TIMEOUT_SECONDS": 0.01},
+    ))
+    create = AsyncMock()
+    monkeypatch.setattr(image_service.kieai_client, "create_task", create)
+    with pytest.raises(ValueError, match="загруз"):
+        await asyncio.wait_for(image_service.generate_image(
+            image_service.ImageModel.SEEDREAM_5_PRO_I2I, "edit",
+            image_url="https://remote.test/stalled.jpg",
+        ), timeout=0.5)
+    assert canceled.is_set()
     create.assert_not_awaited()

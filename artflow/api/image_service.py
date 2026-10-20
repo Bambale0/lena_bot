@@ -545,7 +545,22 @@ async def generate_image(
         logger.info("NexusAPI image task %s: %s", model.value, task_id)
         return ImageResult(is_async=True, task_id=task_id, provider="nexus")
 
-    prepared_image_url = await _prepare_reference_urls_for_model(model, image_url)
+    if model in {
+        ImageModel.SEEDREAM_5_PRO_T2I, ImageModel.SEEDREAM_5_PRO_I2I,
+        ImageModel.SEEDREAM_45, ImageModel.SEEDREAM_45_EDIT,
+    } and _reference_list(image_url):
+        try:
+            prepared_image_url = await asyncio.wait_for(
+                _prepare_reference_urls_for_model(model, image_url),
+                timeout=settings.SEEDREAM_REFERENCE_TIMEOUT_SECONDS,
+            )
+        except TimeoutError as exc:
+            logger.warning("Seedream reference batch deadline exceeded model=%s", model.value)
+            raise ImageReferenceUnavailable(
+                "Не удалось загрузить исходное изображение. Загрузи фото заново и повтори запрос.",
+            ) from exc
+    else:
+        prepared_image_url = await _prepare_reference_urls_for_model(model, image_url)
     resolved_model, inp = _build_input(
         model,
         prompt,

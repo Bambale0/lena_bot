@@ -9,6 +9,12 @@ and an HTTPS download URL before a generation task is submitted. Missing,
 unreachable or invalid media must be uploaded again. The adapter never submits a task with the original external URL after staging
 fails. File staging is free according to the [KIE upload documentation](https://docs.kie.ai/file-upload-api/quickstart); the [URL upload contract](https://docs.kie.ai/file-upload-api/upload-file-url) specifies request fields and response metadata.
 
+The whole reference batch has a 30-second deadline, configured by the typed
+`SEEDREAM_REFERENCE_TIMEOUT_SECONDS` setting (range 1–45 seconds). Expiration
+cancels staging before a paid task can be submitted and uses the same atomic
+admission-failure refund. KIE URL uploads omit `fileName` so the provider generates
+separate names rather than overwriting same-format references.
+
 Site, Mini App, realtime events and Telegram notices share safe explanations for
 the verified copyright, missing-image and `provider_rejected_request` failures.
 Hidden recipes remain private: only fixed explanations are returned, while raw
