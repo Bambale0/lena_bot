@@ -3,6 +3,10 @@ from __future__ import annotations
 from core.provider_errors import known_generation_user_error
 
 
+class ImagePromptTooLong(ValueError):
+    """Rendered prompt rejected before provider admission."""
+
+
 class ImageReferenceUnavailable(ValueError):
     """Reference admission failed before any paid generation was submitted."""
 
@@ -26,6 +30,8 @@ _NO_IMAGE_MARKERS = (
 
 
 def image_generation_user_error(error: BaseException | str) -> str:
+    if isinstance(error, ImagePromptTooLong):
+        return str(error)
     known = known_generation_user_error(error)
     if known:
         return known

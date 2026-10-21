@@ -13,7 +13,7 @@ const API_BASE = "/api/v1";
 const PINTEREST_SERVICE_EVENT = "apix:open-pinterest-service";
 const PINTEREST_SERVICE_ROOT_ID = "apix-pinterest-service-root";
 const ACCEPTED_PINTEREST_PHOTOS = "image/jpeg,image/png,image/webp,image/heic,image/heif,image/avif,.jpg,.jpeg,.png,.webp,.heic,.heif,.avif";
-const FALLBACK_MAX_EXTRA_IDENTITY_PHOTOS = 5;
+const FALLBACK_MAX_EXTRA_IDENTITY_PHOTOS = 2;
 
 type ServicePhase = "idle" | "uploading" | "generating" | "error";
 
@@ -219,7 +219,7 @@ function PinterestServiceFlow({
   const extraInputRef = useRef<HTMLInputElement | null>(null);
   const previewUrls = useRef<Set<string>>(new Set());
 
-  const maxExtraPhotos = Number(info.max_identity_angles || FALLBACK_MAX_EXTRA_IDENTITY_PHOTOS);
+  const maxExtraPhotos = Number(info.max_identity_angles ?? FALLBACK_MAX_EXTRA_IDENTITY_PHOTOS);
   const minHeight = Number(info.height_min_cm || 120);
   const maxHeight = Number(info.height_max_cm || 230);
   const minWeight = Number(info.weight_min_kg || 30);

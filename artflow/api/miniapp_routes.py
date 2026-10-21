@@ -37,8 +37,13 @@ from api import (
     video_service,
 )
 from api.assistant_service import generate_assistant_reply, generate_prompt_moderation_decision
-from api.image_errors import ImageReferenceUnavailable, image_generation_user_error
+from api.image_errors import (
+    ImagePromptTooLong,
+    ImageReferenceUnavailable,
+    image_generation_user_error,
+)
 from api.image_http_failure import is_http_5xx, settle_image_http_5xx
+from api.image_prompt_limits import validate_image_prompt
 from api.image_service import ImageModel, normalize_quality_for_aspect_ratio
 from api.kie_webhook import extract_error, extract_status
 from api.kieai_client import KieSubmissionOutcomeUnknown
@@ -2854,6 +2859,13 @@ async def public_feed_post(
 
 # ── image generation ──────────────────────────────────────────────────────────
 
+def _validate_image_prompt_request(model_key: str, prompt: str) -> None:
+    try:
+        validate_image_prompt(model_key, prompt)
+    except ImagePromptTooLong as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.post("/generate/image", response_model=GenerationOut, status_code=202)
 async def create_image_generation(
     body: ImageGenRequest,
@@ -2897,6 +2909,8 @@ async def create_image_generation(
 
     if body.prompt_id is None and body.trend_user_values:
         raise HTTPException(status_code=422, detail="Personalization values require a trend")
+
+    _validate_image_prompt_request(body.model, user_prompt)
 
     prompt_meta = {
         "prompt_id": getattr(prompt_source, "id", None),
@@ -4352,6 +4366,7 @@ async def quote_feed_remix(
         repeat_prompt = build_feed_image_recipe_prompt(
             repeat_prompt, identity_instruction=instruction,
         )
+    _validate_image_prompt_request(body.model, repeat_prompt)
     gen_type: str
     count = 1
     edit_quote = {}
@@ -4499,6 +4514,7 @@ async def remix_feed_post(
             "feed_original_recipe_submit source_gen=%s user=%s model=%s references=%s",
             gen_id, user.id, body.model, len(repeat_refs),
         )
+    _validate_image_prompt_request(body.model, repeat_prompt)
     feed_context = (
         {FEED_REMIX_CONTEXT_KEY: (
             feed_image_recipe_context(

@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from aiogram.methods import SendVideo
 from aiogram.types import Message
 from PIL import Image
 
@@ -334,7 +335,8 @@ def test_feed_caption() -> None:
 @pytest.mark.asyncio
 async def test_show_feed_card_by_id_sends_video_for_video_post() -> None:
     holder = MagicMock(spec=Message)
-    holder.answer_video = AsyncMock()
+    holder.answer_video = MagicMock(return_value=SendVideo(chat_id=1, video="https://example.com/video.mp4"))
+    holder.bot = AsyncMock()
     holder.answer = AsyncMock()
     holder.photo = None
     holder.video = None
@@ -361,4 +363,6 @@ async def test_show_feed_card_by_id_sends_video_for_video_post() -> None:
     )
     with patch("bot.handlers.feed.repo", AsyncMock(get_feed_generation_card=AsyncMock(return_value=card))):
         await feed.show_feed_card_by_id(message=holder, session=AsyncMock(), gen_id=42)
-    holder.answer_video.assert_awaited_once()
+    holder.answer_video.assert_called_once()
+    holder.bot.assert_awaited_once()
+    assert holder.bot.await_args.kwargs == {"request_timeout": 90}

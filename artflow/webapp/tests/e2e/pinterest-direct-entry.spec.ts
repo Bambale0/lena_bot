@@ -20,7 +20,7 @@ const pinterestService = {
   badge: "Новинка",
   price_credits: 2,
   quality: "2K",
-  max_identity_angles: 5,
+  max_identity_angles: 2,
   height_min_cm: 120,
   height_max_cm: 230,
   weight_min_kg: 30,

@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api import image_service, neironych_image_adapter, nexus_image_adapter
 from api.image_errors import telegram_image_error_text
 from api.image_http_failure import is_http_5xx, settle_image_http_5xx
+from api.image_prompt_limits import validate_image_prompt
 from api.image_service import ImageModel, normalize_quality_for_aspect_ratio
 from api.kie_model_specs import IMAGE_SPECS, KieReferenceType
 from api.photo_prompt_service import generate_prompt_from_photo
@@ -64,7 +65,7 @@ from bot.utils.telegram_images import (
     send_image_to_message,
     send_original_document_to_message,
 )
-from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
+from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message, split_text_chunks
 from core.config import settings
 from core.feed_recipe_identity_policy import get_feed_recipe_identity_instruction
 from core.feed_remix_prompt import (
@@ -1425,6 +1426,12 @@ async def _launch_session_generation(
                 await source_message.answer(str(exc), reply_markup=main_menu_kb())
                 return False
             reference_url = refs[0] if len(refs) == 1 else refs
+    try:
+        validate_image_prompt(image_session.model, prompt)
+    except ValueError as exc:
+        await source_message.answer(str(exc), reply_markup=main_menu_kb())
+        return False
+
     # Validate the exact deduplicated set before creating or charging any task.
     # Every Telegram image launch (including legacy/review/repeat) crosses here.
     refs = [reference_url] if isinstance(reference_url, str) else list(reference_url or [])
@@ -4193,10 +4200,14 @@ async def cb_gen_prompt(call: CallbackQuery, session: AsyncSession, db_user: Use
         await safe_answer_callback(call, "❌ Промпт пустой")
         return
 
-    await call.message.answer(  # type: ignore[union-attr]
-        f"📋 <b>Промпт</b>\n\n<code>{html.escape(prompt)}</code>",
-        reply_markup=back_to_menu_kb(),
-    )
+    # Split the raw text, then escape each complete HTML block. A 2000-codepoint
+    # budget also fits 4000 UTF-16 units when every character is an emoji.
+    chunks = split_text_chunks(prompt, max_chars=2000)
+    for index, chunk in enumerate(chunks):
+        await call.message.answer(  # type: ignore[union-attr]
+            f"📋 <b>Промпт</b>\n\n<code>{html.escape(chunk)}</code>",
+            reply_markup=back_to_menu_kb() if index == len(chunks) - 1 else None,
+        )
     await safe_answer_callback(call, "Промпт отправлен")
 
 

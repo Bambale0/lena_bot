@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
 from dataclasses import dataclass
@@ -10,6 +11,9 @@ from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import BufferedInputFile, InputMediaPhoto, Message, URLInputFile
 from PIL import Image, ImageOps, UnidentifiedImageError
+
+from api.public_files import local_upload_path_from_url
+from bot.utils.telegram_media import local_media_path
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +74,15 @@ def _encode_jpeg_under_limit(image: Image.Image, *, target_bytes: int) -> bytes:
 
 
 async def download_image_bytes(url: str, *, timeout_seconds: int = 20) -> bytes | None:
+    path = local_media_path(url, max_bytes=30 * 1024 * 1024)
+    if path:
+        try:
+            return await asyncio.to_thread(path.read_bytes)
+        except OSError as exc:
+            logger.warning("Local image read failed error_type=%s", type(exc).__name__)
+            return None
+    if local_upload_path_from_url(url) is not None:
+        return None
     try:
         timeout = aiohttp.ClientTimeout(total=timeout_seconds)
         async with aiohttp.ClientSession(timeout=timeout) as http:
@@ -77,7 +90,15 @@ async def download_image_bytes(url: str, *, timeout_seconds: int = 20) -> bytes 
                 if resp.status != 200:
                     logger.warning("Failed to download image url=%s status=%s", url, resp.status)
                     return None
-                return await resp.read()
+                limit = 30 * 1024 * 1024
+                if resp.content_length is not None and resp.content_length > limit:
+                    return None
+                data = bytearray()
+                async for chunk in resp.content.iter_chunked(64 * 1024):
+                    data.extend(chunk)
+                    if len(data) > limit:
+                        return None
+                return bytes(data)
     except Exception as exc:
         logger.warning("Failed to download image url=%s error=%s", url, exc)
         return None
