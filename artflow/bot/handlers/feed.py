@@ -17,7 +17,7 @@ from aiogram.types import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.public_files import public_url_is_available
+from api.public_files import local_upload_path_from_url, public_url_is_available
 from bot.keyboards.feed import empty_feed_kb, feed_card_kb
 from bot.keyboards.main_menu import back_to_menu_kb
 from bot.keyboards.models import IMAGE_CAPS, VIDEO_CAPS, feed_video_models_kb
@@ -228,11 +228,13 @@ async def _show_feed_card(
             logger.debug("Failed to edit feed media gen=%s: %s", card.generation.id, e)
 
     local_video = local_media_path(result_url) if result_url and is_video else None
-    if result_url and is_video and getattr(holder, "video", None) and local_video:
+    if result_url and is_video and getattr(holder, "video", None) and (
+        local_video or local_upload_path_from_url(result_url) is None
+    ):
         try:
             await holder.edit_media(
                 media=InputMediaVideo(
-                    media=FSInputFile(local_video),
+                    media=FSInputFile(local_video) if local_video else result_url,
                     caption=caption,
                     parse_mode="HTML",
                 ),

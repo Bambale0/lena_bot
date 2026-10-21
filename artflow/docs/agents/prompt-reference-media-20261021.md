@@ -116,3 +116,13 @@ Delivery PR: https://github.com/Bambale0/lena_bot/pull/288 . Required exact-head
 checks, native squash auto-merge and merge-SHA Production Autodeploy are pending.
 Final delivery evidence will be attached to this PR after runtime verification.
 No migration, secret, price or mutable business configuration change is required.
+
+GitHub automated review subsequently identified two P2 delivery regressions:
+external-URL video cards skipped the existing in-place edit, and aiogram method
+shortcut kwargs did not set transport timeout. Three RED assertions reproduced
+both defects (including real aiogram Message objects with fake transport).
+Restore external-video edits while preserving local-file guards; call the Bot
+transport with request_timeout=90 for video/document sends. Both independent
+reviewers found zero remaining amendment issues (34 / 7 tests independently).
+Full amended backend suite: 3646 passed, same three existing warnings (36.99s).
+Ruff and diff checks pass. Exact-head CI must rerun after this amendment.

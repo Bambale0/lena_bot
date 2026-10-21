@@ -3,7 +3,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import FSInputFile
+from aiogram.methods import SendDocument, SendVideo
+from aiogram.types import Chat, FSInputFile, Message
 
 from api import public_files
 from bot.handlers import feed, marketplace
@@ -35,7 +36,8 @@ async def test_feed_uploads_surviving_large_local_video_without_public_url_fetch
     path = tmp_path / "result.mp4"
     with path.open("wb") as f:
         f.truncate(21 * 1024 * 1024)
-    holder = SimpleNamespace(photo=None, video=None, answer_video=AsyncMock(), answer=AsyncMock())
+    transport = AsyncMock()
+    holder = Message(message_id=1, date=0, chat=Chat(id=7, type="private")).as_(transport)
     await feed._show_feed_card(
         holder=holder,
         card=video_card("https://example.test/static/upload/result.mp4"),
@@ -43,27 +45,23 @@ async def test_feed_uploads_surviving_large_local_video_without_public_url_fetch
         index=0,
         total=1,
     )
-    media = holder.answer_video.await_args.args[0]
-    assert isinstance(media, FSInputFile)
-    assert media.path == path
-    holder.answer.assert_not_awaited()
+    transport.assert_awaited_once()
+    method = transport.await_args.args[0]
+    assert isinstance(method, SendVideo)
+    assert isinstance(method.video, FSInputFile)
+    assert method.video.path == path
+    assert transport.await_args.kwargs == {"request_timeout": 90}
+    assert "request_timeout" not in method.model_extra
 
 
 @pytest.mark.asyncio
 async def test_failed_local_video_preview_still_delivers_original_document(monkeypatch, tmp_path):
     monkeypatch.setattr(public_files, "UPLOAD_ROOT", tmp_path)
     (tmp_path / "result.mp4").write_bytes(b"synthetic-mp4")
-    holder = SimpleNamespace(
-        photo=None,
-        video=None,
-        answer_video=AsyncMock(
-            side_effect=TelegramBadRequest(
-                method="sendVideo", message="failed to get HTTP URL content"
-            )
-        ),
-        answer_document=AsyncMock(),
-        answer=AsyncMock(),
-    )
+    transport = AsyncMock(side_effect=[
+        TelegramBadRequest(method="sendVideo", message="upload failed"), None,
+    ])
+    holder = Message(message_id=1, date=0, chat=Chat(id=7, type="private")).as_(transport)
     await feed._show_feed_card(
         holder=holder,
         card=video_card("https://example.test/static/upload/result.mp4"),
@@ -71,9 +69,13 @@ async def test_failed_local_video_preview_still_delivers_original_document(monke
         index=0,
         total=1,
     )
-    holder.answer_document.assert_awaited_once()
-    assert isinstance(holder.answer_document.await_args.args[0], FSInputFile)
-    holder.answer.assert_not_awaited()
+    assert transport.await_count == 2
+    method = transport.await_args.args[0]
+    assert isinstance(method, SendDocument)
+    assert isinstance(method.document, FSInputFile)
+    assert all(call.kwargs == {"request_timeout": 90} for call in transport.await_args_list)
+    assert "request_timeout" not in method.model_extra
+
 
 
 @pytest.mark.asyncio
@@ -150,3 +152,19 @@ def test_local_media_upload_rejects_oversize_and_path_escape(tmp_path, monkeypat
         private.write_bytes(b"private bytes")
         path.symlink_to(private)
     assert local_media_path("https://example.test/static/upload/result.mp4") is None
+
+
+@pytest.mark.asyncio
+async def test_external_feed_video_edits_existing_card_in_place():
+    holder = SimpleNamespace(
+        photo=None, video=object(), edit_media=AsyncMock(), answer_video=AsyncMock(),
+        answer=AsyncMock(),
+    )
+    url = "https://provider.test/video.mp4"
+    await feed._show_feed_card(
+        holder=holder, card=video_card(url), source="all", index=1, total=2,
+    )
+    holder.edit_media.assert_awaited_once()
+    assert holder.edit_media.await_args.kwargs["media"].media == url
+    holder.answer_video.assert_not_awaited()
+    holder.answer.assert_not_awaited()

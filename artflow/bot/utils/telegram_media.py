@@ -42,8 +42,9 @@ async def send_video_to_message(
         return False
     media = FSInputFile(path) if path else result_url
     try:
-        await message.answer_video(
-            media, caption=caption, reply_markup=reply_markup, request_timeout=90
+        await message.bot(
+            message.answer_video(media, caption=caption, reply_markup=reply_markup),
+            request_timeout=90,
         )
         logger.info(
             "Telegram media delivered gen=%s mode=%s",
@@ -60,8 +61,11 @@ async def send_video_to_message(
         )
     if path:
         try:
-            await message.answer_document(
-                FSInputFile(path), caption=caption, reply_markup=reply_markup, request_timeout=90
+            await message.bot(
+                message.answer_document(
+                    FSInputFile(path), caption=caption, reply_markup=reply_markup
+                ),
+                request_timeout=90,
             )
             logger.info("Telegram media delivered gen=%s mode=multipart-document", generation_id)
             return True
