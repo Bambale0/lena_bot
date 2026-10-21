@@ -93,3 +93,11 @@ assert the intentional text-card contract, with new handler regressions proving
 buttons and truthful missing-preview text. No tests removed or gate weakened.
 Provider inventory initially lacked synthetic DATABASE_URL; rerun with test-only
 DSN. Full rerun follows these environment/expected-behavior corrections.
+
+Independent review: Standards found zero issues across 21 files and independently
+ran 28 focused tests. Spec reproduced one P2 gap: shared web/Mini App feed remix
+charged before the image adapter rejected a long rendered recipe. RED handler
+regression reproduces it on both surfaces; the final fully rendered feed prompt
+now uses the same pre-charge HTTP422 validator (including the read-only quote).
+Full-suite corrected-environment run passed before this amendment; repeat focused
+and full checks plus amended review are required before queueing merge.
