@@ -187,7 +187,7 @@ def running_nginx(tmp_path):
                 if attempt == 49:
                     pytest.fail("Synthetic Nginx did not start")
                 time.sleep(0.1)
-        yield http_port, tls_port
+        yield http_port, tls_port, tmp_path / "synthetic-cert.pem"
     finally:
         subprocess.run(["docker", "stop", "--time", "1", container], check=True,
                        capture_output=True, timeout=15)
@@ -208,6 +208,12 @@ def test_active_hosts_serve_http01_without_redirect(running_nginx, host):
         assert response.read() == b"acme-fixture-ok"
     finally:
         connection.close()
+    if host != "archibot.xn--e1aikcel5c5a.online":  # This legacy route is HTTP-only.
+        context = ssl.create_default_context(cafile=str(running_nginx[2]))
+        context.check_hostname = False  # All synthetic certificates use a fixture CN.
+        with socket.create_connection(("127.0.0.1", running_nginx[1]), timeout=5) as raw:
+            with context.wrap_socket(raw, server_hostname=host) as tls:
+                assert tls.getpeercert()
 
 
 @pytest.mark.parametrize("host", [

@@ -37,8 +37,8 @@ renewal; public health and active-host TLS after exact-SHA autodeploy.
 2. [x] Owner confirms migrated domain ownership; preserve DNS/new services.
 3. [x] Reproduce isolated unknown-host routing / explicit active HTTP-01.
 4. [x] Remove retired vhosts, add safe defaults and explicit APIX HTTP host.
-5. [ ] Local regression/syntax checks and open code review.
-6. [ ] Reconfigure/renew testapi; archive obsolete renewal configs with backup.
+5. [x] Local regression/syntax checks and open code review.
+6. [x] Reconfigure/renew testapi; archive obsolete renewal configs with backup.
 7. [ ] Protected PR checks, auto-merge and Production Autodeploy exact SHA.
 8. [ ] Verify live TLS/HTTP-01/health, timer renewal, logs; record evidence.
 
@@ -54,3 +54,13 @@ Local regressions: RED retired root returned 301; after removal/safe defaults,
 20 HTTP/TLS/config tests passed using isolated official Nginx and synthetic TLS.
 Ruff and git diff --check passed. OCR delegate preview excludes config/docs/tests
 by defaults; all five changed files will additionally receive manual review.
+
+All five locally hosted lineages renewed successfully (testapi/apix and four
+requested early renewals with key reuse). Four remote-owned renewal configs were
+moved to `/root/apix-acme-backup-20261021/retired-renewals`; certificate files and
+DNS unchanged. `systemctl start certbot.service` returned Result=success and
+ExecMainStatus=0; certbot.timer remains enabled/active. Full staging dry-run runs
+against the five remaining locally owned lineages. Standards and Spec independent
+reviews: zero findings across all five files, including TLS default/active-SNI
+amendment; Spec independently verified valid-SNI/unknown-Host requests return404.
+PR #287; required CI and auto-deploy pending final reviewed commit.
