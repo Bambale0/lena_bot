@@ -33,7 +33,7 @@ const pinterestService = {
   badge: "Новинка",
   price_credits: 2,
   quality: "2K",
-  max_identity_angles: 5,
+  max_identity_angles: 2,
   height_min_cm: 120,
   height_max_cm: 230,
   weight_min_kg: 30,
@@ -157,7 +157,7 @@ test("Pinterest Service uses its own API domain and approved manual reference UX
     buffer: Buffer.from("identity"),
   });
   expect(runCalls).toBe(0);
-  await expect(dialog.getByText("1–5 ракурсов одного человека", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("1–2 ракурсов одного человека", { exact: true })).toBeVisible();
   await expect(dialog.getByText(/Дополнительные ракурсы необязательны/)).toBeVisible();
   await expect(dialog.getByText(/сцена, свет и поза считаются с референса/)).toBeVisible();
   await expect(dialog.getByText(/лицо и внешность берутся только с твоего фото/)).toBeVisible();
@@ -212,12 +212,20 @@ test("Pinterest accepts multiple optional identity angles without auto-start", a
   await dialog.getByLabel("Загрузить референс Pinterest").setInputFiles({ name: "scene.jpg", mimeType: "image/jpeg", buffer: Buffer.from("scene") });
   await dialog.getByLabel("Загрузить ваше фото").setInputFiles({ name: "me.jpg", mimeType: "image/jpeg", buffer: Buffer.from("me") });
   await dialog.getByLabel("Добавить дополнительные ракурсы").setInputFiles([
+    { name: "too-many-1.jpg", mimeType: "image/jpeg", buffer: Buffer.from("one") },
+    { name: "too-many-2.jpg", mimeType: "image/jpeg", buffer: Buffer.from("two") },
+    { name: "too-many-3.jpg", mimeType: "image/jpeg", buffer: Buffer.from("three") },
+  ]);
+  await expect(dialog.getByText("Можно добавить максимум 2 дополнительных ракурсов", { exact: true })).toBeVisible();
+  expect(uploadIndex).toBe(2);
+  expect(runCalls).toBe(0);
+  await dialog.getByLabel("Добавить дополнительные ракурсы").setInputFiles([
     { name: "me-side.jpg", mimeType: "image/jpeg", buffer: Buffer.from("side") },
     { name: "me-three-quarter.jpg", mimeType: "image/jpeg", buffer: Buffer.from("three-quarter") },
   ]);
 
   expect(runCalls).toBe(0);
-  await expect(dialog.getByText("2/5", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("2/2", { exact: true })).toBeVisible();
   await expect(dialog.getByAltText("Дополнительный ракурс 1")).toBeVisible();
   await expect(dialog.getByAltText("Дополнительный ракурс 2")).toBeVisible();
 

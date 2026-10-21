@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest
@@ -33,6 +32,7 @@ from bot.keyboards.prompts import (
 from bot.states import PromptUseFSM
 from bot.states.prompt import PromptModerateFSM, PromptUploadFSM
 from bot.utils.deep_links import build_start_payload
+from bot.utils.telegram_media import local_media_path
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from db import repository as repo
 from db.models import PromptStatus, User, UserPrompt
@@ -63,7 +63,6 @@ from db.prompt_repository import (
 logger = logging.getLogger(__name__)
 router = Router(name="marketplace")
 DEFAULT_PROMPT_MODEL = ImageModel.NANO_BANANA_PRO
-PROMPT_FALLBACK_IMAGE = Path(__file__).resolve().parents[1] / "assets" / "prompt_fallback.jpg"
 
 
 def _prompt_library_text() -> str:
@@ -105,13 +104,11 @@ def _prompt_source_title(source: str) -> str:
 
 def _prompt_photo_source(preview_url: str | None):
     normalized_url = ensure_public_image_url(preview_url)
-    local_path = local_upload_path_from_url(normalized_url)
-    if local_path and local_path.exists():
+    local_path = local_media_path(normalized_url) if normalized_url else None
+    if local_path:
         return FSInputFile(local_path)
-    if normalized_url and not local_path:
+    if normalized_url and local_upload_path_from_url(normalized_url) is None:
         return normalized_url
-    if PROMPT_FALLBACK_IMAGE.exists():
-        return FSInputFile(PROMPT_FALLBACK_IMAGE)
     return None
 
 
@@ -166,13 +163,17 @@ async def _show_prompt_card(
             return
         except TelegramBadRequest as e:
             logger.warning(
-                "Prompt photo fallback failed prompt=%s preview=%s error=%s",
+                "Prompt photo unavailable prompt=%s error_type=%s",
                 prompt.id,
-                prompt.preview_url,
-                e,
+                type(e).__name__,
             )
 
-    await safe_edit_message(holder, caption, reply_markup=reply_markup)
+    caption += "\n\n⚠️ Превью недоступно. Карточка промпта сохранена."
+    if holder.photo:
+        # Do not attach another prompt's caption to the previous photo.
+        await holder.answer(caption, reply_markup=reply_markup)
+    else:
+        await safe_edit_message(holder, caption, reply_markup=reply_markup)
 
 
 async def show_prompt_card_from_source(

@@ -1,3 +1,7 @@
+## 2026-10-21 — Prompt / Pinterest / Telegram media fixes (active)
+
+Baseline `7b037621a3c418b3b1add1a5e523fcc8ef5ef230`. Diagnosis, acceptance, numbered plan and live progress: [execution details](prompt-reference-media-20261021.md).
+
 ## 2026-10-21 — Nginx / ACME repair (active)
 
 Baseline `9f7bff637ee8112aeee880d475a867db339d3e4c`. See [execution details](nginx-acme-20261021.md) for preflight, acceptance, risks, progress and verification.

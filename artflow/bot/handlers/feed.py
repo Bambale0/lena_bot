@@ -6,11 +6,11 @@ import logging
 import re
 
 from aiogram import Bot, F, Router
-from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
     CallbackQuery,
+    FSInputFile,
     InputMediaPhoto,
     InputMediaVideo,
     Message,
@@ -31,6 +31,7 @@ from bot.utils.telegram_images import (
     prepare_photo_upload,
     send_image_to_message,
 )
+from bot.utils.telegram_media import local_media_path, send_video_to_message
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from core.config import settings
 from core.feed_remix_prompt import (
@@ -226,11 +227,12 @@ async def _show_feed_card(
         except Exception as e:
             logger.debug("Failed to edit feed media gen=%s: %s", card.generation.id, e)
 
-    if result_url and is_video and getattr(holder, "video", None):
+    local_video = local_media_path(result_url) if result_url and is_video else None
+    if result_url and is_video and getattr(holder, "video", None) and local_video:
         try:
             await holder.edit_media(
                 media=InputMediaVideo(
-                    media=result_url,
+                    media=FSInputFile(local_video),
                     caption=caption,
                     parse_mode="HTML",
                 ),
@@ -241,33 +243,13 @@ async def _show_feed_card(
             logger.debug("Failed to edit feed video gen=%s: %s", card.generation.id, e)
 
     if result_url and is_video:
-        try:
-            await holder.answer_video(result_url, caption=caption, reply_markup=reply_markup)
+        if await send_video_to_message(
+            holder, result_url=result_url, generation_id=card.generation.id,
+            caption=caption, reply_markup=reply_markup,
+        ):
             return
-        except TelegramBadRequest as e:
-            logger.warning(
-                "Feed video fallback gen=%s url=%s error=%s",
-                card.generation.id,
-                result_url,
-                e,
-            )
-            await holder.answer(
-                _feed_fallback_text(card, caption),
-                reply_markup=reply_markup,
-            )
-            return
-        except Exception as e:
-            logger.warning(
-                "Feed video unexpected fallback gen=%s url=%s error=%s",
-                card.generation.id,
-                result_url,
-                e,
-            )
-            await holder.answer(
-                _feed_fallback_text(card, caption),
-                reply_markup=reply_markup,
-            )
-            return
+        await holder.answer(_feed_fallback_text(card, caption, result_url=result_url), reply_markup=reply_markup)
+        return
 
     if result_url:
         delivery = await send_image_to_message(

@@ -20,6 +20,8 @@ from typing import Any, Awaitable, Callable
 import httpx
 from PIL import Image
 
+from api.image_prompt_limits import validate_image_prompt
+
 try:
     from enum import StrEnum
 except ImportError:
@@ -265,6 +267,11 @@ def _effective_model_for_request(
     return model
 
 
+def image_reference_limit(model_key: str) -> int | None:
+    """Hard reference capacity of the configured image integration."""
+    return _REFERENCE_LIMITS.get(str(getattr(model_key, "value", model_key)))
+
+
 def _validate_reference_count(
     model: ImageModel,
     image_url: str | list[str] | None,
@@ -276,7 +283,7 @@ def _validate_reference_count(
     if effective_model == ImageModel.GPT_IMAGE_2_I2I and not refs:
         raise ValueError("GPT Image 2 Edit requires at least one reference image")
 
-    limit = _REFERENCE_LIMITS.get(resolved_model)
+    limit = image_reference_limit(resolved_model)
     if limit is not None and len(refs) > limit:
         raise ValueError(f"{resolved_model} supports at most {limit} reference images")
 
@@ -433,6 +440,7 @@ async def _create_kie_image_task(
     *,
     callback_url: str | None,
 ) -> ImageResult:
+    validate_image_prompt(resolved_model, str(inp.get("prompt") or ""))
     resp = await kieai_client.create_task(
         {"model": resolved_model, "input": inp},
         callback_url=callback_url,
@@ -488,6 +496,7 @@ async def generate_image(
     del image_bytes, image_mime, size
 
     prompt = _validate_prompt(prompt)
+    validate_image_prompt(model, prompt)
     _validate_reference_count(model, image_url)
 
     if model == ImageModel.NANO_BANANA_21:

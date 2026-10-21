@@ -33,7 +33,12 @@ HEIGHT_MIN_CM = 120
 HEIGHT_MAX_CM = 230
 WEIGHT_MIN_KG = 30
 WEIGHT_MAX_KG = 250
-MAX_EXTRA_IDENTITY_PHOTOS = 5
+
+
+def _extra_photo_limit() -> int:
+    from api.pinterest_service_routes import pinterest_max_identity_angles
+
+    return pinterest_max_identity_angles()
 
 
 class PinterestFlow(StatesGroup):
@@ -124,6 +129,7 @@ def _extra_prompt_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="➕ Добавить фото", callback_data="pinterest:extra:add"))
     builder.row(InlineKeyboardButton(text="➡️ Продолжить", callback_data="pinterest:extra:done"))
+    builder.row(InlineKeyboardButton(text="🗑 Убрать дополнительные фото", callback_data="pinterest:extra:clear"))
     return builder.as_markup()
 
 
@@ -131,7 +137,7 @@ def _extra_prompt_text() -> str:
     return (
         "Можно добавить дополнительные фото.\n\n"
         "Они помогают сохранить лицо и пропорции.\n\n"
-        f"До {MAX_EXTRA_IDENTITY_PHOTOS} дополнительных фото."
+        f"До {_extra_photo_limit()} дополнительных фото."
     )
 
 
@@ -289,10 +295,18 @@ def _dedupe_extras(values: Any) -> list[str]:
 async def extra_add_photo(call: CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
     extras = _dedupe_extras(data.get("extra_asset_ids"))
-    if len(extras) >= MAX_EXTRA_IDENTITY_PHOTOS:
-        await call.answer("Максимум 5 дополнительных фото.", show_alert=True)
+    if len(extras) >= _extra_photo_limit():
+        await call.answer(f"Максимум {_extra_photo_limit()} дополнительных фото.", show_alert=True)
         return
     await call.message.answer("Пришлите дополнительное фото:")
+    await safe_answer_callback(call)
+
+
+@router.callback_query(F.data == "pinterest:extra:clear")
+async def extra_clear(call: CallbackQuery, state: FSMContext) -> None:
+    await state.update_data(extra_asset_ids=[])
+    await state.set_state(PinterestFlow.waiting_extra_references)
+    await call.message.answer(_extra_prompt_text(), reply_markup=_extra_prompt_keyboard())
     await safe_answer_callback(call)
 
 
@@ -316,9 +330,9 @@ async def extra_photo(
 ) -> None:
     data = await state.get_data()
     extras = _dedupe_extras(data.get("extra_asset_ids"))
-    if len(extras) >= MAX_EXTRA_IDENTITY_PHOTOS:
+    if len(extras) >= _extra_photo_limit():
         await message.answer(
-            "Максимум 5 дополнительных фото уже добавлено.",
+            f"Максимум {_extra_photo_limit()} дополнительных фото уже добавлено.",
             reply_markup=_extra_prompt_keyboard(),
         )
         return
@@ -329,7 +343,7 @@ async def extra_photo(
     if asset_id not in extras:
         extras.append(asset_id)
     await state.update_data(extra_asset_ids=extras)
-    remaining = MAX_EXTRA_IDENTITY_PHOTOS - len(extras)
+    remaining = _extra_photo_limit() - len(extras)
     await message.answer(
         f"Фото добавлено ✅ Можно добавить ещё {remaining}."
         if remaining
@@ -395,6 +409,15 @@ async def confirm_and_run(
     missing = flow_missing_fields(data)
     if missing:
         await call.answer("Сначала заполните все шаги.", show_alert=True)
+        return
+
+    if len(_dedupe_extras(data.get("extra_asset_ids"))) > _extra_photo_limit():
+        await state.set_state(PinterestFlow.waiting_extra_references)
+        await call.message.answer(
+            f"Можно добавить до {_extra_photo_limit()} дополнительных фото. Уберите лишние и повторите запуск.",
+            reply_markup=_extra_prompt_keyboard(),
+        )
+        await safe_answer_callback(call)
         return
 
     await safe_edit_message(call.message, "⏳ <b>Запускаю генерацию…</b>", reply_markup=None)

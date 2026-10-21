@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.image_service import MODEL_ASPECT_RATIOS, ImageModel
+from api.image_service import MODEL_ASPECT_RATIOS, ImageModel, image_reference_limit
 from api.miniapp_auth import get_miniapp_user
 from api.pinterest_service_contract import (
     DISPLAY_PROMPT,
@@ -44,6 +44,18 @@ PINTEREST_PRIVATE_RECIPE = (
     "wardrobe silhouette and mood from SCENE_REFERENCE while preserving the exact recognizable "
     "identity of USER_IDENTITY_REFERENCE. No text, no collage, no split-screen, no watermark."
 )
+
+
+def pinterest_reference_limit() -> int:
+    from bot.keyboards.models import IMAGE_CAPS
+
+    capacity = int(IMAGE_CAPS.get(PINTEREST_MODEL, {}).get("max_refs", 0) or 0)
+    provider_capacity = image_reference_limit(PINTEREST_MODEL)
+    return min(MAX_PINTEREST_REFERENCES, max(0, capacity), provider_capacity if provider_capacity is not None else capacity)
+
+
+def pinterest_max_identity_angles() -> int:
+    return max(0, pinterest_reference_limit() - MIN_PINTEREST_REFERENCES)
 
 
 class PinterestServiceRunRequest(BaseModel):
@@ -213,7 +225,7 @@ async def get_pinterest_service(
         "price_credits": price_credits,
         "model": PINTEREST_MODEL,
         "quality": PINTEREST_QUALITY,
-        "max_identity_angles": MAX_PINTEREST_IDENTITY_ANGLES,
+        "max_identity_angles": pinterest_max_identity_angles(),
         "height_min_cm": 120,
         "height_max_cm": 230,
         "weight_min_kg": 30,
@@ -293,6 +305,13 @@ async def launch_pinterest_service(
             "price_credits": price_credits,
         }
 
+    limit = pinterest_reference_limit()
+    if len(reference_asset_ids) < MIN_PINTEREST_REFERENCES or len(reference_asset_ids) > limit:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Pinterest поддерживает до {limit} фото всего: сцена, ваше фото и до {pinterest_max_identity_angles()} дополнительных ракурсов",
+        )
+
     assets: list[dict[str, Any]] = []
     for asset_id in reference_asset_ids:
         asset = verify_uploaded_asset(asset_id, user_id=user.id, expected_kind="image")
@@ -303,7 +322,7 @@ async def launch_pinterest_service(
     if len(references) < MIN_PINTEREST_REFERENCES or len(references) > MAX_PINTEREST_REFERENCES:
         raise HTTPException(
             status_code=422,
-            detail="Загрузите Pinterest-референс, ваше фото и при желании до 5 дополнительных ракурсов",
+            detail=f"Загрузите сцену, ваше фото и при желании до {pinterest_max_identity_angles()} дополнительных ракурсов",
         )
     if references[0] == references[1]:
         raise HTTPException(status_code=422, detail="Референс и ваше фото должны быть разными")

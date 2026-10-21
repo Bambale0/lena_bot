@@ -5,9 +5,10 @@ from aiogram.types import FSInputFile
 from bot.handlers.marketplace import _prompt_photo_source
 
 
-def test_prompt_photo_source_uses_fallback_when_preview_missing() -> None:
-    source = _prompt_photo_source(None)
-    assert isinstance(source, FSInputFile)
+def test_prompt_photo_source_returns_none_when_preview_missing() -> None:
+    # The old fallback asset is 1x1 and Telegram rejects it as a photo.
+    # The card handler now renders an explicit text card with its actions.
+    assert _prompt_photo_source(None) is None
 
 
 def test_prompt_photo_source_uses_local_upload_file(tmp_path, monkeypatch) -> None:
@@ -24,7 +25,7 @@ def test_prompt_photo_source_uses_local_upload_file(tmp_path, monkeypatch) -> No
     assert isinstance(source, FSInputFile)
 
 
-def test_prompt_photo_source_uses_fallback_when_local_upload_missing(tmp_path, monkeypatch) -> None:
+def test_prompt_photo_source_returns_none_when_local_upload_missing(tmp_path, monkeypatch) -> None:
     from api import public_files
 
     monkeypatch.setattr(public_files, "UPLOAD_ROOT", tmp_path)
@@ -33,4 +34,4 @@ def test_prompt_photo_source_uses_fallback_when_local_upload_missing(tmp_path, m
 
     source = _prompt_photo_source("https://example.test/static/upload/missing.jpg")
 
-    assert isinstance(source, FSInputFile)
+    assert source is None

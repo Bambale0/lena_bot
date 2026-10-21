@@ -39,6 +39,7 @@ from api import (
 from api.assistant_service import generate_assistant_reply, generate_prompt_moderation_decision
 from api.image_errors import ImageReferenceUnavailable, image_generation_user_error
 from api.image_http_failure import is_http_5xx, settle_image_http_5xx
+from api.image_prompt_limits import validate_image_prompt
 from api.image_service import ImageModel, normalize_quality_for_aspect_ratio
 from api.kie_webhook import extract_error, extract_status
 from api.kieai_client import KieSubmissionOutcomeUnknown
@@ -2897,6 +2898,11 @@ async def create_image_generation(
 
     if body.prompt_id is None and body.trend_user_values:
         raise HTTPException(status_code=422, detail="Personalization values require a trend")
+
+    try:
+        validate_image_prompt(body.model, user_prompt)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     prompt_meta = {
         "prompt_id": getattr(prompt_source, "id", None),
