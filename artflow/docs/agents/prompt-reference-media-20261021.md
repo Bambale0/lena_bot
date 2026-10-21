@@ -56,7 +56,7 @@ limits and local path containment for uploads. Preserve idempotent settlement.
 3. [x] RED Pinterest metadata/upload/launch limit regression; shared budget and UI/FSM parity.
 4. [x] RED Seedream service/API/bot pre-charge regression; shared admission checks.
 5. [x] RED media-card local-file/recovery regression; bounded safe delivery fixes.
-6. [ ] Full applicable backend/frontend/provider/privacy/financial checks and
+6. [x] Full applicable backend/frontend/provider/privacy/financial checks and
    independent Standards/Spec + Open Code Review; no unresolved high findings.
 7. [ ] Protected PR, four exact-head CI checks, native auto-merge; exact merge-SHA
    Production Autodeploy and public health/runtime verification.
@@ -101,3 +101,18 @@ regression reproduces it on both surfaces; the final fully rendered feed prompt
 now uses the same pre-charge HTTP422 validator (including the read-only quote).
 Full-suite corrected-environment run passed before this amendment; repeat focused
 and full checks plus amended review are required before queueing merge.
+
+Final local verification at code SHA `6a4c50a42e7416597d916ada1a491c71a04b8c70`:
+3645 backend tests passed with disposable PostgreSQL and nginx:alpine (37.61s);
+114 frontend unit tests and 5 Desktop Pinterest browser scenarios passed;
+frontend build/typecheck, Ruff, compileall, provider inventory and diff checks passed.
+Three existing warnings remain (multipart deprecation / old AsyncMock fixtures).
+Standards and Spec independently reviewed the amendment: zero remaining findings;
+Spec reran 11 admission tests, Standards reran four feed-admission regressions.
+Open Code Review delegate selection/rules informed the independent manual review;
+all changed production files, tests and documentation were included in review.
+
+Delivery PR: https://github.com/Bambale0/lena_bot/pull/288 . Required exact-head
+checks, native squash auto-merge and merge-SHA Production Autodeploy are pending.
+Final delivery evidence will be attached to this PR after runtime verification.
+No migration, secret, price or mutable business configuration change is required.
