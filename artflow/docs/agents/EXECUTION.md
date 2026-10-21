@@ -1,3 +1,7 @@
+## 2026-10-21 — Nginx / ACME repair (active)
+
+Baseline `9f7bff637ee8112aeee880d475a867db339d3e4c`. See [execution details](nginx-acme-20261021.md) for preflight, acceptance, risks, progress and verification.
+
 ## 2026-10-20 — provider rejection reasons and Seedream reference admission (active)
 
 Baseline `07dc84a140b9bf71119af7894249ebef51b3bf3b`; isolated worktree `/tmp/apix-provider-rejections-20261020`, branch `fix/provider-rejections-media-20261020`. User requests fixes for the three highlighted production failure groups. Read-only production evidence: two Seedance 2.5 GET statuses explicitly report `provider_rejected_request`, `retryable=false`, without a detailed cause; two Seedream text tasks report output copyright restriction; one Seedream edit used an unreachable former-domain URL with no matching local file. Existing guarded refunds worked. No customer prompts/media/identifiers are copied here.
