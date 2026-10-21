@@ -7,11 +7,15 @@ No production certificates, secrets, networks, services or ports are used.
 """
 from __future__ import annotations
 
+import http.client
 import ipaddress
 import os
 import re
 import shutil
+import socket
+import ssl
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -117,7 +121,7 @@ def test_nginx_fixture_preserves_full_configs_and_supplies_synthetic_tls(tmp_pat
     assert command[-2:] == [OFFICIAL_IMAGE, "-t"]
     assert "--publish" not in command and "-p" not in command
     assert "app:127.0.0.1" in command
-    assert "tanyapi.chillcreative.ru:127.0.0.1" in command
+    assert "banano-miniapp:127.0.0.1" in command
     assert all(str(tmp_path) in argument for argument in command if argument.startswith("type=bind,"))
 
 
@@ -144,3 +148,84 @@ def test_canonical_nginx_syntax_in_official_image(tmp_path, invalid_directive) -
     else:
         assert result.returncode == 0, output
         assert "syntax is ok" in output and "test is successful" in output, output
+
+
+@pytest.fixture
+def running_nginx(tmp_path):
+    """Exercise full production vhost selection with synthetic certificates only."""
+    image = os.environ.get("APIX_TEST_NGINX_IMAGE")
+    if not image:
+        pytest.skip("Set APIX_TEST_NGINX_IMAGE=nginx:alpine for real Nginx HTTP/TLS checks")
+    conf_dir, tls_dir, hosts = _prepare_fixture(tmp_path)
+    webroot = tmp_path / "webroot"
+    challenge = webroot / ".well-known" / "acme-challenge" / "fixture-probe"
+    challenge.parent.mkdir(parents=True)
+    challenge.write_text("acme-fixture-ok")
+    command = _docker_command(image, conf_dir, tls_dir, hosts)
+    # Only synthetic inputs; random loopback ports avoid all production listeners.
+    command[command.index("none")] = "bridge"
+    command[2:2] = ["--detach"]
+    command[-2:] = [
+        "--publish", "127.0.0.1::80", "--publish", "127.0.0.1::443",
+        "--mount", f"type=bind,src={webroot},dst=/var/www/certbot,readonly",
+        image, "-g", "daemon off;",
+    ]
+    container = subprocess.check_output(command, text=True, timeout=30).strip()
+    try:
+        def port(number):
+            result = subprocess.check_output(
+                ["docker", "port", container, str(number)], text=True, timeout=10,
+            )
+            return int(result.strip().rsplit(":", 1)[1])
+
+        http_port, tls_port = port(80), port(443)
+        for attempt in range(50):
+            try:
+                with socket.create_connection(("127.0.0.1", http_port), timeout=1):
+                    break
+            except OSError:
+                if attempt == 49:
+                    pytest.fail("Synthetic Nginx did not start")
+                time.sleep(0.1)
+        yield http_port, tls_port
+    finally:
+        subprocess.run(["docker", "stop", "--time", "1", container], check=True,
+                       capture_output=True, timeout=15)
+
+
+@pytest.mark.parametrize("host", [
+    "apixbotai.com", "testapi.chillcreative.ru", "apix.chillcreative.ru",
+    "media.apixbotai.com", "tbank.apixbotai.com", "alena.chillcreative.ru",
+    "alena.xn--e1aikcel5c5a.online", "archibot.xn--e1aikcel5c5a.online",
+])
+def test_active_hosts_serve_http01_without_redirect(running_nginx, host):
+    connection = http.client.HTTPConnection("127.0.0.1", running_nginx[0], timeout=5)
+    try:
+        connection.request("GET", "/.well-known/acme-challenge/fixture-probe",
+                           headers={"Host": host})
+        response = connection.getresponse()
+        assert response.status == 200
+        assert response.read() == b"acme-fixture-ok"
+    finally:
+        connection.close()
+
+
+@pytest.mark.parametrize("host", [
+    "xn--e1aikcel5c5a.online", "www.xn--e1aikcel5c5a.online",
+    "tanyapp.chillcreative.ru", "unknown.invalid",
+])
+def test_retired_and_unknown_hosts_do_not_reach_applications(running_nginx, host):
+    connection = http.client.HTTPConnection("127.0.0.1", running_nginx[0], timeout=5)
+    try:
+        connection.request("GET", "/", headers={"Host": host})
+        response = connection.getresponse()
+        assert response.status == 404
+        response.read()
+    finally:
+        connection.close()
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE  # Synthetic fixture certificates only.
+    with socket.create_connection(("127.0.0.1", running_nginx[1]), timeout=5) as raw:
+        with pytest.raises(ssl.SSLError):
+            context.wrap_socket(raw, server_hostname=host)
