@@ -6,6 +6,9 @@
   const originalFetch = window.fetch.bind(window);
   const drafts = new Map();
   let uploading = false;
+  let uploadController = null;
+  let draftOwner = null;
+  const currentOwner = () => typeof state !== 'undefined' ? String(state.user?.id || 'anonymous') : 'harness';
   let panel;
   let renderedModel = '';
   let restoredRecipe = null;
@@ -32,6 +35,10 @@
     const node = element('input'); node.value = value || ''; node.maxLength = maxLength; node.setAttribute('aria-label', label);
     node.addEventListener(label.startsWith('Имя') ? 'change' : 'input', () => action(node.value)); wrapper.append(node); parent.append(wrapper);
   }
+  function nextName(data, prefix) {
+    const used=new Set([...(data.elements||[]),...(data.voices||[])].map(item=>item.name.toLowerCase()));
+    let index=1;while(used.has(`${prefix}_${index}`.toLowerCase()))index++;return `${prefix}_${index}`;
+  }
   function renamePrompt(oldName, newName) {
     if (!/^[\u4E00-\u9FA5A-Za-z0-9_]{1,20}$/.test(newName)) return;
     const prompt=document.querySelector('.account-composer [name=prompt]'); if(!prompt)return;
@@ -43,22 +50,27 @@
     const wrapper = element('label'); wrapper.className = 'reference-upload'; wrapper.append(element('span', label));
     const node = element('input'); node.type = 'file'; node.accept = accept; node.multiple = multiple; node.setAttribute('aria-label', label);
     node.addEventListener('change', async () => {
-      const key = currentKey(); const values = Array.from(node.files || []); if (!values.length || uploading) return;
-      uploading = true; const status = panel.querySelector('[role=status]'); status.textContent = 'Загружаем материалы…';
+      const key = currentKey(); const owner = currentOwner(); const values = Array.from(node.files || []); if (!values.length || uploading) return;
+      uploading = true; uploadController = new AbortController(); const controller = uploadController;
+      const assertOwner = () => { if (currentOwner() !== owner || currentKey() !== key) throw new Error('Аккаунт или модель изменились. Добавьте материалы заново.'); };
+      const status = panel.querySelector('[role=status]'); status.textContent = 'Загружаем материалы…';
       panel.querySelectorAll('input,button,select').forEach(control => { control.disabled = true; });
       try {
         const urls = [];
         for (const file of values) {
-          const form = new FormData(); form.append('file', file);
-          const response = await originalFetch('/api/web/kling4/assets', { method: 'POST', body: form, credentials: 'same-origin' });
+          assertOwner();
+          const form = new FormData(); form.append('file', file); form.append('owner_id', owner);
+          const response = await originalFetch('/api/web/kling4/assets', { method: 'POST', body: form, credentials: 'same-origin', signal: controller.signal });
+          assertOwner();
           const payload = await response.json();
+          assertOwner();
           if (!response.ok || payload.ok === false) throw new Error(payload.error || payload.detail || 'Материал не загружен');
           urls.push((payload.data || payload).url);
         }
-        if (currentKey() !== key) throw new Error('Модель изменилась. Добавьте материалы заново.');
+        if (currentKey() !== key || currentOwner() !== owner) throw new Error('Аккаунт или модель изменились. Добавьте материалы заново.');
         action(urls); render();
       } catch (error) { status.textContent = error.message || 'Ошибка загрузки'; }
-      finally { uploading = false; panel.querySelectorAll('input,button,select').forEach(control => { control.disabled = false; }); node.value = ''; }
+      finally { uploading = false; if(uploadController===controller)uploadController=null; panel?.querySelectorAll('input,button,select').forEach(control => { control.disabled = false; }); node.value = ''; }
     });
     wrapper.append(node); parent.append(wrapper);
   }
@@ -103,7 +115,7 @@
         if(item.voice_url) list(block,[item.voice_url],()=>{delete item.voice_url;});
         button(block,'Удалить элемент',()=>{elements.splice(index,1);render();}); panel.append(block);
       });
-      if(elements.length<7) button(panel,'Добавить элемент',()=>{elements.push({name:`Hero_${elements.length+1}`,tag:'character'});render();});
+      if(elements.length<7) button(panel,'Добавить элемент',()=>{elements.push({name:nextName(data,"Hero"),tag:'character'});render();});
       const voices=data.voices||(data.voices=[]);
       voices.forEach((item,index)=>{
         const block=element('fieldset'); block.append(element('legend',`Голос ${index+1}`));
@@ -112,7 +124,7 @@
         if(item.audio_url) list(block,[item.audio_url],()=>{delete item.audio_url;});
         button(block,'Удалить голос',()=>{voices.splice(index,1);render();});panel.append(block);
       });
-      if(voices.length<3)button(panel,'Добавить голос',()=>{voices.push({name:`Voice_${voices.length+1}`,audio_url:''});render();});
+      if(voices.length<3)button(panel,'Добавить голос',()=>{voices.push({name:nextName(data,"Voice"),audio_url:''});render();});
     }
     const status=element('p');status.setAttribute('role','status');status.textContent=recipeError;panel.append(status);
   }
@@ -140,6 +152,15 @@
     return originalFetch(resource,init);
   };
   function sync() {
+    const owner = currentOwner();
+    if(draftOwner !== null && draftOwner !== owner) {
+      uploadController?.abort();
+      drafts.clear(); recipeApplied=false; renderedModel='';
+      if(restoredRecipe?.owner_id && String(restoredRecipe.owner_id)!==owner)restoredRecipe=null;
+      if(panel){panel.remove();panel=null;}
+    }
+    draftOwner=owner;
+    if(restoredRecipe?.owner_id && String(restoredRecipe.owner_id)!==owner) return;
     if(restoredRecipe && !recipeApplied && currentKey()===restoredRecipe.model) {
       const form=document.querySelector('.account-composer');
       if(form?.querySelector('[name=duration]')?.options.length) {

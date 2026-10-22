@@ -119,3 +119,15 @@ async def test_saved_recipe_is_only_exported_to_its_owner(monkeypatch, owner):
         assert result["data"]["kling4"]["first_frame_url"] == options.first_frame_url
     else:
         assert result.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_upload_rejects_changed_owner_before_reading_private_file(monkeypatch):
+    from api.web import generations as routes
+    from core import kling4_access
+
+    monkeypatch.setattr(kling4_access, "require_kling4_access", AsyncMock())
+    file = SimpleNamespace(read=AsyncMock())
+    result = await routes.upload_kling4_asset(file=file, owner_id=1, session=None, user=SimpleNamespace(id=2))
+    assert result.status_code == 409
+    file.read.assert_not_awaited()

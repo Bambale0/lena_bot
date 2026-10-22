@@ -3,7 +3,7 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
-import { KLING4_KEYFRAME, type Kling4Element, type Kling4Options } from '@/lib/kling4';
+import { KLING4_KEYFRAME, nextKling4Name, type Kling4Element, type Kling4Options } from '@/lib/kling4';
 
 interface Props {
   model: string;
@@ -26,10 +26,15 @@ export function Kling4Materials({ model, value, onChange, onUpload, onBusyChange
     setError(''); setBusy(true); onBusyChange(true);
     try {
       const urls: string[] = [];
-      for (const file of Array.from(files)) urls.push((await onUpload(file)).url);
+      for (const file of Array.from(files)) {
+        if (!mounted.current) return;
+        const result = await onUpload(file);
+        if (!mounted.current) return;
+        urls.push(result.url);
+      }
       if (mounted.current) apply(urls);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Не удалось загрузить материал'); }
-    finally { setBusy(false); onBusyChange(false); }
+    } catch (cause) { if (mounted.current) setError(cause instanceof Error ? cause.message : 'Не удалось загрузить материал'); }
+    finally { if (mounted.current) { setBusy(false); onBusyChange(false); } }
   }
   function fileInput(label: string, accept: string, multiple: boolean, apply: (urls: string[]) => void) {
     return <label className="grid cursor-pointer gap-1 rounded-lg border border-dashed border-border p-2 text-xs"><span>{label}</span><span className="text-primary">{busy ? "Загрузка…" : multiple ? "Добавить файлы" : "Добавить файл"}</span><input className="sr-only" aria-label={label} type="file" accept={accept} multiple={multiple} disabled={busy} onChange={event => { const files = event.target.files; void upload(files, apply); event.target.value = ''; }} /></label>;
@@ -70,7 +75,7 @@ export function Kling4Materials({ model, value, onChange, onUpload, onBusyChange
           {element.voice_url ? list([element.voice_url],()=>changeElement(index,{voice_url:undefined})) : null}
           <Button type="button" variant="ghost" onClick={()=>onChange({...value,elements:elements.filter((_,i)=>i!==index)})}>Удалить элемент</Button>
         </div>)}
-        <Button type="button" variant="outline" disabled={elements.length>=7||busy} onClick={()=>onChange({...value,elements:[...elements,{name:`Hero_${elements.length+1}`,tag:'character'}]})}>Добавить элемент</Button>
+        <Button type="button" variant="outline" disabled={elements.length>=7||busy} onClick={()=>onChange({...value,elements:[...elements,{name:nextKling4Name(value,"Hero"),tag:'character'}]})}>Добавить элемент</Button>
       </details>
       <details><summary className="cursor-pointer text-sm">Голосовые референсы · {voices.length}/3</summary>
         {voices.map((voice,index)=><div key={index} className="my-3 grid gap-2">
@@ -79,7 +84,7 @@ export function Kling4Materials({ model, value, onChange, onUpload, onBusyChange
           {voice.audio_url ? <p className="text-xs">Аудио загружено</p> : null}
           <Button type="button" variant="ghost" onClick={()=>onChange({...value,voices:voices.filter((_,i)=>i!==index)})}>Удалить голос</Button>
         </div>)}
-        <Button type="button" variant="outline" disabled={voices.length>=3||busy} onClick={()=>onChange({...value,voices:[...voices,{name:`Voice_${voices.length+1}`,audio_url:''}]})}>Добавить голос</Button>
+        <Button type="button" variant="outline" disabled={voices.length>=3||busy} onClick={()=>onChange({...value,voices:[...voices,{name:nextKling4Name(value,"Voice"),audio_url:''}]})}>Добавить голос</Button>
       </details>
     </>}
     </fieldset>

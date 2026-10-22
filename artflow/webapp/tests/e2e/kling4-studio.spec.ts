@@ -33,3 +33,28 @@ test('Studio restores an owned typed recipe with quality, duration and ordered f
  await expect(page.locator('[name=resolution]')).toHaveValue('1080p');
  for(const name of ['first.png','middle.png','last.png'])await expect(page.getByText(new RegExp(name))).toBeVisible();
 });
+
+test('Studio discards media drafts when the signed-in account changes',async({page})=>{
+ await page.route('**/kling4-studio-harness',route=>route.fulfill({contentType:'text/html',body:`<script>window.state={user:{id:7}}</script><form class="account-composer"><select data-account-model-select><option value="${model}">Kling 4</option></select><textarea name="prompt"></textarea><div data-reference-section></div></form>`}));
+ await page.route('**/api/web/kling4/assets',route=>route.fulfill({json:{ok:true,data:{url:'https://media.example.test/kling4/7/private.png'}}}));
+ await page.goto('/kling4-studio-harness');await page.addScriptTag({path:script});
+ await page.getByLabel('Фото-референсы · до 10',{exact:true}).setInputFiles({name:'photo.png',mimeType:'image/png',buffer:Buffer.from('test')});
+ await expect(page.getByText(/private.png/)).toBeVisible();
+ await page.evaluate(()=>{(window as any).state.user.id=8;document.dispatchEvent(new Event('change'));});
+ await expect(page.getByText(/private.png/)).toHaveCount(0);
+});
+
+test('Studio stops a private multi-file batch when the account changes',async({page})=>{
+ let requests=0;
+ let release: ()=>void=()=>{};
+ const pending=new Promise<void>(resolve=>{release=resolve;});
+ await page.route('**/kling4-studio-harness',route=>route.fulfill({contentType:'text/html',body:`<script>window.state={user:{id:7}}</script><form class="account-composer"><select data-account-model-select><option value="${model}">Kling 4</option></select><textarea name="prompt"></textarea><div data-reference-section></div></form>`}));
+ await page.route('**/api/web/kling4/assets',async route=>{requests++;expect(route.request().postData()).toContain('name="owner_id"');await pending;try{await route.fulfill({json:{ok:true,data:{url:'https://media.example.test/kling4/7/private.png'}}});}catch{/* Account change aborts the active upload. */}});
+ await page.goto('/kling4-studio-harness');await page.addScriptTag({path:script});
+ await page.getByLabel('Фото-референсы · до 10',{exact:true}).setInputFiles(['first.png','second.png'].map(name=>({name,mimeType:'image/png',buffer:Buffer.from('private')})));
+ await expect.poll(()=>requests).toBe(1);
+ await page.evaluate(()=>{(window as any).state.user.id=8;document.dispatchEvent(new Event('change'));});release();
+ await expect(page.getByLabel('Фото-референсы · до 10',{exact:true})).toBeEnabled();
+ expect(requests).toBe(1);
+ await expect(page.getByText(/private.png/)).toHaveCount(0);
+});

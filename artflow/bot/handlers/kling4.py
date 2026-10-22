@@ -163,6 +163,14 @@ async def render(message, state):
     await message.answer("\n".join(lines), reply_markup=keyboard(rows, revision=revision))
 
 
+def next_material_name(options, prefix):
+    names = {item["name"].lower() for key in ("elements", "voices") for item in options[key]}
+    index = 1
+    while f"{prefix}_{index}".lower() in names:
+        index += 1
+    return f"{prefix}_{index}"
+
+
 def rename_material(options, prompt, collection, index, name):
     if not NAME.fullmatch(name) or RESERVED.fullmatch(name):
         raise ValueError("Имя: 1–20 латинских/китайских букв, цифр или _, без служебных имён")
@@ -292,7 +300,7 @@ async def action(call: CallbackQuery, state, session, db_user):
             if len(options["elements"]) >= 7:
                 await call.answer("Не больше 7 персонажей", show_alert=True)
                 return
-            name = f'Hero_{len(options["elements"])+1}'
+            name = next_material_name(options, "Hero")
             await state.update_data(
                 k4_field="element_" + action.split(":")[1], k4_new_name=name, k4_pending_images=[]
             )
@@ -495,7 +503,7 @@ async def media_value(message: Message, state, session, db_user, bot):
                 raise ValueError("Нужен аудиофайл")
             if field == "voice":
                 options["voices"].append(
-                    {"name": f'Voice_{len(options["voices"])+1}', "audio_url": url}
+                    {"name": next_material_name(options, "Voice"), "audio_url": url}
                 )
             else:
                 options["elements"][int(field.split("_")[1])]["voice_url"] = url

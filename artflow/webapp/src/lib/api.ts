@@ -312,8 +312,8 @@ export class MiniAppApi {
     return payload.data || payload;
   }
 
-  async uploadKling4Asset(file: File): Promise<{ url: string; kind?: string }> {
-    const form = new FormData(); form.append("file", file);
+  async uploadKling4Asset(file: File, ownerId: number): Promise<{ url: string; kind?: string }> {
+    const form = new FormData(); form.append("file", file); form.append("owner_id", String(ownerId));
     const response = await fetch("/api/web/kling4/assets", { method: "POST", body: form, headers: { "X-Telegram-Init-Data": this.initData } });
     if (!response.ok) throw await readApiError(response);
     const payload = asRecord(await response.json()); const data = asRecord(payload.data || payload);

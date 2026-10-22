@@ -451,7 +451,7 @@ function GenerationScreen({
 
             </fieldset>
 
-            {kling4Selected && onUploadKling4 ? <Kling4Materials key={draft.model} onBusyChange={setKling4Uploading} model={draft.model} value={draft.kling4 || {}} onChange={kling4 => onChange({ kling4, prompt: renameKling4Mentions(draft.kling4 || {}, kling4, draft.prompt) })} onUpload={onUploadKling4} /> : null}
+            {kling4Selected && onUploadKling4 ? <Kling4Materials key={`${user.id}:${draft.model}`} onBusyChange={setKling4Uploading} model={draft.model} value={draft.kling4 || {}} onChange={kling4 => onChange({ kling4, prompt: renameKling4Mentions(draft.kling4 || {}, kling4, draft.prompt) })} onUpload={onUploadKling4} /> : null}
             {showReferenceUploader ? (
               <div className="apix-uploader-card grid min-w-0 gap-2 rounded-xl border border-border/75 bg-card/40 p-2">
                 <div className="apix-uploader-head flex min-w-0 flex-wrap items-center justify-between gap-2">

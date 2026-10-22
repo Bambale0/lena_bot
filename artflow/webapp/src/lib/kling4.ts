@@ -51,3 +51,9 @@ export function renameKling4Mentions(previous: Kling4Options, next: Kling4Option
   }
   return updated;
 }
+
+
+export function nextKling4Name(options: Kling4Options, prefix: string): string {
+  const used = new Set([...(options.elements || []), ...(options.voices || [])].map(item => item.name.toLowerCase()));
+  for (let index = 1; ; index += 1) if (!used.has(`${prefix}_${index}`.toLowerCase())) return `${prefix}_${index}`;
+}

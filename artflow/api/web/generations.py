@@ -661,6 +661,7 @@ async def topup_lava(
 @router.post("/kling4/assets")
 async def upload_kling4_asset(
     file: UploadFile = File(...),
+    owner_id: int = Form(...),
     session: AsyncSession = Depends(get_session),
     user=Depends(get_web_user_or_none),
 ):
@@ -670,6 +671,8 @@ async def upload_kling4_asset(
     if auth_error := _auth_required(user):
         return auth_error
     await require_kling4_access(session, user)
+    if owner_id != user.id:
+        return error_response(409, "Account changed; select the materials again")
     data = await file.read(MAX_ASSET_BYTES + 1)
     try:
         return ok(await store_kling4_asset(data, file.filename or "", user_id=user.id))
@@ -696,4 +699,4 @@ async def kling4_owned_recipe(
     if generation_prompt_is_protected(generation):
         return error_response(403,'Protected source recipe cannot be exported')
     options = Kling4Input(**parse_input_params(generation.input_params).get('kling4',{}))
-    return ok({'model':generation.model,'prompt':generation.prompt,'kling4':options.model_dump()})
+    return ok({'owner_id': user.id, 'model':generation.model,'prompt':generation.prompt,'kling4':options.model_dump()})
