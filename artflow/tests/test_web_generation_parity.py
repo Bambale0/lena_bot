@@ -58,7 +58,7 @@ def test_public_site_billing_keeps_tribute_usd_provider_parity():
 
 
 def test_public_site_busts_cached_payment_runtime_after_card_sbp_label():
-    expected = "prototype-premium.js?v=20261015_video_quote"
+    expected = "prototype-premium.js?v=20261022_private_catalog"
     pages = sorted((ROOT / "landing").glob("*.html"))
     referenced = [path for path in pages if "prototype-premium.js?v=" in path.read_text()]
     assert referenced
