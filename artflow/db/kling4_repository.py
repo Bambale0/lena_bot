@@ -31,6 +31,7 @@ async def reserve_kling4(
     params: dict,
     credits: float,
     surface: str,
+    max_active_generations: int,
 ):
     intent_id = canonical_intent(intent_id)
     fingerprint = hashlib.sha256(
@@ -56,7 +57,7 @@ async def reserve_kling4(
         return gen, False
     if float(owner.credits) < credits:
         raise HTTPException(status_code=402, detail="Недостаточно кредитов")
-    if await repo.count_user_active_generations(session, user_id) >= 3:
+    if await repo.count_user_active_generations(session, user_id) >= max_active_generations:
         raise HTTPException(status_code=429, detail="Слишком много активных генераций")
     gen = Generation(
         user_id=user_id,

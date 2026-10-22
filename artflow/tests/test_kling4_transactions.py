@@ -66,6 +66,7 @@ async def test_concurrent_same_intent_reserves_exactly_once(database):
                 params={"duration": 3},
                 credits=85.5,
                 surface="web",
+                max_active_generations=6,
             )
             return gen.id, fresh
 
@@ -99,6 +100,7 @@ async def test_atomic_reserve_rolls_back_wallet_if_intent_insert_fails(database,
                     params={},
                     credits=85.5,
                     surface="web",
+                    max_active_generations=6,
                 )
             await session.rollback()
     finally:
@@ -124,6 +126,7 @@ async def test_submission_marker_is_single_use_and_unknown_never_rebuys(database
             params={},
             credits=85.5,
             surface="web",
+            max_active_generations=6,
         )
         gen_id = gen.id
         assert await repo.begin_kie_video_submission(session, gen_id, "intent")

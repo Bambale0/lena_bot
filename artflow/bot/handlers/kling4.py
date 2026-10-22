@@ -410,9 +410,14 @@ async def action(call: CallbackQuery, state, session, db_user):
         except HTTPException as exc:
             await call.message.answer(escape(str(exc.detail))[:2000])
         else:
-            await call.message.answer(
-                f"Задача #{gen.id} · {escape(str(gen.status.value))}. Результат придёт сюда и сохранится в истории."
-            )
+            if gen.status.value == "failed":
+                await call.message.answer(
+                    f"KIE не принял задачу #{gen.id}. {gen.credits_spent:g} 💋 возвращены на баланс."
+                )
+            else:
+                await call.message.answer(
+                    f"Задача #{gen.id} принята. Результат придёт сюда и сохранится в истории."
+                )
             # Keep intent and confirmation for safe transport retries; edits rotate it.
     elif action == "edit":
         await render(call.message, state)

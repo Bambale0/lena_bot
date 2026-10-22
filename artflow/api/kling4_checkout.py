@@ -138,6 +138,8 @@ async def create_kling4_generation(body, prompt, session, user, *, surface, call
         billing_tariff_key=quote.tariff_key,
     )
     await require_kling4_access(session, user)
+    from api.miniapp_routes import MAX_CONCURRENT
+
     gen, fresh = await reserve_kling4(
         session,
         user_id=user.id,
@@ -147,6 +149,7 @@ async def create_kling4_generation(body, prompt, session, user, *, surface, call
         params=params,
         credits=quote.credits,
         surface=surface,
+        max_active_generations=MAX_CONCURRENT,
     )
     if not fresh:
         return gen
