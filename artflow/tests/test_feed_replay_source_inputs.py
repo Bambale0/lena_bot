@@ -412,3 +412,39 @@ def test_old_legacy_surface_uses_same_safe_feed_recipe_runner():
     assert 'import { openFeedRemixRunner } from "./features/feed-remix-runner"' in source
     assert 'typeof feedItem.source_has_video_reference === "boolean"' in source
     assert 'openFeedRemixRunner(feedItem)' in source
+
+
+@pytest.mark.parametrize("mode,count", [("edit", 4), ("reference", 3), ("first", 1), ("first_last", 2)])
+def test_wan_feed_public_cards_expose_required_photo_count_without_references(mode, count):
+    source = SimpleNamespace(
+        id=77, user_id=99, model="wan/3-0-video", gen_type=GenerationType.video,
+        prompt=PROMPT, result_url=RESULT_MP4, result_urls=None,
+        likes_count=0, shares_count=0, created_at=datetime.now(timezone.utc),
+        input_params={"wan30_request": {"model": "wan/3-0-video", "mode": mode,
+            "reference_image_urls": [f"https://example.test/private-{i}.png" for i in range(count)],
+            "reference_video_urls": [AUTHOR_VIDEO] if mode == "edit" else []}},
+        is_public_feed=True,
+    )
+    card = SimpleNamespace(generation=source, username="author", full_name=None,
+                           aspect_ratio="9:16", remix_count=0, quality=None)
+    for payload in (_feed_card_out(card, SimpleNamespace(id=42)), FeedCard.from_feed_card(card).model_dump()):
+        assert payload["source_required_photo_count"] == count
+        assert "private-" not in str(payload)
+
+
+@pytest.mark.asyncio
+async def test_wan_feed_entry_announces_recipe_photo_count(monkeypatch):
+    from bot.handlers import feed
+    source = SimpleNamespace(
+        id=77, model="wan/3-0-video", gen_type=GenerationType.video, prompt=PROMPT,
+        input_params={"wan30_request": {"model": "wan/3-0-video", "mode": "edit",
+            "reference_image_urls": [f"https://example.test/private-{i}.png" for i in range(4)],
+            "reference_video_urls": [AUTHOR_VIDEO]}}, result_url=RESULT_MP4,
+    )
+    monkeypatch.setattr(feed.repo, "get_public_feed_generation", AsyncMock(return_value=source))
+    monkeypatch.setattr(feed.repo, "get_all_model_costs", AsyncMock(return_value=[]))
+    call = SimpleNamespace(data="feed:use:77", message=SimpleNamespace(answer=AsyncMock()), answer=AsyncMock())
+    state = AsyncMock()
+    await feed.cb_feed_use(call, AsyncMock(), SimpleNamespace(id=42), state)
+    assert state.update_data.await_args.kwargs["feed_use_required_photos"] == 4
+    assert "Для повтора нужно фото: 4" in call.message.answer.await_args.args[0]

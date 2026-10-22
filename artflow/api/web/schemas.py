@@ -7,6 +7,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from api.public_files import preview_public_image_url, public_url_is_available
+from api.wan30_feed_recipe import required_reader_photos
 from core.config import settings
 from core.feed_remix_prompt import (
     feed_image_original_recipe_allowed,
@@ -228,6 +229,7 @@ class FeedCard(BaseModel):
     can_remix: bool = True
     can_use_reference: bool = False
     source_has_video_reference: bool | None = None
+    source_required_photo_count: int | None = None
     source_image_recipe_available: bool = False
     source_image_recipe_available_for_nano21: bool = False
     original_image_quality: str | None = None
@@ -276,6 +278,7 @@ class FeedCard(BaseModel):
             can_remix=bool(result_url),
             can_use_reference=gen_type == "image" and bool(result_url),
             source_has_video_reference=bool(origin_videos) if origin_videos is not None else None,
+            source_required_photo_count=required_reader_photos(generation.model, creator_inputs or {}),
             source_image_recipe_available=bool(photo_recipe),
             source_image_recipe_available_for_nano21=bool(nano21_recipe),
             original_image_quality=image_recipe_settings.get("quality"),

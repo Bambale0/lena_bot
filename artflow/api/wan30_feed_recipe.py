@@ -11,6 +11,19 @@ from api.wan30_contract import WAN30_MODELS
 from api.wan30_launch import _clean_urls
 
 
+def required_reader_photos(model: str, params: dict[str, Any]) -> int | None:
+    """Public count only; unknown recipes remain subject to checkout validation."""
+    snapshot = params.get("wan30_request")
+    if model not in WAN30_MODELS or not isinstance(snapshot, dict) or snapshot.get("model") != model:
+        return None
+    mode = snapshot.get("mode")
+    if mode not in {"text", "first", "first_last", "reference", "edit", "file", "link"}:
+        return None
+    return 2 if mode == "first_last" else 1 if mode == "first" else len(
+        _clean_urls(snapshot.get("reference_image_urls"))
+    )
+
+
 def restore_feed_recipe(model: str, params: dict[str, Any], photos: list[str]) -> dict[str, Any]:
     if model not in WAN30_MODELS:
         raise ValueError("Unsupported Wan repeat model")
@@ -25,9 +38,8 @@ def restore_feed_recipe(model: str, params: dict[str, Any], photos: list[str]) -
     if mode not in {"text", "first", "first_last", "reference", "edit", "file", "link"}:
         raise ValueError("Исходный режим Wan недоступен; кредиты не списаны.")
     refs = list(dict.fromkeys(photos))
-    required = 2 if mode == "first_last" else 1 if mode == "first" else len(
-        _clean_urls(snapshot.get("reference_image_urls"))
-    )
+    required = required_reader_photos(model, params)
+    assert required is not None  # Canonical snapshot validated above.
     if len(refs) < required or (mode in {"first", "first_last"} and len(refs) != required):
         raise ValueError(f"Для повтора Wan добавь {required} своих фото; кредиты не списаны.")
     videos = list(_clean_urls(snapshot.get("reference_video_urls")))

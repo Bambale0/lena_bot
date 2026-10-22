@@ -90,7 +90,7 @@ from api.video_reference_billing import VideoSeconds, measured_video_seconds
 from api.video_runtime_fixes import seedance25_edit_billing_duration
 from api.video_service import VideoModel
 from api.wan30_contract import WAN30_MODELS
-from api.wan30_feed_recipe import recipe_options, restore_feed_recipe
+from api.wan30_feed_recipe import recipe_options, required_reader_photos, restore_feed_recipe
 from bot.keyboards.models import (
     _IMAGE_MODEL_ORDER,
     _VIDEO_MODEL_ORDER,
@@ -464,6 +464,7 @@ def _feed_card_out(card: Any, user: User | None) -> dict:
         "shares_count": generation.shares_count,
         "aspect_ratio": card.aspect_ratio,
         "source_has_video_reference": bool(replay_videos) if replay_videos is not None else None,
+        "source_required_photo_count": required_reader_photos(generation.model, creator_inputs or {}),
         "source_image_recipe_available": bool(photo_recipe),
         "source_image_recipe_available_for_nano21": bool(nano21_recipe),
         "original_image_quality": image_recipe_settings.get("quality"),

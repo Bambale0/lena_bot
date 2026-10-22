@@ -1132,7 +1132,7 @@ for (const modelKey of ["wan/3-0-video", "wan/3-0-video-prime"]) {
     };
     const source = {
       id: 201, model: modelKey, gen_type: "video", prompt: "", prompt_hidden: true,
-      source_has_video_reference: true, original_duration: 15,
+      source_has_video_reference: true, source_required_photo_count: 4, original_duration: 15,
       original_aspect_ratio: "9:16", original_resolution: "480p",
       result_url: "https://example.test/rendered.mp4", result_urls: ["https://example.test/rendered.mp4"],
       author: "Wan Creator", likes_count: 0, shares_count: 0, remixes: 0, is_mine: false,
@@ -1140,6 +1140,10 @@ for (const modelKey of ["wan/3-0-video", "wan/3-0-video-prime"]) {
     await page.route("**/api/v1/feed?**", route => route.fulfill({ json: [source] }));
     await page.route("**/api/v1/feed/201", route => route.fulfill({ json: source }));
     await page.route("**/api/v1/models/video", route => route.fulfill({ json: [model] }));
+    let uploadCount = 0;
+    await page.route("**/api/web/upload-media", route => route.fulfill({ json: {
+      data: { url: `https://example.test/reader-${++uploadCount}.png`, kind: "image" },
+    } }));
     const quotes: Record<string, unknown>[] = [];
     await page.route("**/api/v1/feed/201/remix/quote", route => {
       quotes.push(route.request().postDataJSON() as Record<string, unknown>);
@@ -1164,6 +1168,13 @@ for (const modelKey of ["wan/3-0-video", "wan/3-0-video-prime"]) {
     await dialog.locator("input[type=file]").setInputFiles({
       name: "reader.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
     });
+    await expect(dialog.getByText(/Для повтора нужно фото: 4/).first()).toBeVisible();
+    await expect(dialog.getByRole("button", { name: /Запустить повтор/ })).toBeDisabled();
+    await expect(dialog.getByText("Реф #1", { exact: true })).toBeVisible();
+    expect(quotes).toHaveLength(0);
+    await dialog.locator("input[type=file]").setInputFiles([2, 3, 4].map(index => ({
+      name: `reader-${index}.jpg`, mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
+    })));
     await expect(dialog.getByText("Стоимость: 84 💋").first()).toBeVisible();
     await expect.poll(() => quotes.length).toBeGreaterThan(0);
     expect(launches).toHaveLength(0);
@@ -1171,9 +1182,10 @@ for (const modelKey of ["wan/3-0-video", "wan/3-0-video-prime"]) {
     await expect(page.getByRole("dialog", { name: /Задача #9207/ })).toBeVisible();
     expect(launches).toHaveLength(1);
     expect(launches[0]).toMatchObject({
-      model: modelKey, image_url: "https://example.test/uploaded-ref.png",
+      model: modelKey, image_url: "https://example.test/reader-1.png",
       duration: 15, resolution: "480p", aspect_ratio: "9:16", quoted_credits: 84, change_request: "",
     });
+    expect(launches[0].reference_urls).toHaveLength(4);
     expect(launches[0]).not.toHaveProperty("wan30_request");
     expect(launches[0]).not.toHaveProperty("prompt");
   });

@@ -1660,3 +1660,38 @@ async def test_wan_advanced_rejects_unsupported_audio_and_stays_in_input_state(m
     assert (await state.get_data())["wan_input_target"] == "audio"
     state.set_state.assert_not_awaited()
     assert "❌" in msg.answer.await_args.args[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model", ["wan/3-0-video", "wan/3-0-video-prime"])
+async def test_wan_feed_video_collects_four_photos_before_done(model):
+    state = _fake_state(model_key=model, mode="video", feed_force_reference=True,
+                        feed_use_gen_type="video", feed_use_prompt="hidden recipe",
+                        feed_use_required_photos=4, ref_file_ids=[], resolution="720p", duration=5)
+    with patch.object(video_gen.repo, "get_model_cost", AsyncMock(return_value=_make_video_model_cost(model))):
+        for i in range(4):
+            msg = make_message(text="")
+            msg.photo = [SimpleNamespace(file_size=1000, file_id=f"reader-{i}")]
+            msg.answer = AsyncMock()
+            await video_gen.handle_image_upload(msg, state, AsyncMock())
+    data = await state.get_data()
+    assert data["ref_file_ids"] == ["reader-0", "reader-1", "reader-2", "reader-3"]
+    assert video_gen._video_ref_count(data) == 4
+    assert not state.set_state.called
+    call = make_callback(data="ref:done_multi")
+    with patch.object(video_gen.repo, "get_model_cost", AsyncMock(return_value=_make_video_model_cost(model))):
+        await video_gen.cb_video_ref_done_multi(call, state, AsyncMock())
+    state.set_state.assert_awaited_once_with(VideoGenFSM.params_select)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["image", "video"])
+async def test_wan_feed_done_requires_recipe_photo_count(mode):
+    state = _fake_state(model_key="wan/3-0-video", mode=mode, feed_use_gen_type="video",
+                        feed_use_prompt="hidden recipe", feed_use_required_photos=4,
+                        ref_file_ids=["reader-0"])
+    call = make_callback(data="ref:done_multi")
+    with patch.object(video_gen.repo, "get_model_cost", AsyncMock(return_value=_make_video_model_cost())):
+        await video_gen.cb_video_ref_done_multi(call, state, AsyncMock())
+    assert not state.set_state.called
+    assert "4" in call.answer.await_args.args[0]
