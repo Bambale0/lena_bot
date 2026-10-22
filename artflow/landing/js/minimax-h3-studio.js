@@ -39,7 +39,9 @@
   function setOptions(select, values, current) {
     if (!select) return;
     const next = current && values.includes(current) ? current : values[0];
-    select.innerHTML = values.map((value) => `<option value="${value}">${value}</option>`).join("");
+    const unchanged = select.options.length === values.length
+      && values.every((value, index) => select.options[index].value === value && select.options[index].text === value);
+    if (!unchanged) select.innerHTML = values.map((value) => `<option value="${value}">${value}</option>`).join("");
     select.value = next;
   }
 
@@ -66,7 +68,7 @@
     if (resolution) {
       setOptions(resolution, ["2K", "768P"], resolution.value);
       const label = resolution.closest("label")?.querySelector("span");
-      if (label) label.textContent = "Качество";
+      if (label && label.textContent !== "Качество") label.textContent = "Качество";
     }
 
     const ratio = form.querySelector('select[name="aspect_ratio"]');

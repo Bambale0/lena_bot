@@ -68,3 +68,17 @@ test('Failed Kling repeat does not block another model quote',async({page})=>{
  const status=await page.evaluate(async()=>{const response=await fetch('/api/web/generate/video/quote',{method:'POST',body:JSON.stringify({model:'legacy',prompt:'Scene'})});return response.status;});
  expect(status).toBe(200);
 });
+
+test('existing Studio extensions converge on H3 and allow both Kling editors',async({page})=>{
+ await page.route('**/kling4-studio-harness',route=>route.fulfill({contentType:'text/html',body:`<form class="account-composer"><select data-account-model-select><option value="minimax-h3/text-to-video">H3</option><option value="${model}">Kling references</option><option value="kling-4.0/keyframe-to-video">Kling keyframes</option></select><textarea name="prompt"></textarea><label><span>Quality</span><select name="resolution"><option>2K</option></select></label><select name="duration"><option>6</option></select><select name="aspect_ratio"><option>adaptive</option></select><div data-reference-section></div><div data-optional-section><div class="composer-disclosure-body"></div></div></form>`}));
+ await page.goto('/kling4-studio-harness');
+ // Stop a broken observer from starving the browser; the assertion still fails.
+ await page.evaluate(()=>{const Native=window.MutationObserver;(window as any).observerLoops=0;window.MutationObserver=class extends Native{constructor(callback:MutationCallback){let count=0;super((records,observer)=>{if(++count>50){(window as any).observerLoops++;observer.disconnect();return;}callback(records,observer);});}};});
+ for(const file of ['minimax-h3-studio.js','seedance25-studio.js','kling4-studio.js'])await page.addScriptTag({path:path.resolve(process.cwd(),'../landing/js',file)});
+ await expect.poll(()=>page.evaluate(()=>(window as any).observerLoops)).toBe(0);
+ await page.locator('[data-account-model-select]').selectOption(model);
+ await expect(page.getByLabel('Фото-референсы · до 10',{exact:true})).toBeVisible();
+ await page.locator('[data-account-model-select]').selectOption('kling-4.0/keyframe-to-video');
+ await expect(page.getByLabel('Первый кадр',{exact:true})).toBeVisible();
+ expect(await page.evaluate(()=>(window as any).observerLoops)).toBe(0);
+});
