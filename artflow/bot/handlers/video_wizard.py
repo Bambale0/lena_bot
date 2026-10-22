@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from html import escape
+from types import SimpleNamespace
 
 from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
@@ -14,6 +15,7 @@ from bot.keyboards.video_navigation import video_back_kb as back_to_menu_kb
 from bot.states import VideoGenFSM
 from bot.ui.model_labels import model_display_name
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
+from core.kling4_access import visible_model_costs
 from db import repository as repo
 from db.models import User
 
@@ -129,7 +131,7 @@ async def choose_video_scenario(call: CallbackQuery, state: FSMContext, session:
         await safe_answer_callback(call, "Сценарий не найден", show_alert=True)
         return
 
-    costs = await repo.get_all_model_costs(session)
+    costs = await visible_model_costs(session, await repo.get_all_model_costs(session), SimpleNamespace(tg_id=call.from_user.id))
     by_key = {item.model_key: item for item in costs if item.model_key in VIDEO_CAPS}
     recommended = [by_key[key] for key in scenario["recommended"] if key in by_key]
     if not recommended:
@@ -182,7 +184,7 @@ async def open_advanced_video_models(call: CallbackQuery, state: FSMContext, ses
     await state.clear()
     await state.set_state(VideoGenFSM.model_select)
     await state.update_data(wizard_review_enabled=True, wizard_scenario="advanced", video_model_menu="vid_wizard:advanced")
-    costs = await repo.get_all_model_costs(session)
+    costs = await visible_model_costs(session, await repo.get_all_model_costs(session), SimpleNamespace(tg_id=call.from_user.id))
     await safe_edit_message(
         call.message,
         "🧠 <b>Все видео-модели</b>\n\n"
@@ -200,7 +202,7 @@ async def show_scenario_models(call: CallbackQuery, state: FSMContext, session: 
     if scenario is None:
         await safe_answer_callback(call, "Сценарий не найден", show_alert=True)
         return
-    costs = await repo.get_all_model_costs(session)
+    costs = await visible_model_costs(session, await repo.get_all_model_costs(session), SimpleNamespace(tg_id=call.from_user.id))
     compatible = [item for item in costs if supports_scenario(item.model_key, scenario["mode"])]
     await state.clear()
     await state.set_state(VideoGenFSM.model_select)

@@ -1,6 +1,7 @@
 """Multi-reference collection for feed repeats and prompt-library launches."""
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 from aiogram import Bot, F
@@ -17,6 +18,7 @@ from bot.utils.feed_media import feed_identity_references
 from bot.utils.telegram_ui import safe_answer_callback
 from core.config import settings
 from core.feed_remix_prompt import feed_image_original_recipe_allowed
+from core.kling4_access import visible_model_costs
 from db import repository as repo
 from db.models import ImageGenerationAction, User
 
@@ -288,7 +290,7 @@ async def _model_menu(call: CallbackQuery, session: AsyncSession, state: FSMCont
         await call.answer("Не удалось проверить фото. Попробуй ещё раз.", show_alert=True)
         return
     selected = str(data.get("use_model_key") or marketplace.DEFAULT_PROMPT_MODEL)
-    costs = await repo.get_all_model_costs(session)
+    costs = await visible_model_costs(session, await repo.get_all_model_costs(session), SimpleNamespace(tg_id=call.from_user.id))
     await call.message.answer(  # type: ignore[union-attr]
         "🧠 <b>Выбери нейросеть</b>\n\n"
         "Показаны только модели, которые примут все загруженные референсы.",

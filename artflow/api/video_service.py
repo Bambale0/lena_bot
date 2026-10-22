@@ -24,6 +24,7 @@ except ImportError:
 
 from api import comet_fallback, kieai_client, neironych_seedance_runtime, wan30_provider
 from api.kie_model_specs import VIDEO_SPECS, build_kie_input
+from api.kling4_contract import Kling4Input
 from api.public_files import ensure_video_reference_aspect_url, local_upload_path_from_url
 from api.seedance_provider_routing import journal_kie_fallback, submit_seedance
 from api.video_prompt_limits import validate_video_prompt
@@ -66,6 +67,8 @@ class VideoModel(StrEnum):
     VEO_3 = "veo3"
     VEO_3_FAST = "veo3_fast"
     VEO_3_LITE = "veo3_lite"
+    KLING_4_REFERENCE = "kling-4.0/reference-to-video"
+    KLING_4_KEYFRAME = "kling-4.0/keyframe-to-video"
 
 
 class VideoGenerationType(StrEnum):
@@ -282,11 +285,21 @@ async def generate_video(
     idempotency_key: str | None = None,
     neironych_submission: neironych_seedance_runtime.SubmissionContext | None = None,
     wan_request: "Wan30Request | None" = None,
+    kling4_input: "Kling4Input | None" = None,
 ) -> VideoResult:
     del image_bytes  # the URL/file-upload path is the canonical provider contract
 
     # Never truncate Seedance prompts. Validate before touching either provider.
     prompt = validate_video_prompt(model.value, prompt)
+
+    from api.kling4_contract import KLING4_MODELS
+    if model.value in KLING4_MODELS:
+        from api.kling4_launch import stage_kling4_payload
+        if kling4_input is None:
+            raise ValueError("Kling 4 requires verified typed input")
+        payload = await stage_kling4_payload(model.value, prompt, kling4_input)
+        response = await kieai_client.create_task(payload, callback_url=callback_url)
+        return VideoResult(task_id=response["data"]["taskId"], provider="kieai", uses_webhook=bool(callback_url))
 
     raw_image_url = image_url
     raw_reference_video_url = reference_video_url

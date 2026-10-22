@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.web.deps import ok
 from api.web.schemas import ModelCostCard, PricePlanCard
+from core.kling4_access import visible_model_costs
 from db import repository as repo
 from db.session import get_session
 
@@ -13,7 +14,7 @@ router = APIRouter(tags=["web"])
 
 @router.get("/models")
 async def models(session: AsyncSession = Depends(get_session)) -> dict:
-    model_costs = await repo.get_all_model_costs(session)
+    model_costs = await visible_model_costs(session, await repo.get_all_model_costs(session))
     grouped = {"image": [], "video": [], "music": [], "all": []}
     for item in model_costs:
         card = ModelCostCard.from_model_cost(item).model_dump()

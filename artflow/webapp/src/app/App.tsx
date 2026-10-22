@@ -1,3 +1,4 @@
+import { isKling4, kling4Body, kling4Intent } from "@/lib/kling4";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LoaderCircle } from "lucide-react";
 import { Toaster, toast } from "sonner";
@@ -674,6 +675,7 @@ function App() {
       const prompt = draft.prompt.trim() || (draft.model.startsWith("higgsfield/genjutsu/") ? "" : "Использовать выбранный сценарий");
       const videoBody = {
         model: draft.model, prompt, prompt_id: draft.promptId, mode: draft.mode,
+        ...kling4Body(draft),
         duration: draft.duration, aspect_ratio: draft.aspectRatio, resolution: draft.resolution,
         image_url: draft.referenceUrls[0] || null, reference_urls: draft.referenceUrls,
         video_url: draft.videoUrl || null, video_start: draft.videoStart, video_end: draft.videoEnd,
@@ -710,6 +712,7 @@ function App() {
         setVideoConfirmation(null);
       }
       for (let index = 0; index < taskCount; index += 1) {
+        const intent = isKling4(draft.model) ? await kling4Intent(videoBody, data.user.id, index) : null;
         const task = kind === "image"
           ? await api.createImage({
               model: draft.model,
@@ -721,7 +724,8 @@ function App() {
               reference_url: draft.referenceUrls[0] || null,
               reference_urls: draft.referenceUrls,
             })
-          : await api.createVideo({ ...videoBody, quoted_credits: quotedCredits });
+          : await api.createVideo({ ...videoBody, quoted_credits: quotedCredits, ...(intent ? { intent_id: intent.id } : {}) });
+        intent?.clear();
         createdTasks.push(task);
       }
       const orderedTasks = [...createdTasks].reverse();
@@ -1077,7 +1081,7 @@ function App() {
       return <GenerationScreen checkReference={ux2 ? checkReference : undefined} ux2={ux2} kind="image" user={data.user} models={data.imageModels} draft={imageDraft} submitting={submitting} referenceUploading={referenceUploadingKind === "image" || photoUploading(imageDraft)} photoUploads={ux2 && imageDraft.promptId === null ? photoQueue.controls("image") : undefined} videoUploading={videoUploadingKind === "image"} onChange={(patch) => setImageDraft((current) => applyDraftPatch(current, patch))} onUploadReferenceFiles={(files) => void uploadReferenceFiles("image", files)} onUploadVideoFile={(file) => void uploadVideoFile("image", file)} onSubmit={() => void submitGeneration("image")} onResetPreset={() => resetPreset("image")} />;
     }
     if (activeTab === "video") {
-      return <GenerationScreen checkReference={ux2 ? checkReference : undefined} ux2={ux2} kind="video" user={data.user} models={data.videoModels} draft={videoDraft} submitting={submitting} referenceUploading={referenceUploadingKind === "video" || photoUploading(videoDraft)} photoUploads={ux2 && videoDraft.promptId === null ? photoQueue.controls("video") : undefined} videoUploading={videoUploadingKind === "video"} onChange={(patch) => setVideoDraft((current) => applyDraftPatch(current, patch))} onUploadReferenceFiles={(files) => void uploadReferenceFiles("video", files)} onUploadVideoFile={(file) => void uploadVideoFile("video", file)} onQuoteWan={quoteWan} onSubmit={() => void submitGeneration("video")} onResetPreset={() => resetPreset("video")} />;
+      return <GenerationScreen checkReference={ux2 ? checkReference : undefined} ux2={ux2} kind="video" user={data.user} models={data.videoModels} draft={videoDraft} submitting={submitting} referenceUploading={referenceUploadingKind === "video" || photoUploading(videoDraft)} photoUploads={ux2 && videoDraft.promptId === null ? photoQueue.controls("video") : undefined} videoUploading={videoUploadingKind === "video"} onChange={(patch) => setVideoDraft((current) => applyDraftPatch(current, patch))} onUploadReferenceFiles={(files) => void uploadReferenceFiles("video", files)} onUploadVideoFile={(file) => void uploadVideoFile("video", file)} onUploadKling4={file => api!.uploadKling4Asset(file)} onQuoteWan={quoteWan} onSubmit={() => void submitGeneration("video")} onResetPreset={() => resetPreset("video")} />;
     }
     if (activeTab === "motion") {
       return <GenerationScreen checkReference={ux2 ? checkReference : undefined} ux2={ux2} kind="motion" user={data.user} models={data.videoModels} draft={motionDraft} submitting={submitting} referenceUploading={referenceUploadingKind === "motion" || photoUploading(motionDraft)} photoUploads={ux2 && motionDraft.promptId === null ? photoQueue.controls("motion") : undefined} videoUploading={videoUploadingKind === "motion"} onChange={(patch) => setMotionDraft((current) => applyDraftPatch(current, patch))} onUploadReferenceFiles={(files) => void uploadReferenceFiles("motion", files)} onUploadVideoFile={(file) => void uploadVideoFile("motion", file)} onSubmit={() => void submitGeneration("motion")} onResetPreset={() => resetPreset("motion")} />;

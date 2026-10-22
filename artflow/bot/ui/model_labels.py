@@ -29,6 +29,8 @@ _MODEL_LABELS: dict[str, str] = {
     "kling-2.6/text-to-video": "🎬 Kling 2.6",
     "kling-2.6/image-to-video": "🎬 Kling 2.6",
     "kling-2.6/motion-control": "🎥 Kling 2.6 Motion Control",
+    "kling-4.0/reference-to-video": "🎬 Kling 4 · Референсы",
+    "kling-4.0/keyframe-to-video": "🎬 Kling 4 · Ключевые кадры",
     "kling-3.0/video": "🎬 Kling 3.0",
     "kling-3.0/motion-control": "🎥 Kling 3.0 Motion Control",
     "kling/v3-turbo-text-to-video": "⚡ Kling V3 Turbo",

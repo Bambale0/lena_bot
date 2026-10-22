@@ -10,6 +10,7 @@ import os
 import secrets
 import tempfile
 from html import escape
+from types import SimpleNamespace
 from urllib.parse import urlencode
 
 import aiohttp
@@ -114,6 +115,7 @@ from core.gemini_omni import (
     validate_gemini_omni_media_slots,
 )
 from core.kie_seedance_callback import callback_url_for_generation
+from core.kling4_access import is_kling4_key, visible_model_costs
 from core.seedance_reconciliation import (
     handle_submission_not_sent,
     handle_submission_unknown,
@@ -1207,7 +1209,7 @@ async def cb_genjutsu_menu(
     await state.clear()
     await state.set_state(VideoGenFSM.model_select)
     await state.update_data(video_model_menu="menu:genjutsu")
-    model_costs = await repo.get_all_model_costs(session)
+    model_costs = await visible_model_costs(session, await repo.get_all_model_costs(session), SimpleNamespace(tg_id=call.from_user.id))
     configured = is_genjutsu_configured()
     text = (
         "🥷 <b>Genjutsu</b>\n\n"
@@ -1265,7 +1267,7 @@ async def cb_video_group(call: CallbackQuery, session: AsyncSession, state: FSMC
     await state.clear()
     await state.set_state(VideoGenFSM.model_select)
     await state.update_data(video_model_menu=call.data, wizard_review_enabled=True, wizard_scenario="advanced")
-    model_costs = await repo.get_all_model_costs(session)
+    model_costs = await visible_model_costs(session, await repo.get_all_model_costs(session), SimpleNamespace(tg_id=call.from_user.id))
     await safe_edit_message(
         call.message,  # type: ignore[arg-type]
         f"🎬 <b>{VIDEO_GROUP_TITLES.get(group_key, 'Модели')}</b>\n\n"
@@ -1385,6 +1387,10 @@ async def cb_video_model(
     call: CallbackQuery, session: AsyncSession, state: FSMContext, db_user: User
 ) -> None:
     model_key = call.data.split(":")[1]  # type: ignore[union-attr]
+    if is_kling4_key(model_key):
+        from bot.handlers.kling4 import start_kling4
+        await start_kling4(call, state, session, db_user, model_key)
+        return
     state_data = await state.get_data()
     caps = VIDEO_CAPS.get(model_key, {})
     if state_data.get("feed_force_reference"):
@@ -2480,7 +2486,7 @@ async def cb_vpar_back(call: CallbackQuery, state: FSMContext, session: AsyncSes
     display_name = model_cost.display_name if model_cost else model_key
 
     if data.get("feed_force_reference"):
-        model_costs = await repo.get_all_model_costs(session)
+        model_costs = await visible_model_costs(session, await repo.get_all_model_costs(session), SimpleNamespace(tg_id=call.from_user.id))
         await state.set_state(VideoGenFSM.model_select)
         await call.message.edit_text(  # type: ignore[union-attr]
             "🎬 <b>Повторить видео</b>\n\n"
@@ -2497,7 +2503,7 @@ async def cb_vpar_back(call: CallbackQuery, state: FSMContext, session: AsyncSes
             reply_markup=video_mode_kb(model_key),
         )
     else:
-        model_costs = await repo.get_all_model_costs(session)
+        model_costs = await visible_model_costs(session, await repo.get_all_model_costs(session), SimpleNamespace(tg_id=call.from_user.id))
         await state.set_state(VideoGenFSM.model_select)
         await call.message.edit_text(  # type: ignore[union-attr]
             "🎬 <b>Генерация видео</b>\n\nВыбери модель:",

@@ -744,3 +744,32 @@ class PromptLike(Base):
 
     user: Mapped["User"] = relationship(lazy="noload")
     prompt: Mapped["UserPrompt"] = relationship(lazy="noload")
+
+
+class Kling4AccessPolicy(Base):
+    """Kling 4 rollout; absence is an admin-only preview."""
+    __tablename__ = 'kling4_access_policy'
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    audience: Mapped[str] = mapped_column(String(16), nullable=False)
+    updated_by_admin_tg_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class Kling4AccessAudit(Base):
+    __tablename__ = 'kling4_access_audit'
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    previous_audience: Mapped[str] = mapped_column(String(16), nullable=False)
+    new_audience: Mapped[str] = mapped_column(String(16), nullable=False)
+    changed_by_admin_tg_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+    changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Kling4Intent(Base):
+    """One durable paid submission per user intent, including process restarts."""
+    __tablename__ = 'kling4_intents'
+    intent_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey('users.id'), nullable=False)
+    generation_id: Mapped[int] = mapped_column(Integer, ForeignKey('generations.id'), nullable=False, unique=True)
+    payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

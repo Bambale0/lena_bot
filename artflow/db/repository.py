@@ -1362,7 +1362,9 @@ async def begin_kie_video_submission(
     Neironych journal whose exact attempt is still at the submitting marker;
     an ambiguous/accepted provider state must NEVER launch KIE.
     """
-    from core.seedance_reconciliation import PRODUCT_MODELS
+    from api.kling4_contract import KLING4_MODELS
+    from core.seedance_reconciliation import PRODUCT_MODELS as SEEDANCE_MODELS
+    PRODUCT_MODELS = SEEDANCE_MODELS | KLING4_MODELS
 
     gen = await _locked_seedance_generation(session, gen_id)
     if (
@@ -1460,7 +1462,9 @@ async def bind_kie_video_callback(
     session: AsyncSession, gen_id: int, provider_task_id: str,
 ) -> Generation | None:
     """Bind only a server-signed Kie callback to its originally paid order."""
-    from core.seedance_reconciliation import PRODUCT_MODELS
+    from api.kling4_contract import KLING4_MODELS
+    from core.seedance_reconciliation import PRODUCT_MODELS as SEEDANCE_MODELS
+    PRODUCT_MODELS = SEEDANCE_MODELS | KLING4_MODELS
 
     task = str(provider_task_id or "").strip()
     if not task or len(task) > 180:
