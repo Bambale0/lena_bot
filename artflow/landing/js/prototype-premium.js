@@ -17,6 +17,8 @@ const state = {
   models: [],
   modelsByKind: { image: [], video: [], music: [] },
   modelCatalogOwner: null,
+  privateModelKinds: [],
+  publicModelsByKind: { image: [], video: [], music: [] },
   activeExample: 0,
   modelType: "all",
   generationKind: "image",
@@ -638,15 +640,14 @@ function rememberAuthSession(result = {}) {
 
 function forgetAuthSession() {
   state.authEpoch += 1;
-  if (state.modelCatalogOwner !== null) {
-    state.models = [];
-    state.modelsByKind = { image: [], video: [], music: [] };
-    state.modelCatalogOwner = null;
-  }
+  state.modelCatalogOwner = null;
+  state.privateModelKinds = [];
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(AUTH_HINT_KEY);
   state.token = "";
   state.user = null;
+  mergePublicModelCatalog();
+  renderModels();
   resetAdminState();
 }
 
@@ -5384,11 +5385,8 @@ function clearPublicData() {
   state.prompts = [];
   state.plans = [];
   state.paymentMethods = [];
-  if (!hasPrivateModelCatalog()) {
-    state.models = [];
-    state.modelsByKind = { image: [], video: [], music: [] };
-    state.modelCatalogOwner = null;
-  }
+  state.publicModelsByKind = { image: [], video: [], music: [] };
+  mergePublicModelCatalog();
 }
 
 async function loadFallbackData() {
@@ -5404,18 +5402,21 @@ function hasPrivateModelCatalog() {
   return state.user && state.modelCatalogOwner === state.user.id;
 }
 
+function mergePublicModelCatalog() {
+  for (const kind of ["image", "video", "music"]) {
+    if (hasPrivateModelCatalog() && state.privateModelKinds.includes(kind)) continue;
+    state.modelsByKind[kind] = [...state.publicModelsByKind[kind]];
+  }
+  state.models = Object.values(state.modelsByKind).flat();
+}
+
 function applyModelPayload(grouped = {}) {
-  if (hasPrivateModelCatalog()) return;
-  state.modelsByKind = {
+  state.publicModelsByKind = {
     image: (grouped.image || []).map((model) => normalizeModel(model, "image")),
     video: (grouped.video || []).map((model) => normalizeModel(model, "video")),
     music: (grouped.music || []).map((model) => normalizeModel(model, "music")),
   };
-  state.models = [
-    ...state.modelsByKind.image,
-    ...state.modelsByKind.video,
-    ...state.modelsByKind.music,
-  ];
+  mergePublicModelCatalog();
 }
 
 function applyLandingPayload(payload = {}) {
@@ -5540,13 +5541,15 @@ async function loadPrivate({ quiet = false } = {}) {
   ]);
   if (authEpoch !== state.authEpoch || state.user?.id !== me.id) return;
   const [imageModels, videoModels, musicModels, history, active, imageSession, plans, billing, methods, paymentOptions] = coreResults.map((result) => result.status === "fulfilled" ? result.value : null);
-  state.modelsByKind = {
-    image: (imageModels || []).map((model) => normalizeModel(model, "image")),
-    video: (videoModels || []).map((model) => normalizeModel(model, "video")),
-    music: (musicModels || []).map((model) => normalizeModel(model, "music")),
-  };
+  const catalogs = { image: imageModels, video: videoModels, music: musicModels };
+  state.privateModelKinds = Object.keys(catalogs).filter((kind) => Array.isArray(catalogs[kind]));
+  state.modelCatalogOwner = state.privateModelKinds.length ? me.id : null;
+  for (const kind of ["image", "video", "music"]) {
+    state.modelsByKind[kind] = Array.isArray(catalogs[kind])
+      ? catalogs[kind].map((model) => normalizeModel(model, kind))
+      : [...state.publicModelsByKind[kind]];
+  }
   state.models = Object.values(state.modelsByKind).flat();
-  state.modelCatalogOwner = me.id;
   state.history = (history || []).map(normalizeExample);
   state.queue = (active || []).map(normalizeExample);
   state.activeImageSession = imageSession || null;

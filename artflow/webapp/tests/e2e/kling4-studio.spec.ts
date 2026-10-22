@@ -123,3 +123,26 @@ for(const stage of ["me","models/video"])for(const nextOwner of [null,7,8])test(
  const result=await page.evaluate(()=>(window as any).eval('({user:state.user?.id??null,owner:state.modelCatalogOwner,keys:state.models.map(item=>item.key)})'));
  expect(result.user).toBe(nextOwner);expect(result.owner).toBeNull();expect(result.keys).not.toContain(model);
 });
+
+for(const failedKind of ['image','video','music'])test(`public ${failedKind} fallback and logout DOM survive failed private category`,async({page})=>{
+ let release: ()=>void=()=>{};const pending=new Promise<void>(resolve=>{release=resolve;});
+ await page.route('**/kling4-catalog-harness**',route=>route.fulfill({contentType:'text/html',body:'<!doctype html><html><body><div data-model-grid></div><select data-account-model-select></select></body></html>'}));
+ await page.route('**/api/web/**',async route=>{
+  const pathname=new URL(route.request().url()).pathname;
+  if(pathname==='/api/web/landing'){await pending;return route.fulfill({json:{ok:true,data:{models:Object.fromEntries(['image','video','music'].map(kind=>[kind,[{key:`public-${kind}`,display_name:`Public ${kind}`,gen_type:kind,credits:1,modes:['text']}]])),examples:[],prompts:{items:[]},plans:[{id:123}]}}});}
+  if(pathname==='/api/web/models/'+failedKind)return route.fulfill({status:503,json:{ok:false,error:'Private category unavailable'}});
+  const data=pathname==='/api/web/me'?{id:7,credits:1000,is_admin:false}:pathname==='/api/web/models/video'?[{key:model,display_name:'Kling 4',modes:['text'],credits:28.5}]:pathname==='/api/web/models/image'?[{key:'private-image',display_name:'Private image',modes:['text'],credits:1}]:pathname==='/api/web/auth/config'?{}:[];
+  return route.fulfill({json:{ok:true,data}});
+ });
+ await page.goto('/kling4-catalog-harness?type=video');await page.addScriptTag({path:path.resolve(process.cwd(),'../landing/js/prototype-premium.js')});
+ await expect.poll(()=>page.evaluate(()=>(window as any).eval('state.modelCatalogOwner'))).toBe(7);
+ release();await expect.poll(()=>page.evaluate(()=>(window as any).eval('state.plans.some(item=>item.id===123)'))).toBe(true);
+ const keys=()=>page.evaluate(()=>(window as any).eval('Object.fromEntries(Object.entries(state.modelsByKind).map(([kind,items])=>[kind,items.map(item=>item.key)]))'));
+ expect((await keys())[failedKind]).toContain(`public-${failedKind}`);
+ if(failedKind!=='video')await expect(page.locator(`[data-account-model-select] option[value="${model}"]`)).toHaveCount(1);
+ await page.evaluate(()=>(window as any).eval('forgetAuthSession()'));
+ await expect(page.locator(`[data-account-model-select] option[value="${model}"]`)).toHaveCount(0);
+ await expect(page.locator('[data-account-model-select] option[value="public-video"]')).toHaveCount(1);
+ await expect(page.locator('[data-model-grid]')).not.toContainText('Kling 4');
+ expect((await keys()).video).toEqual(['public-video']);
+});
