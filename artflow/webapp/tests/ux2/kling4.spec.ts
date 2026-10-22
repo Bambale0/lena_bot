@@ -52,3 +52,14 @@ test('ordinary catalog does not expose Kling 4 or material controls',async({page
  await expect(page.getByRole('combobox',{name:'Модель',exact:true}).locator('option')).not.toContainText(['Kling 4']);
  await expect(page.getByRole('region',{name:'Материалы Kling 4'})).toHaveCount(0);
 });
+
+test('parked generic media and Omni IDs do not block Kling quote confirmation',async({page})=>{
+ await page.addInitScript(()=>{
+  sessionStorage.setItem('apix:ux2:drafts:v1:7',JSON.stringify({version:1,owner:7,drafts:{video:{kind:'video',model:'kling-4.0/reference-to-video',prompt:'A calm landscape',promptId:null,sourceTitle:'',aspectRatio:'auto',quality:'basic',count:1,taskCount:1,mode:'text',duration:3,resolution:'720p',referenceUrls:['https://expired.example.test/old.png'],videoUrl:'https://expired.example.test/old.mp4',videoStart:10,videoEnd:1,audioIds:['audio'],characterIds:['character'],seed:1,grokMode:'normal'}}}));
+ });
+ await prepare(page);
+ await page.getByRole('combobox',{name:'Модель',exact:true}).selectOption(reference);
+ await page.getByRole('textbox',{name:/^Промпт/}).fill('A calm landscape');
+ await page.getByRole('complementary').getByRole('button',{name:'Создать',exact:true}).click();
+ await expect(page.getByRole('dialog')).toBeVisible();
+});

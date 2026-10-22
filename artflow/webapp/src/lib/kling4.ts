@@ -23,7 +23,7 @@ export interface Kling4Options {
 }
 
 export function kling4Body(draft: { model: string; kling4?: Kling4Options }): Record<string, unknown> {
-  return isKling4(draft.model) ? { kling4: draft.kling4 || {} } : {};
+  return isKling4(draft.model) ? { kling4: draft.kling4 || {}, image_url: null, reference_urls: [], video_url: null, video_start: 0, video_end: null, audio_ids: [], character_ids: [], seed: null } : {};
 }
 
 export async function kling4Intent(body: unknown, owner: number, index: number): Promise<{ id: string; clear: () => void }> {

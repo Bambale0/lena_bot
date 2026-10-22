@@ -115,6 +115,12 @@ async def create_kling4_generation(body, prompt, session, user, *, surface, call
         )
     if not settings.KIE_WEBHOOK_HMAC_KEY:
         raise HTTPException(status_code=503, detail="Kling 4: не настроена защита callback")
+    from api.miniapp_routes import MAX_CONCURRENT
+
+    if float(user.credits or 0) < quote.credits:
+        raise HTTPException(status_code=402, detail="Недостаточно кредитов")
+    if await repo.count_user_active_generations(session, user.id) >= MAX_CONCURRENT:
+        raise HTTPException(status_code=429, detail="Слишком много активных генераций")
     try:
         staged = await stage_kling4_payload(body.model, prompt, data)
     except (ValueError, OSError, RuntimeError, TimeoutError) as exc:
@@ -138,8 +144,6 @@ async def create_kling4_generation(body, prompt, session, user, *, surface, call
         billing_tariff_key=quote.tariff_key,
     )
     await require_kling4_access(session, user)
-    from api.miniapp_routes import MAX_CONCURRENT
-
     gen, fresh = await reserve_kling4(
         session,
         user_id=user.id,

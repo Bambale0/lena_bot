@@ -24,6 +24,7 @@ EXTENSIONS = {
     ".aac": "audio",
     ".flac": "audio",
     ".ogg": "audio",
+    ".oga": "audio",
     ".opus": "audio",
 }
 

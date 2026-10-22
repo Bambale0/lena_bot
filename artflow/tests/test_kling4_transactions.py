@@ -150,3 +150,41 @@ async def test_submission_marker_is_single_use_and_unknown_never_rebuys(database
         )
         assert not failed and refunded == 0
         assert (await session.get(User, owner)).credits == 914.5
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("active,rate", [(False, 28.5), (True, 30)])
+async def test_tariff_changed_during_staging_cannot_reserve(database, active, rate):
+    from fastapi import HTTPException
+
+    from db.models import GenerationType, ModelCost
+
+    sessions, owner = database
+    async with sessions() as session:
+        session.add(
+            ModelCost(
+                model_key="kling4-test-tariff",
+                display_name="Test",
+                gen_type=GenerationType.video,
+                credits=rate,
+                is_active=active,
+            )
+        )
+        await session.commit()
+        with pytest.raises(HTTPException) as error:
+            await reserve_kling4(
+                session,
+                user_id=owner,
+                intent_id=str(uuid4()),
+                model="kling-4.0/reference-to-video",
+                prompt="A scene",
+                params={"billing_tariff_key": "kling4-test-tariff", "billing_rate": 28.5},
+                credits=85.5,
+                surface="web",
+                max_active_generations=6,
+            )
+        assert error.value.status_code == 409
+        await session.rollback()
+    async with sessions() as session:
+        assert (await session.get(User, owner)).credits == 1000
+        assert await session.scalar(select(func.count()).select_from(Generation)) == 0

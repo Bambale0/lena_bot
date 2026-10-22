@@ -1,3 +1,4 @@
+import { isKling4 } from "./kling4.ts";
 import { referenceMaterials, selectGenerationInputs } from "./reference-selection.ts";
 import type { GenerationDraft, ModelInfo } from "./types";
 
@@ -37,7 +38,8 @@ export function switchDraftModel(draft: GenerationDraft, model: ModelInfo): Gene
 }
 
 /** Shared by the form and command boundary. Does not change the draft or payload. */
-export function inspectDraftMedia(source: GenerationDraft, model: ModelInfo | undefined): DraftMediaInspection {
+export function inspectDraftMedia(original: GenerationDraft, model: ModelInfo | undefined): DraftMediaInspection {
+  const source = isKling4(original.model) ? selectGenerationInputs(original) : original;
   const draft = selectGenerationInputs(source);
   const issues: MediaConflict[] = [];
   const inputs = referenceMaterials(source);

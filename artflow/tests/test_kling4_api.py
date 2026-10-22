@@ -128,6 +128,78 @@ async def test_upload_rejects_changed_owner_before_reading_private_file(monkeypa
 
     monkeypatch.setattr(kling4_access, "require_kling4_access", AsyncMock())
     file = SimpleNamespace(read=AsyncMock())
-    result = await routes.upload_kling4_asset(file=file, owner_id=1, session=None, user=SimpleNamespace(id=2))
+    result = await routes.upload_kling4_asset(
+        file=file, owner_id=1, session=None, user=SimpleNamespace(id=2)
+    )
     assert result.status_code == 409
     file.read.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_public_landing_hides_preview_models(monkeypatch):
+    from api.web import landing
+
+    monkeypatch.setattr(
+        landing.repo,
+        "get_all_model_costs",
+        AsyncMock(return_value=[SimpleNamespace(model_key=REFERENCE_MODEL)]),
+    )
+    result = await landing._group_model_cards(SimpleNamespace(get=AsyncMock(return_value=None)))
+    assert result == {"image": [], "video": [], "music": [], "all": []}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("credits,active,expected", [(0, 0, 402), (1000, 6, 429)])
+async def test_unfunded_or_busy_request_does_not_stage_assets(
+    monkeypatch, credits, active, expected
+):
+    from api import kling4_checkout as checkout
+    from api.kling4_contract import Kling4Input
+    from api.miniapp_routes import VideoGenRequest
+    from core.config import settings
+
+    monkeypatch.setattr(checkout, "require_kling4_access", AsyncMock())
+    monkeypatch.setattr(settings, "KIE_WEBHOOK_HMAC_KEY", "test")
+    monkeypatch.setattr(
+        checkout,
+        "quote_kling4",
+        AsyncMock(return_value=(Kling4Input(), SimpleNamespace(credits=85.5))),
+    )
+    monkeypatch.setattr(
+        checkout.repo, "count_user_active_generations", AsyncMock(return_value=active)
+    )
+    stage = AsyncMock()
+    monkeypatch.setattr(checkout, "stage_kling4_payload", stage)
+    body = VideoGenRequest(
+        model=REFERENCE_MODEL,
+        prompt="A scene",
+        quoted_credits=85.5,
+        intent_id="12345678-1234-1234-1234-123456789abc",
+    )
+    with pytest.raises(HTTPException) as error:
+        await checkout.create_kling4_generation(
+            body,
+            body.prompt,
+            SimpleNamespace(get=AsyncMock(return_value=None)),
+            SimpleNamespace(id=1, credits=credits),
+            surface="web",
+            callback_url="https://example.org/callback",
+        )
+    assert error.value.status_code == expected
+    stage.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_telegram_oga_voice_is_probed_and_stored(monkeypatch, tmp_path):
+    from api import kling4_assets as assets
+
+    monkeypatch.setattr(assets, "get_static_upload_directory", lambda: tmp_path)
+    monkeypatch.setattr(
+        assets, "public_upload_url", lambda name: "https://media.example.org/" + name
+    )
+    probe = AsyncMock(return_value=SimpleNamespace(duration_seconds=6, width=None, height=None))
+    monkeypatch.setattr(assets, "probe_local_media", probe)
+    result = await assets.store_kling4_asset(b"voice fixture", "voice.oga", user_id=1)
+    assert result["kind"] == "audio"
+    assert result["url"].endswith(".oga")
+    probe.assert_awaited_once()

@@ -84,3 +84,19 @@ test("Wan video advanced settings round trip without changing old image drafts",
   assert.equal(readUserDrafts(s, 7).video?.wanAudio, false);
   assert.deepEqual(readUserDrafts(s, 7).image, draft());
 });
+
+test('Kling structured materials survive reload without prompt and stay owner scoped',()=>{
+ const s=storage();const kling4={elements:[{name:'Hero',image_urls:['https://media.example.test/a.png','https://media.example.test/b.png'],tag:'character' as const,voice_url:'https://media.example.test/voice.ogg'}],voices:[{name:'Narrator',audio_url:'https://media.example.test/narrator.ogg'}],keyframe_urls:['https://media.example.test/middle.png']};
+ const video={...draft(),kind:'video' as const,model:'kling-4.0/reference-to-video',prompt:'',referenceUrls:[],kling4};
+ assert.equal(saveUserDrafts(s,7,{video}),true);assert.deepEqual(readUserDrafts(s,7).video?.kling4,kling4);assert.deepEqual(readUserDrafts(s,8),{});
+ assert.equal(saveUserDrafts(storage(),7,{video:{...video,kling4:{image_urls:['javascript:private']}}}),false);
+});
+
+test('Kling projection parks generic media and ids without blocking its editor',async()=>{
+ const {selectGenerationInputs}=await import('../../src/lib/reference-selection.ts');
+ const {inspectDraftMedia}=await import('../../src/lib/draft-media.ts');
+ const source={...draft(),kind:'video' as const,model:'kling-4.0/keyframe-to-video',mode:'image',videoUrl:'https://media.example.test/expired.mp4',audioIds:['audio'],characterIds:['character'],videoStart:5,videoEnd:1};
+ const effective=selectGenerationInputs(source);assert.deepEqual(effective.referenceUrls,[]);assert.equal(effective.videoUrl,'');assert.deepEqual(effective.audioIds,[]);assert.equal(source.videoUrl,'https://media.example.test/expired.mp4');
+ assert.deepEqual(inspectDraftMedia(source,{key:source.model,display_name:'Kling',modes:['text','image'],credits:1,max_refs:10}).issues,[]);
+ const s=storage();assert.equal(saveUserDrafts(s,7,{video:source}),true);const restored=readUserDrafts(s,7).video!;assert.deepEqual(restored.referenceUrls,source.referenceUrls);assert.equal(restored.videoUrl,source.videoUrl);assert.deepEqual(restored.audioIds,source.audioIds);assert.equal(restored.videoEnd,1);
+});

@@ -5,20 +5,21 @@ const model='kling-4.0/reference-to-video';
 
 test('Studio extension uploads roles, enriches both quote and launch, and restores other models',async({page})=>{
  const calls: Record<string,unknown>[]=[];
- await page.route('**/kling4-studio-harness',route=>route.fulfill({contentType:'text/html',body:`<form class="account-composer"><select data-account-model-select><option value="${model}">Kling 4</option><option value="legacy">Legacy</option></select><textarea name="prompt">@image_1 Move gently</textarea><div data-reference-section>Generic uploader</div><div data-video-trim-row>Generic trim</div></form>`}));
+ await page.route('**/kling4-studio-harness',route=>route.fulfill({contentType:'text/html',body:`<form class="account-composer"><select data-account-model-select><option value="${model}">Kling 4</option><option value="legacy">Legacy</option></select><textarea name="prompt" maxlength="30000">@image_1 Move gently</textarea><div data-reference-section>Generic uploader</div><div data-video-trim-row>Generic trim</div></form>`}));
  await page.route('**/api/web/kling4/assets',route=>route.fulfill({json:{ok:true,data:{url:'https://media.example.test/kling4/7/input.png'}}}));
  await page.route('**/api/web/generate/video**',route=>{calls.push(route.request().postDataJSON());return route.fulfill({status:202,json:{id:10,status:'processing'}});});
  await page.goto('/kling4-studio-harness');
  await page.addScriptTag({path:script});
  await page.getByLabel('Фото-референсы · до 10',{exact:true}).setInputFiles({name:'photo.png',mimeType:'image/png',buffer:Buffer.from('test')});
  await expect(page.getByText(/input.png/)).toBeVisible();
- const body={model,prompt:'@image_1 Move gently',duration:3,resolution:'720p'};
+ const body={model,prompt:'@image_1 Move gently',duration:3,resolution:'720p',reference_urls:['https://media.example.test/miniapp/old.png'],video_url:'https://media.example.test/miniapp/old.mp4'};
  await page.evaluate(async body=>{await fetch('/api/web/generate/video/quote',{method:'POST',body:JSON.stringify(body)});await fetch('/api/web/generate/video',{method:'POST',body:JSON.stringify({...body,quoted_credits:85.5})});},body);
  expect(calls).toHaveLength(2);
- for(const call of calls)expect((call.kling4 as any).image_urls).toEqual(['https://media.example.test/kling4/7/input.png']);
+ for(const call of calls){expect((call.kling4 as any).image_urls).toEqual(['https://media.example.test/kling4/7/input.png']);expect(call.reference_urls).toEqual([]);expect(call.video_url).toBeNull();}
  expect(calls[1].intent_id).toMatch(/^[0-9a-f-]{36}$/);
  await page.locator('[data-account-model-select]').selectOption('legacy');
  await expect(page.locator('[data-reference-section]')).toBeVisible();
+ await expect(page.locator('[name=prompt]')).toHaveAttribute('maxlength','30000');
  await expect(page.getByRole('region',{name:'Материалы Kling 4'})).toBeHidden();
 });
 
@@ -57,4 +58,13 @@ test('Studio stops a private multi-file batch when the account changes',async({p
  await expect(page.getByLabel('Фото-референсы · до 10',{exact:true})).toBeEnabled();
  expect(requests).toBe(1);
  await expect(page.getByText(/private.png/)).toHaveCount(0);
+});
+
+test('Failed Kling repeat does not block another model quote',async({page})=>{
+ await page.route('**/kling4-studio-harness**',route=>route.fulfill({contentType:'text/html',body:`<form class="account-composer"><select data-account-model-select><option value="legacy">Legacy</option></select><textarea name="prompt"></textarea></form>`}));
+ await page.route('**/api/web/kling4/recipe/42',route=>route.fulfill({status:404,json:{ok:false,error:'Recipe unavailable'}}));
+ await page.route('**/api/web/generate/video/quote',route=>route.fulfill({json:{cost_credits:1}}));
+ await page.goto('/kling4-studio-harness?kling4_repeat=42');await page.addScriptTag({path:script});
+ const status=await page.evaluate(async()=>{const response=await fetch('/api/web/generate/video/quote',{method:'POST',body:JSON.stringify({model:'legacy',prompt:'Scene'})});return response.status;});
+ expect(status).toBe(200);
 });

@@ -603,11 +603,11 @@ function App() {
   const submitGeneration = useCallback(async (kind: "image" | "video" | "motion", confirmed?: VideoConfirmation) => {
     if (!api || !data || submitting || submissionLock.current) return;
     const sourceDraft = currentDraft[kind];
-    if (photoQueue.hasPending(kind)) return;
+    if (!isKling4(sourceDraft.model) && photoQueue.hasPending(kind)) return;
     const draft = selectGenerationInputs(sourceDraft);
-    const hasSelection = sourceDraft.promptId === null && sourceDraft.referenceMaterials !== undefined;
+    const hasSelection = !isKling4(sourceDraft.model) && sourceDraft.promptId === null && sourceDraft.referenceMaterials !== undefined;
     if ((ux2 || hasSelection) && draft.promptId === null) {
-      if (referenceUploadingKind === kind || videoUploadingKind === kind) return;
+      if (!isKling4(draft.model) && (referenceUploadingKind === kind || videoUploadingKind === kind)) return;
       const model = (kind === "image" ? data.imageModels : data.videoModels).find(item => item.key === draft.model);
       const { issues } = inspectDraftMedia(sourceDraft, model);
       if (issues.length) {
@@ -675,7 +675,6 @@ function App() {
       const prompt = draft.prompt.trim() || (draft.model.startsWith("higgsfield/genjutsu/") ? "" : "Использовать выбранный сценарий");
       const videoBody = {
         model: draft.model, prompt, prompt_id: draft.promptId, mode: draft.mode,
-        ...kling4Body(draft),
         duration: draft.duration, aspect_ratio: draft.aspectRatio, resolution: draft.resolution,
         image_url: draft.referenceUrls[0] || null, reference_urls: draft.referenceUrls,
         video_url: draft.videoUrl || null, video_start: draft.videoStart, video_end: draft.videoEnd,
@@ -689,6 +688,7 @@ function App() {
         wan_reference_link_urls: draft.wanReferenceLinkUrls || [],
         wan_first_frame_url: draft.wanFirstFrameUrl || null,
         wan_last_frame_url: draft.wanLastFrameUrl || null,
+        ...kling4Body(draft),
       };
       // Model-specific upload panels hold files outside GenerationDraft. Quote
       // every video launch so their enhancers can attach those files first.

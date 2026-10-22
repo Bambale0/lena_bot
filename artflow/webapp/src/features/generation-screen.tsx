@@ -263,7 +263,7 @@ function GenerationScreen({
   const missingPrompt = !draft.prompt.trim() && !draft.promptId && !selectedModel?.key.startsWith("higgsfield/genjutsu/");
   const maxPromptLength = promptMaxLength(kind, selectedModel?.key);
   const insufficientCredits = !referenceVideoPricePending && estimate > Number(user.credits || 0);
-  const mediaUploading = referenceUploading || videoUploading || kling4Uploading;
+  const mediaUploading = (!kling4Selected && (referenceUploading || videoUploading)) || kling4Uploading;
   const invalidSeed = Boolean(
     selectedModel?.has_seed &&
     draft.seed != null &&

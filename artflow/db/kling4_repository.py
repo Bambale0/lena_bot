@@ -5,13 +5,14 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import datetime, timezone
+from decimal import Decimal
 from uuid import UUID
 
 from fastapi import HTTPException
 from sqlalchemy import select
 
 from db import repository as repo
-from db.models import Generation, GenerationStatus, GenerationType, Kling4Intent, User
+from db.models import Generation, GenerationStatus, GenerationType, Kling4Intent, ModelCost, User
 
 
 def canonical_intent(value: str) -> str:
@@ -55,6 +56,24 @@ async def reserve_kling4(
         gen = await session.get(Generation, existing.generation_id)
         await session.commit()
         return gen, False
+    tariff_key = params.get("billing_tariff_key")
+    if tariff_key:
+        tariff = (
+            await session.execute(
+                select(ModelCost)
+                .where(ModelCost.model_key == tariff_key)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if (
+            tariff is None
+            or not tariff.is_active
+            or Decimal(str(tariff.credits)) != Decimal(str(params["billing_rate"]))
+        ):
+            raise HTTPException(
+                status_code=409, detail="Тариф Kling 4 изменился. Подтверди новую цену"
+            )
     if float(owner.credits) < credits:
         raise HTTPException(status_code=402, detail="Недостаточно кредитов")
     if await repo.count_user_active_generations(session, user_id) >= max_active_generations:
@@ -79,7 +98,7 @@ async def reserve_kling4(
             "registered_at": now,
         },
     }
-    # Staging is free and occurs after atomic reservation. Crash recovery never
+    # Free staging precedes reservation; the tariff is locked again above. Crash recovery never
     # replays a POST: only a committed submitting marker may cross the boundary.
     gen.input_params = json.dumps(stored, ensure_ascii=False)
     owner.credits = float(owner.credits) - credits

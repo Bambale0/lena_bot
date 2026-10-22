@@ -135,12 +135,13 @@
   }
   window.fetch=async function(resource,init) {
     const url=typeof resource==='string'?resource:resource?.url||'';
-    if(repeatId && !recipeApplied && init?.method?.toUpperCase()==='POST' && /\/generate\/video/.test(url))throw new Error(recipeError||'Подожди восстановления исходного заказа');
     if(init?.method?.toUpperCase()==='POST' && /\/generate\/video(?:\/quote)?(?:\?|$)/.test(url) && typeof init.body==='string') {
       const body=JSON.parse(init.body);
       if(isKling(body.model)) {
+        if(repeatId && !recipeApplied)throw new Error(recipeError||'Подожди восстановления исходного заказа');
         if(uploading)throw new Error('Подожди завершения загрузки материалов');
         body.kling4=structuredClone(drafts.get(body.model)||{});
+        body.image_url=null;body.reference_urls=[];body.video_url=null;body.audio_ids=[];body.character_ids=[];body.seed=null;
         body.video_start=0;body.video_end=null;
         const launch=!/\/quote(?:\?|$)/.test(url); const intent=launch?await intentFor(body):null;
         if(intent)body.intent_id=intent.id;
@@ -173,6 +174,8 @@
     }
     if(currentKey()!==renderedModel || !panel?.isConnected)render();
     if(!isKling(currentKey())) {
+      const prompt=document.querySelector('.account-composer [name=prompt]');
+      if(prompt?.dataset.kling4Max!==undefined){const original=prompt.dataset.kling4Max;if(original)prompt.setAttribute('maxlength',original);else prompt.removeAttribute('maxlength');delete prompt.dataset.kling4Max;}
       document.querySelectorAll('[data-kling4-hidden]').forEach(node => { node.style.display=node.dataset.kling4Hidden; delete node.dataset.kling4Hidden; });
       return;
     }
@@ -180,7 +183,7 @@
     for(const selector of ['[data-reference-section]','[data-video-trim-row]','[data-video-identity-row]']) {
       const node=form?.querySelector(selector);if(node && node.style.display!=='none'){node.dataset.kling4Hidden=node.style.display;node.style.display='none';}
     }
-    const prompt=form?.querySelector('[name=prompt]');if(prompt && prompt.maxLength!==8000)prompt.maxLength=8000;
+    const prompt=form?.querySelector('[name=prompt]');if(prompt && prompt.maxLength!==8000){if(prompt.dataset.kling4Max===undefined)prompt.dataset.kling4Max=prompt.getAttribute('maxlength')||'';prompt.maxLength=8000;};
   }
   document.addEventListener('change',()=>queueMicrotask(sync));
   new MutationObserver(()=>queueMicrotask(sync)).observe(document.documentElement,{childList:true,subtree:true});
