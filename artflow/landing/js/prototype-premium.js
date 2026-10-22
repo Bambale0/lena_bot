@@ -11,10 +11,12 @@ const state = {
   token: "",
   authConfig: null,
   authChecked: false,
+  authEpoch: 0,
   user: null,
   examples: [],
   models: [],
   modelsByKind: { image: [], video: [], music: [] },
+  modelCatalogOwner: null,
   activeExample: 0,
   modelType: "all",
   generationKind: "image",
@@ -627,6 +629,7 @@ function resetAdminState() {
 }
 
 function rememberAuthSession(result = {}) {
+  state.authEpoch += 1;
   state.token = "";
   state.user = result.user || state.user || null;
   localStorage.removeItem(TOKEN_KEY);
@@ -634,6 +637,12 @@ function rememberAuthSession(result = {}) {
 }
 
 function forgetAuthSession() {
+  state.authEpoch += 1;
+  if (state.modelCatalogOwner !== null) {
+    state.models = [];
+    state.modelsByKind = { image: [], video: [], music: [] };
+    state.modelCatalogOwner = null;
+  }
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(AUTH_HINT_KEY);
   state.token = "";
@@ -5375,8 +5384,11 @@ function clearPublicData() {
   state.prompts = [];
   state.plans = [];
   state.paymentMethods = [];
-  state.models = [];
-  state.modelsByKind = { image: [], video: [], music: [] };
+  if (!hasPrivateModelCatalog()) {
+    state.models = [];
+    state.modelsByKind = { image: [], video: [], music: [] };
+    state.modelCatalogOwner = null;
+  }
 }
 
 async function loadFallbackData() {
@@ -5388,7 +5400,12 @@ async function ensureFallbackVisuals() {
   return;
 }
 
+function hasPrivateModelCatalog() {
+  return state.user && state.modelCatalogOwner === state.user.id;
+}
+
 function applyModelPayload(grouped = {}) {
+  if (hasPrivateModelCatalog()) return;
   state.modelsByKind = {
     image: (grouped.image || []).map((model) => normalizeModel(model, "image")),
     video: (grouped.video || []).map((model) => normalizeModel(model, "video")),
@@ -5470,10 +5487,12 @@ async function loadFeedSource(source = "feed") {
 }
 
 async function loadPrivate({ quiet = false } = {}) {
+  const authEpoch = state.authEpoch;
   let me = null;
   try {
     me = await request("/me");
   } catch (error) {
+    if (authEpoch !== state.authEpoch) return;
     state.authChecked = true;
     const authExpired = error?.status === 401 || error?.status === 403;
     if (authExpired || !state.user) {
@@ -5489,6 +5508,7 @@ async function loadPrivate({ quiet = false } = {}) {
     if (!quiet) toast("Не удалось обновить кабинет. Показываю последнюю загруженную сессию.", "info");
     return;
   }
+  if (authEpoch !== state.authEpoch) return;
   if (!me) {
     state.authChecked = true;
     forgetAuthSession();
@@ -5518,6 +5538,7 @@ async function loadPrivate({ quiet = false } = {}) {
     optionalRequest("/billing/payment-methods", []),
     optionalRequest("/billing/payment-options", []),
   ]);
+  if (authEpoch !== state.authEpoch || state.user?.id !== me.id) return;
   const [imageModels, videoModels, musicModels, history, active, imageSession, plans, billing, methods, paymentOptions] = coreResults.map((result) => result.status === "fulfilled" ? result.value : null);
   state.modelsByKind = {
     image: (imageModels || []).map((model) => normalizeModel(model, "image")),
@@ -5525,6 +5546,7 @@ async function loadPrivate({ quiet = false } = {}) {
     music: (musicModels || []).map((model) => normalizeModel(model, "music")),
   };
   state.models = Object.values(state.modelsByKind).flat();
+  state.modelCatalogOwner = me.id;
   state.history = (history || []).map(normalizeExample);
   state.queue = (active || []).map(normalizeExample);
   state.activeImageSession = imageSession || null;
@@ -5550,6 +5572,7 @@ async function loadPrivate({ quiet = false } = {}) {
     me.is_admin ? request("/admin/overview") : Promise.resolve(null),
     me.is_admin ? request("/admin/prompts?status=pending") : Promise.resolve({ items: [] }),
   ]);
+  if (authEpoch !== state.authEpoch || state.user?.id !== me.id) return;
   const [referrals, prompts, help, adminOverview, adminPrompts] = extraResults.map((result) => result.status === "fulfilled" ? result.value : null);
   state.referrals = referrals;
   state.prompts = prompts?.items || state.prompts;

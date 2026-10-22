@@ -82,3 +82,44 @@ test('existing Studio extensions converge on H3 and allow both Kling editors',as
  await expect(page.getByLabel('Первый кадр',{exact:true})).toBeVisible();
  expect(await page.evaluate(()=>(window as any).observerLoops)).toBe(0);
 });
+
+test('slow public landing cannot erase the already loaded private admin catalog',async({page})=>{
+ let release: ()=>void=()=>{};const pending=new Promise<void>(resolve=>{release=resolve;});
+ await page.route('**/kling4-catalog-harness',route=>route.fulfill({contentType:'text/html',body:'<!doctype html><html><body></body></html>'}));
+ await page.route('**/api/web/**',async route=>{
+  const pathname=new URL(route.request().url()).pathname;
+  if(pathname==='/api/web/landing'){await pending;return route.fulfill({json:{ok:true,data:{models:{image:[],video:[],music:[]},examples:[],prompts:{items:[]},plans:[{id:123}]}}});}
+  const data=pathname==='/api/web/me'?{id:7,credits:1000,is_admin:false}:pathname==='/api/web/models/video'?[{key:model,display_name:'Kling 4',modes:['text','image'],credits:28.5}]:pathname==='/api/web/auth/config'?{}:[];
+  return route.fulfill({json:{ok:true,data}});
+ });
+ await page.goto('/kling4-catalog-harness');
+ await page.addScriptTag({path:path.resolve(process.cwd(),'../landing/js/prototype-premium.js')});
+ const keys=()=>page.evaluate(()=>((window as any).eval('state.modelsByKind.video')).map((item:any)=>item.key));
+ await expect.poll(keys).toContain(model);
+ const landing=page.waitForResponse('**/api/web/landing');release();await landing;
+ await expect.poll(()=>page.evaluate(()=>(window as any).eval('state.plans.some(item=>item.id===123)'))).toBe(true);
+ expect(await keys()).toContain(model);
+ await page.evaluate(()=>(window as any).eval('clearPublicData()'));
+ expect(await keys()).toContain(model);
+ await page.evaluate(()=>(window as any).eval('forgetAuthSession()'));
+ expect(await keys()).not.toContain(model);
+});
+
+for(const stage of ["me","models/video"])for(const nextOwner of [null,7,8])test(`late private ${stage} cannot cross logout/session change to ${nextOwner}`,async({page})=>{
+ let release: ()=>void=()=>{};const pending=new Promise<void>(resolve=>{release=resolve;});let started=false;
+ await page.route('**/kling4-catalog-harness',route=>route.fulfill({contentType:'text/html',body:'<!doctype html><html><body></body></html>'}));
+ await page.route('**/api/web/**',async route=>{
+  const pathname=new URL(route.request().url()).pathname;
+  if(pathname==='/api/web/'+stage){started=true;await pending;}
+  const data=pathname==='/api/web/me'?{id:7,credits:1000,is_admin:false}:pathname==='/api/web/models/video'?[{key:model,display_name:'Kling 4',modes:['text'],credits:28.5}]:pathname==='/api/web/landing'?{models:{image:[],video:[],music:[]},examples:[],prompts:{items:[]},plans:[]}:pathname==='/api/web/auth/config'?{}:[];
+  return route.fulfill({json:{ok:true,data}});
+ });
+ await page.goto('/kling4-catalog-harness');await page.addScriptTag({path:path.resolve(process.cwd(),'../landing/js/prototype-premium.js')});
+ await expect.poll(()=>started).toBe(true);
+ await page.evaluate(next=>{(window as any).eval('forgetAuthSession()');if(next!==null)(window as any).eval(`rememberAuthSession({user:{id:${next}}})`);},nextOwner);
+ const response=page.waitForResponse('**/api/web/'+stage);release();await response;
+ // Wait until the stale batch has settled without granting it a current session.
+ await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+ const result=await page.evaluate(()=>(window as any).eval('({user:state.user?.id??null,owner:state.modelCatalogOwner,keys:state.models.map(item=>item.key)})'));
+ expect(result.user).toBe(nextOwner);expect(result.owner).toBeNull();expect(result.keys).not.toContain(model);
+});
