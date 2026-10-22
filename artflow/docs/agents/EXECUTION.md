@@ -1,3 +1,13 @@
+## 2026-10-22 — Wan feed photo collection
+
+Baseline `636fcf111d74f3538d1d5ec04dd9ae34a01db386`; isolated branch `fix/wan-feed-photo-upload-20261022`. User authorized repair after read-only diagnosis. Wan edit recipes require multiple photos; Telegram asks for one and leaves upload state immediately. Synthetic reproduction retained one reference; existing 64 checkout tests miss upload navigation. Relevant source hashes match production.
+
+Acceptance: Telegram collects multiple reader photos for video-reference repeats, announces the recipe-derived minimum and refuses early Done; site/Mini App expose the same safe count and prevent premature quote/launch. Private inputs, auth, pricing, exact quote and pre-debit validation remain authoritative. No migrations, runtime/admin configuration or paid smoke. Counts derive from stored recipe, never source/account IDs. Existing safe logs/journals retained; progress makes rejection actionable without logging media.
+
+Preflight: instructions, local skills, README, feed schemas/routes, bot FSM/upload, shared runner/legacy entry, tests, CI and prior Wan PRs #282/#283/#284 inspected. Sources: local debugging/TDD/verification, claw review checklist, wondelai legacy-code guide; Anthropic webapp-testing inspected; Bambale code-review for independent review.
+
+Steps: 1. [x] baseline/audit; 2. [x] seven Python failures reproduced lost uploads/early Done/missing public count; both new browser cases failed before implementation; 3. [x] shared count and site/mini_app/telegram_bot parity; 4. [x] 152 initial focused Python checks, full pytest 3579 passed / 76 environment-dependent skips / 0 failures (3 pre-existing warnings); 114 frontend units, fresh typecheck/build and all 40 Desktop repeat browser scenarios passed; full Ruff/compile/diff passed; provider inventory/readiness/dry smoke valid for 98 contracts. Exported OpenAPI: 195 paths, artifacts unchanged because feed cards use existing dictionary responses. Independent Standards and Spec reviewers found no blocking findings. Existing exact first/last-frame excess-photo UX remains server-rejected, outside this four-photo edit fix; no acceptance rule weakened. Existing per-FSM event isolation covers sequential album processing. 5. [ ] PR/exact-head CI/auto-merge; 6. [ ] autodeploy/health. No production mutation or paid render. All 8 Wan/Prime browser cases across iPhone SE, iPhone 13, Pixel 5 and Desktop passed. CI must cover local environment skips.
+
 ## 2026-10-21 — Prompt / Pinterest / Telegram media fixes (active)
 
 Baseline `7b037621a3c418b3b1add1a5e523fcc8ef5ef230`. Diagnosis, acceptance, numbered plan and live progress: [execution details](prompt-reference-media-20261021.md).

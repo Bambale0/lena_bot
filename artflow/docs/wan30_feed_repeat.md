@@ -75,3 +75,17 @@ The full local Python suite for this follow-up completed with 3498 passed,
 64 environment-dependent skips and 3 warnings. It used dummy credentials,
 not production data. Exact-head CI remains mandatory for the skipped
 PostgreSQL/Nginx integrations; local results never bypass protected checks.
+
+
+### Reader photo collection (2026-10-22)
+
+Public cards expose only `source_required_photo_count`, derived from the same
+canonical Wan snapshot and count rule used at checkout. Reference/edit/file/link
+recipes need at least the original image-slot count; first/last recipes retain
+their strict frame count. Private author inputs are never included in this field.
+Telegram collects reader photos sequentially or as an album and stays in upload
+until Done; Done refuses an incomplete recipe. Existing per-FSM event isolation
+serializes album updates. Site, Mini App and the supported legacy runner show
+the minimum and withhold quote/launch until enough reader photos are present.
+Final server-side recipe validation remains mandatory before any debit.
+No migrations, pricing, provider routing or admin settings change.

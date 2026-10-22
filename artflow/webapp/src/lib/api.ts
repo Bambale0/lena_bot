@@ -118,6 +118,7 @@ function feedItemFromPublicPayload(payload: unknown): FeedItem | null {
     model: String(item.model || ""),
     gen_type: String(item.gen_type || item.type || ""),
     source_has_video_reference: typeof item.source_has_video_reference === "boolean" ? item.source_has_video_reference : null,
+    source_required_photo_count: typeof item.source_required_photo_count === "number" ? item.source_required_photo_count : null,
     source_image_recipe_available: item.source_image_recipe_available === true,
     source_image_recipe_available_for_nano21: item.source_image_recipe_available_for_nano21 === true,
     original_image_quality: typeof item.original_image_quality === "string" ? item.original_image_quality : null,

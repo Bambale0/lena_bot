@@ -28,6 +28,7 @@ COMPACT_FEED_KEYS = {
     "shares",
     "aspect_ratio",
     "source_has_video_reference",
+    "source_required_photo_count",
     "source_image_recipe_available",
     "source_image_recipe_available_for_nano21",
     "original_image_quality",

@@ -598,7 +598,7 @@ def _video_params_hint(model_key: str, data: dict) -> str:
 
 
 def _video_ref_count(data: dict) -> int:
-    if data.get("mode") != "image":
+    if data.get("mode") != "image" and not _is_feed_video_use(data):
         return 0
     ref_file_ids = data.get("ref_file_ids")
     if isinstance(ref_file_ids, list):
@@ -1515,6 +1515,10 @@ async def _handle_mode(
                  "Загрузи своё фото. Промпт и параметры автора сохраняются, его готовое видео не отправляется."
         )
         markup = video_back_kb()
+        if model_key in {VideoModel.WAN_30.value, VideoModel.WAN_30_PRIME.value}:
+            required = max(1, data.get("feed_use_required_photos") or 0)
+            text += f"\n\nДля повтора нужно фото: {required}. Можно отправить подряд или альбомом. После загрузки нажми «Готово»."
+            markup = multi_ref_kb(_video_ref_count(data), _video_max_refs_for_state(data), back_cb="vid_nav:back")
         if model_key == GEMINI_OMNI_VIDEO_MODEL:
             text += "\n\n" + _status_text(data) + "\nПосле загрузки фото нажми «Готово»."
             markup = _media_keyboard()
@@ -1526,7 +1530,7 @@ async def _handle_mode(
         if _is_feed_video_use(data):
             upload_text = (
                 f"✅ <b>{display_name}</b> · повтор по фото\n\n"
-                "🖼️ Загрузи своё фото/референс. Повтор выполним по оригинальному промпту автора, "
+                f"🖼️ Для повтора нужно фото: {max(1, data.get("feed_use_required_photos") or 0)}. Повтор выполним по оригинальному промпту автора, "
                 "а готовое видео не будем использовать как референс."
             )
             if max_refs > 1:
@@ -1879,7 +1883,10 @@ async def handle_image_upload(
     display_name = model_cost.display_name if model_cost else model_key
     max_refs = _video_max_refs_for_state(data)
 
-    if max_refs > 1 and data.get("mode") == "image":
+    collect_feed_photos = _is_feed_video_use(data) and model_key in {
+        VideoModel.WAN_30.value, VideoModel.WAN_30_PRIME.value,
+    }
+    if max_refs > 1 and (data.get("mode") == "image" or collect_feed_photos):
         existing = [str(item) for item in (data.get("ref_file_ids") or []) if item]
         if file_id not in existing and len(existing) < max_refs:
             existing.append(file_id)
@@ -1959,8 +1966,9 @@ async def cb_video_ref_done_multi(
     session: AsyncSession,
 ) -> None:
     data = await state.get_data()
-    if _video_ref_count(data) <= 0:
-        await call.answer("Сначала загрузи хотя бы одно фото", show_alert=True)
+    required = max(1, data.get("feed_use_required_photos") or 0) if _is_feed_video_use(data) else 1
+    if _video_ref_count(data) < required:
+        await call.answer(f"Для повтора нужно фото: {required}. Загружено: {_video_ref_count(data)}.", show_alert=True)
         return
     model_key = str(data["model_key"])
     model_cost = await repo.get_model_cost(session, model_key)
