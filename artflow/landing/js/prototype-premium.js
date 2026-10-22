@@ -4823,6 +4823,14 @@ async function handleGenerationAction(action, generationId) {
   if (["repeat", "variant", "animate"].includes(action)) {
     const item = (state.history || []).find((entry) => String(entry.id) === String(generationId));
     if (!item) return;
+    if (String(item.model || "").startsWith("kling-4.0/") && action !== "animate") {
+      const repeatUrl = new URL('studio.html', window.location.href);
+      repeatUrl.searchParams.set('type', 'video');
+      repeatUrl.searchParams.set('model', String(item.model));
+      repeatUrl.searchParams.set('kling4_repeat', String(generationId));
+      window.location.href = `${repeatUrl.pathname}${repeatUrl.search}`;
+      return;
+    }
     const url = new URL('studio.html', window.location.href);
     const genType = String(item.gen_type || item.type || "image").toLowerCase();
     url.searchParams.set('type', action === "animate" ? "video" : (genType === 'video' ? 'video' : 'image'));

@@ -34,6 +34,7 @@ from bot.states.prompt import PromptModerateFSM, PromptUploadFSM
 from bot.utils.deep_links import build_start_payload
 from bot.utils.telegram_media import local_media_path
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
+from core.kling4_access import visible_model_costs
 from db import repository as repo
 from db.models import PromptStatus, User, UserPrompt
 from db.prompt_repository import (
@@ -432,7 +433,7 @@ async def cb_prompt_use(
         await call.answer("Промпт не найден", show_alert=True)
         return
 
-    model_costs = await repo.get_all_model_costs(session)
+    model_costs = await visible_model_costs(session, await repo.get_all_model_costs(session), db_user)
     await state.clear()
     await state.set_state(PromptUseFSM.model_select)
     await state.update_data(use_prompt_id=prompt_id)

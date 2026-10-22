@@ -21,7 +21,7 @@ from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.types import LabeledPrice, URLInputFile
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import Date, String, cast, desc, func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -47,6 +47,7 @@ from api.image_prompt_limits import validate_image_prompt
 from api.image_service import ImageModel, normalize_quality_for_aspect_ratio
 from api.kie_webhook import extract_error, extract_status
 from api.kieai_client import KieSubmissionOutcomeUnknown
+from api.kling4_contract import KLING4_MODELS, Kling4Input
 from api.midjourney_service import MJDimensions, MJVideoMotion
 from api.miniapp_auth import create_web_auth_token, get_miniapp_user, verify_telegram_login_data
 from api.music_service import (
@@ -147,6 +148,7 @@ from core.gemini_omni import (
 )
 from core.image_recovery_policy import get_image_recovery_policy
 from core.kie_seedance_callback import callback_url_for_generation
+from core.kling4_access import require_kling4_access, visible_model_costs
 from core.neironych_video_poll_gate import (
     NeironychVideoPollLeaseLost,
     neironych_video_poll_guard,
@@ -892,7 +894,7 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
 
     from api.wan30_contract import WAN30_MODELS
 
-    strict_wan_video = gen.gen_type == GenerationType.video and gen.model in WAN30_MODELS
+    strict_wan_video = gen.gen_type == GenerationType.video and gen.model in (WAN30_MODELS | KLING4_MODELS)
     strict_nexus_image = (
         gen.gen_type == GenerationType.image
         and nexus_image_adapter.is_nexus_image_model(str(gen.model))
@@ -929,7 +931,21 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
             elif gen.model in _VEO_MODEL_KEYS:
                 result_url = await video_service.poll_veo_status(task_id)
             else:
-                result_url = await video_service.poll_kieai_status(task_id)
+                if gen.model in KLING4_MODELS:
+                    from api.kling4_status import canonical_kling4_status
+                    payload = await canonical_kling4_status(task_id, expected_model=gen.model)
+                    provider_data = payload["data"]
+                    if provider_data["state"] == "fail":
+                        raise video_service.KieVideoTaskFailed(str(provider_data.get("failMsg") or "Kling 4 failed"))
+                    output = provider_data.get("resultJson")
+                    if provider_data["state"] == "success":
+                        output = json.loads(output) if isinstance(output, str) else output
+                        urls = video_service._result_urls_from_value(output)
+                        result_url = urls[0] if urls else None
+                    else:
+                        result_url = None
+                else:
+                    result_url = await video_service.poll_kieai_status(task_id)
         else:
             return gen
     except Exception as exc:
@@ -2053,6 +2069,8 @@ class ImageGenRequest(BaseModel):
 
 class VideoGenRequest(BaseModel):
     model: str
+    kling4: Kling4Input | None = None
+    intent_id: str | None = None
     # Model-specific validation happens after prompt_id resolution. Keep the DTO
     # wide enough for Seedance 2.5, whose KIE contract accepts 30k characters.
     prompt: str = Field(..., max_length=30000)
@@ -2081,6 +2099,13 @@ class VideoGenRequest(BaseModel):
     wan_last_frame_url: str | None = None
     quoted_credits: float | None = Field(default=None, ge=0)
     trend_user_values: dict[str, str] = Field(default_factory=dict, max_length=6)
+
+    @field_validator("duration", mode="before")
+    @classmethod
+    def strict_kling4_duration(cls, value, info):
+        if info.data.get("model") in KLING4_MODELS and type(value) is not int:
+            raise ValueError("Kling 4 duration must be an integer")
+        return value
 
 
 class FeedRemixRequest(BaseModel):
@@ -2739,7 +2764,7 @@ async def list_video_models(
     user: User = Depends(get_miniapp_user),
 ) -> list[ModelInfo]:
     """All active video models with costs and capabilities."""
-    model_costs = await repo.get_all_model_costs(session)
+    model_costs = await visible_model_costs(session, await repo.get_all_model_costs(session), user)
     video_keys = {m.value for m in VideoModel} | _MJ_VIDEO_MODELS
     result = []
     for mc in model_costs:
@@ -2842,7 +2867,7 @@ async def public_models_summary(
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, list[str]]:
     """Public model summary for the landing page."""
-    model_costs = await repo.get_all_model_costs(session)
+    model_costs = await visible_model_costs(session, await repo.get_all_model_costs(session))
     public_model_costs = [mc for mc in model_costs if not _is_midjourney_model(mc.model_key)]
     return _landing_models_payload(public_model_costs)
 
@@ -3314,6 +3339,12 @@ async def quote_video_generation(
     user: User = Depends(get_miniapp_user),
 ) -> dict[str, Any]:
     """Read-only tariff quote after the same normalization and media probe as launch."""
+    if body.model in KLING4_MODELS:
+        await require_kling4_access(session, user)
+        from api.kling4_checkout import quote_kling4, quote_response
+        prompt, _ = await _video_prompt_and_source(body, session)
+        data, quote = await quote_kling4(body, prompt, session, user)
+        return quote_response(body, data, quote, user)
     prompt, _ = await _video_prompt_and_source(body, session)
     if body.model in _MJ_VIDEO_MODELS:
         model_cost = await repo.get_model_cost(session, body.model)
@@ -3387,6 +3418,12 @@ async def create_video_generation(
     Returns immediately with `status: pending`.
     Poll `GET /api/v1/generations/{id}` until done.
     """
+    if body.model in KLING4_MODELS:
+        await require_kling4_access(session, user)
+        from api.kling4_checkout import create_kling4_generation
+        prompt, _ = await _video_prompt_and_source(body, session)
+        gen = await create_kling4_generation(body, prompt, session, user, surface=surface, callback_url=_kie_callback_url())
+        return _gen_out(gen)
     user_prompt, prompt_source = await _video_prompt_and_source(body, session)
 
     prompt_meta = {
@@ -4354,6 +4391,9 @@ async def quote_feed_remix(
     user: User = Depends(get_miniapp_user),
 ) -> dict[str, Any]:
     """Read-only exact DB tariff quote, with no reservation or paid submission."""
+    if body.model in KLING4_MODELS:
+        await require_kling4_access(session, user)
+        raise HTTPException(status_code=422, detail="Открой Kling 4 в студии: роли материалов требуют отдельного подтверждения")
     source = await repo.get_public_feed_generation(session, gen_id)
     if source is None:
         raise HTTPException(status_code=404, detail="Post not found or not public")
@@ -4496,6 +4536,9 @@ async def remix_feed_post(
     """
     Repeat a public post, or edit its public media without disclosing author text.
     """
+    if body.model in KLING4_MODELS:
+        await require_kling4_access(session, user)
+        raise HTTPException(status_code=422, detail="Открой Kling 4 в студии: роли материалов требуют отдельного подтверждения")
     source = await repo.get_public_feed_generation(session, gen_id)
     if not source:
         raise HTTPException(status_code=404, detail="Post not found or not public")

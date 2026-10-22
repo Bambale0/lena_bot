@@ -647,6 +647,8 @@ def generation_public_error(generation, *, error_override: str | None = None) ->
 
 def supports_feed_source_media(caps: dict, source_type: str | None) -> bool:
     """Treat input-routed multimodal models by capability, not legacy mode labels."""
+    if caps.get("feed_source_media") == []:
+        return False
     modes = caps.get("modes", [])
     multimodal = bool(caps.get("auto_route_by_inputs") and "multimodal" in modes)
     if source_type == "image":

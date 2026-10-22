@@ -25,6 +25,8 @@ def video_prompt_max_chars(model: str) -> int | None:
         return SEEDANCE_20_PROMPT_MAX_CHARS
     if key in _SEEDANCE_25_MODELS:
         return SEEDANCE_25_PROMPT_MAX_CHARS
+    if key in {"kling-4.0/reference-to-video", "kling-4.0/keyframe-to-video"}:
+        return 8000
     if key in _KLING_3_MODELS:
         return KLING_3_PROMPT_MAX_CHARS
     if key in {"wan/3-0-video", "wan/3-0-video-prime"}:

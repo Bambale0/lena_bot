@@ -19,6 +19,7 @@ from bot.utils.generation_reference import provider_task_reference
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from core.config import settings
 from core.feed_remix_prompt import generation_prompt_is_protected
+from core.kling4_access import visible_model_costs
 from db import repository as repo
 from db.models import GenerationType, ModelCost, User
 from db.repository import InsufficientReferralBalanceError
@@ -177,7 +178,7 @@ async def _notify_admins_about_withdrawal(bot: Bot, user: User, request) -> None
 @router.callback_query(F.data == "menu:balance")
 async def cb_balance(call: CallbackQuery, db_user: User, session: AsyncSession) -> None:
     lang = db_user.language or "ru"
-    model_costs = await repo.get_all_model_costs(session)
+    model_costs = await visible_model_costs(session, await repo.get_all_model_costs(session), db_user)
     sub_status = (
         t("balance_sub_active", lang, date=db_user.subscription_until.strftime("%d.%m.%Y"))
         if db_user.is_subscribed and db_user.subscription_until

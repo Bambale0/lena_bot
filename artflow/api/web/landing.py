@@ -8,6 +8,7 @@ from api.web.deps import ok
 from api.web.feed import _feed_payloads
 from api.web.prompts import _prompt_cards
 from api.web.schemas import ModelCostCard, PricePlanCard
+from core.kling4_access import visible_model_costs
 from db import repository as repo
 from db.models import GenerationType
 from db.prompt_repository import get_approved_prompts
@@ -17,7 +18,7 @@ router = APIRouter(tags=["web"])
 
 
 async def _group_model_cards(session: AsyncSession) -> dict[str, list[dict]]:
-    cards = [ModelCostCard.from_model_cost(item).model_dump() for item in await repo.get_all_model_costs(session)]
+    cards = [ModelCostCard.from_model_cost(item).model_dump() for item in await visible_model_costs(session, await repo.get_all_model_costs(session))]
     image = [item for item in cards if item["gen_type"] == GenerationType.image.value]
     video = [item for item in cards if item["gen_type"] == GenerationType.video.value]
     music = [item for item in cards if item["gen_type"] == GenerationType.music.value]

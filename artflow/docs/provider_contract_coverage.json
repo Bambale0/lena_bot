@@ -611,6 +611,73 @@
     },
     {
       "backend_entrypoints": [
+        "api.kling4_checkout:create_kling4_generation",
+        "api.video_service:generate_video"
+      ],
+      "billing": true,
+      "contract_id": "video.kling4.reference",
+      "contract_tests": [
+        "tests/test_kling4_contract.py",
+        "tests/test_kling4_launch.py",
+        "tests/test_kling4_api.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "video.kling4.reference",
+      "miniapp": true,
+      "model": "kling-4.0/reference-to-video",
+      "modes": [
+        "text",
+        "image",
+        "video",
+        "elements",
+        "voices"
+      ],
+      "notes": "Admin preview; authenticated typed /generate/video checkout; rollout is DB-backed",
+      "official_docs": [
+        "https://docs.kie.ai/market/kling/v4-reference-to-video"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": true,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.kling4_checkout:create_kling4_generation",
+        "api.video_service:generate_video"
+      ],
+      "billing": true,
+      "contract_id": "video.kling4.keyframe",
+      "contract_tests": [
+        "tests/test_kling4_contract.py",
+        "tests/test_kling4_launch.py",
+        "tests/test_kling4_api.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "video.kling4.keyframe",
+      "miniapp": true,
+      "model": "kling-4.0/keyframe-to-video",
+      "modes": [
+        "text",
+        "first_frame",
+        "keyframes",
+        "last_frame"
+      ],
+      "notes": "Admin preview; authenticated typed /generate/video checkout; rollout is DB-backed",
+      "official_docs": [
+        "https://docs.kie.ai/market/kling/v4-keyframe-to-video"
+      ],
+      "product_ready": true,
+      "provider": "kie",
+      "public_api": true,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
         "api.video_service:generate_video"
       ],
       "billing": true,

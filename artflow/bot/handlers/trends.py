@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 from io import BytesIO
+from types import SimpleNamespace
 
 from aiogram import Bot, F, Router
 from aiogram.filters import Command
@@ -25,6 +26,7 @@ from bot.keyboards.main_menu import back_to_menu_kb
 from bot.utils.telegram_ui import safe_answer_callback, safe_edit_message
 from core.config import settings
 from core.gemini_omni import GEMINI_OMNI_DURATIONS, GEMINI_OMNI_VIDEO_MODEL
+from core.kling4_access import visible_model_costs
 from core.trends import (
     TREND_CATEGORIES,
     TREND_TAG,
@@ -272,7 +274,7 @@ async def trend_category_pick(call: CallbackQuery, state: FSMContext, session: A
     data = await state.get_data()
     kind = data.get("kind", "image")
     models = [
-        item for item in await repo.get_all_model_costs(session)
+        item for item in await visible_model_costs(session, await repo.get_all_model_costs(session), SimpleNamespace(tg_id=call.from_user.id))
         if getattr(getattr(item, "gen_type", None), "value", None) == kind and getattr(item, "is_active", True)
     ]
     if not models:

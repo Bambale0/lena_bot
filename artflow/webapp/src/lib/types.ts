@@ -264,6 +264,7 @@ export interface ReferenceMaterial {
 }
 
 export interface GenerationDraft {
+  kling4?: import("./kling4").Kling4Options;
   kind: "image" | "video" | "motion";
   model: string;
   prompt: string;

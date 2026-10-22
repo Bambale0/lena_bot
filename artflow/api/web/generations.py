@@ -656,3 +656,47 @@ async def topup_lava(
     if auth_error := _auth_required(user):
         return auth_error
     return await _call_miniapp(miniapp_topup_lava, body=body, session=session, user=user)
+
+
+@router.post("/kling4/assets")
+async def upload_kling4_asset(
+    file: UploadFile = File(...),
+    owner_id: int = Form(...),
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    from api.kling4_assets import MAX_ASSET_BYTES, store_kling4_asset
+    from core.kling4_access import require_kling4_access
+
+    if auth_error := _auth_required(user):
+        return auth_error
+    await require_kling4_access(session, user)
+    if owner_id != user.id:
+        return error_response(409, "Account changed; select the materials again")
+    data = await file.read(MAX_ASSET_BYTES + 1)
+    try:
+        return ok(await store_kling4_asset(data, file.filename or "", user_id=user.id))
+    except ValueError as exc:
+        return error_response(422, str(exc))
+
+
+@router.get('/kling4/recipe/{generation_id}')
+async def kling4_owned_recipe(
+    generation_id: int,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    from api.kling4_contract import KLING4_MODELS, Kling4Input
+    from core.feed_remix_prompt import generation_prompt_is_protected
+    from core.kling4_access import require_kling4_access
+    from db.repeat_lookup import parse_input_params
+    if auth_error := _auth_required(user):
+        return auth_error
+    await require_kling4_access(session,user)
+    generation = await repo.get_generation_by_id(session,generation_id)
+    if not generation or generation.user_id != user.id or generation.model not in KLING4_MODELS:
+        return error_response(404,'Generation not found')
+    if generation_prompt_is_protected(generation):
+        return error_response(403,'Protected source recipe cannot be exported')
+    options = Kling4Input(**parse_input_params(generation.input_params).get('kling4',{}))
+    return ok({'owner_id': user.id, 'model':generation.model,'prompt':generation.prompt,'kling4':options.model_dump()})

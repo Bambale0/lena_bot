@@ -1,3 +1,7 @@
+from types import SimpleNamespace
+
+from core.kling4_access import visible_model_costs
+
 """Explicit parent screens for the video wizard; back never starts a new model."""
 
 from aiogram import F, Router
@@ -31,7 +35,7 @@ async def back_to_models(call: CallbackQuery, state: FSMContext, session: AsyncS
         }
         await state.set_data(repeat_data)
         await state.set_state(VideoGenFSM.model_select)
-        costs = await repo.get_all_model_costs(session)
+        costs = await visible_model_costs(session, await repo.get_all_model_costs(session), SimpleNamespace(tg_id=call.from_user.id))
         await safe_edit_message(
             call.message,
             "🎬 <b>Повторить видео</b>\n\nВыбери модель для повтора по твоему фото:",

@@ -1,3 +1,5 @@
+import { isKling4 } from "./kling4.ts";
+import type { Kling4Options, Kling4Element } from "./kling4";
 import { referenceMaterials, selectGenerationInputs } from "./reference-selection.ts";
 import type { GenerationDraft, PhotoUploadError, PhotoUploadState, ReferenceMaterial } from "./types";
 
@@ -20,7 +22,7 @@ export function uploadStorageKey(owner: number): string {
 }
 
 export function hasDraftInput(draft: GenerationDraft): boolean {
-  return draft.promptId === null && Boolean(draft.prompt.trim() || referenceMaterials(draft).length || draft.videoUrl || draft.audioIds.length || draft.characterIds.length);
+  return draft.promptId === null && Boolean(draft.prompt.trim() || (isKling4(draft.model) && draft.kling4 && Object.keys(draft.kling4).length) || referenceMaterials(draft).length || draft.videoUrl || draft.audioIds.length || draft.characterIds.length);
 }
 
 function safeMedia(value: unknown): value is string {
@@ -30,6 +32,52 @@ function safeMedia(value: unknown): value is string {
     const url = new URL(value);
     return ["https:", "http:"].includes(url.protocol) && !url.username && !url.password;
   } catch { return false; }
+}
+
+function decodeKling4(raw: unknown): Kling4Options | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const source = raw as Record<string, unknown>; const result: Kling4Options = {};
+  const media = (value: unknown) => value === "" || safeMedia(value);
+  for (const field of ["image_urls", "video_urls", "keyframe_urls"] as const) {
+    const urls = source[field]; if (urls === undefined) continue;
+    if (!Array.isArray(urls) || urls.length > 15 || !urls.every(media)) return null;
+    result[field] = [...urls];
+  }
+  for (const field of ["first_frame_url", "last_frame_url"] as const) {
+    const value = source[field]; if (value === undefined) continue;
+    if (value !== null && !media(value)) return null; result[field] = value as string | null;
+  }
+  if (source.keep_original_sound !== undefined) {
+    if (typeof source.keep_original_sound !== "boolean") return null;
+    result.keep_original_sound = source.keep_original_sound;
+  }
+  if (source.elements !== undefined) {
+    if (!Array.isArray(source.elements) || source.elements.length > 7) return null;
+    result.elements = [];
+    for (const item of source.elements) {
+      if (!item || typeof item.name !== "string" || item.name.length > 20) return null;
+      const value: Kling4Element = { name: item.name };
+      if (item.image_urls !== undefined) {
+        if (!Array.isArray(item.image_urls) || item.image_urls.length > 4 || !item.image_urls.every(media)) return null;
+        value.image_urls = [...item.image_urls];
+      }
+      for (const key of ["video_url", "voice_url"] as const) {
+        if (item[key] !== undefined) { if (!media(item[key])) return null; value[key] = item[key]; }
+      }
+      if (item.description !== undefined) { if (typeof item.description !== "string" || item.description.length > 5000) return null; value.description = item.description; }
+      if (item.tag !== undefined) { if (!["character", "animal", "prop", "costume", "scene", "effect", "others"].includes(item.tag)) return null; value.tag = item.tag; }
+      result.elements.push(value);
+    }
+  }
+  if (source.voices !== undefined) {
+    if (!Array.isArray(source.voices) || source.voices.length > 3) return null;
+    result.voices = [];
+    for (const item of source.voices) {
+      if (!item || typeof item.name !== "string" || item.name.length > 20 || !media(item.audio_url)) return null;
+      result.voices.push({ name: item.name, audio_url: item.audio_url });
+    }
+  }
+  return result;
 }
 
 const UPLOAD_ERRORS: PhotoUploadError[] = ["network", "timeout", "empty_file", "too_large", "invalid_file", "invalid_response", "policy_unavailable", "source_required", "rejected"];
@@ -82,8 +130,11 @@ function decodeDraft(raw: unknown, kind: DraftKind, modern = false, uploads = fa
     if (!decoded || d.referenceUrls.length !== 0) return null;
     selection = decoded;
   }
+  const kling4 = kind === "video" && isKling4(d.model as string) && d.kling4 !== undefined ? decodeKling4(d.kling4) : undefined;
+  if (kling4 === null) return null;
   // Explicit allowlist: never spread untrusted storage or accidentally persist auth/quotes.
   return {
+    ...(kling4 ? { kling4 } : {}),
     kind, model: d.model as string, prompt: d.prompt as string, promptId: null, sourceTitle: "",
     aspectRatio: d.aspectRatio as string, quality: d.quality as string,
     count: d.count as number, taskCount: d.taskCount as number, mode: d.mode as string,
@@ -154,7 +205,7 @@ export function saveUserDrafts(storage: DraftStorage | null, owner: number, draf
       if (hasDraftInput(safe)) next[kind] = safe;
       else delete next[kind];
     }
-    const modern = existingModern !== null || Object.values(next).some(draft => draft.referenceMaterials !== undefined);
+    const modern = existingModern !== null || Object.values(next).some(draft => draft.referenceMaterials !== undefined || isKling4(draft.model));
     const compatibility: DraftSet = {};
     for (const kind of KINDS) if (next[kind]) compatibility[kind] = selectGenerationInputs(next[kind]!);
     const legacyValue = JSON.stringify({ version: 1, owner, drafts: compatibility });

@@ -42,6 +42,8 @@ def _base_case(contract_id: str) -> dict[str, Any]:
         return params
 
     primary_video: dict[str, dict[str, Any]] = {
+        "video.kling4.reference": {"prompt": "A red ball rolls in a studio", "kling4_input": {"duration": 3, "resolution": "720p"}},
+        "video.kling4.keyframe": {"prompt": "A red ball rolls in a studio", "kling4_input": {"duration": 3, "resolution": "720p"}},
         "video.kling26.t2v": {"prompt": "A paper airplane crosses a bright studio", "duration": 5, "aspect_ratio": "16:9"},
         "video.kling26.i2v": {"prompt": "Animate the paper airplane", "image_urls": [IMAGE_URL], "duration": 5},
         "video.kling26.motion": {"prompt": "Follow the reference motion", "image_url": IMAGE_URL, "video_url": VIDEO_URL, "mode": "720p"},

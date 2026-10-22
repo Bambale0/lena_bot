@@ -1,3 +1,5 @@
+import { isKling4, kling4Body, renameKling4Mentions } from "@/lib/kling4";
+import { Kling4Materials } from "@/components/kling4-materials";
 import { useEffect, useState, type ReactNode } from "react";
 import { AlertCircle, Film, ImageIcon, LoaderCircle, Orbit, Upload, WandSparkles, X } from "lucide-react";
 
@@ -32,6 +34,7 @@ interface GenerationScreenProps {
   onUploadVideoFile: (file: File) => void;
   onSubmit: () => void;
   onResetPreset: () => void;
+  onUploadKling4?: (file: File) => Promise<{ url: string; kind?: string }>;
   onQuoteWan?: (payload: Record<string, unknown>) => Promise<{
     credits: number;
     rate: number;
@@ -53,6 +56,7 @@ const KLING_3_MODELS = new Set(["kling-3.0/video", "kling/v3-turbo-text-to-video
 
 function promptMaxLength(kind: "image" | "video" | "motion", modelKey: string | undefined): number {
   if (kind !== "video") return 4000;
+  if (isKling4(modelKey || "")) return 8000;
   if (WAN30_MODELS.has(modelKey || "")) return 4500;
   if (modelKey === SEEDANCE_25_MODEL) return 30000;
   if (modelKey && SEEDANCE_20_MODELS.has(modelKey)) return 20000;
@@ -166,12 +170,14 @@ function GenerationScreen({
   onSubmit,
   onResetPreset,
   onQuoteWan,
+  onUploadKling4,
 }: GenerationScreenProps) {
   const draft = selectGenerationInputs(storedDraft);
   const preserveMedia = ux2 && draft.promptId === null;
   const selectionExists = storedDraft.promptId === null && storedDraft.referenceMaterials !== undefined;
   const allReferences = referenceMaterials(storedDraft);
   const [switchNotice, setSwitchNotice] = useState("");
+  const [kling4Uploading, setKling4Uploading] = useState(false);
   const copy = titles[kind];
   const Icon = copy.icon;
   const availableModels =
@@ -179,6 +185,7 @@ function GenerationScreen({
       ? models.filter((model) => /motion/i.test(`${model.key} ${model.display_name}`) || model.modes?.includes("motion"))
       : models.filter((model) => !model.modes?.includes("motion") && !/motion-control/i.test(model.key));
   const selectedModel = availableModels.find((model) => model.key === draft.model) || (ux2 && draft.model ? undefined : availableModels[0]);
+  const kling4Selected = isKling4(selectedModel?.key || "");
   const isWan30 = kind === "video" && WAN30_MODELS.has(selectedModel?.key || "");
   const [wanQuote, setWanQuote] = useState<{
     key: string;
@@ -191,6 +198,7 @@ function GenerationScreen({
   const wanQuotePayload = {
     // Quote depends on media and settings, not prompt keystrokes.
     model: draft.model, prompt: "Проверка цены",
+    ...kling4Body(draft),
     mode: draft.mode, duration: draft.duration,
     resolution: draft.resolution, aspect_ratio: draft.aspectRatio,
     image_url: draft.referenceUrls[0] || null, reference_urls: draft.referenceUrls,
@@ -241,7 +249,7 @@ function GenerationScreen({
   const baseEstimate = kind === "image" ? imageBaseCost(selectedModel, draft.quality, draft.count) : videoBaseCost(selectedModel, draft);
   const quoteReady = !isWan30 || (wanQuote?.key === wanQuoteKey && wanQuote.credits !== undefined && !wanQuote.error);
   const estimate = (isWan30 ? (quoteReady ? Number(wanQuote?.credits) : 0) : baseEstimate) * taskCount;
-  const referenceVideoPricePending = !isWan30 && kind !== "image" && Boolean(
+  const referenceVideoPricePending = kling4Selected || !isWan30 && kind !== "image" && Boolean(
     draft.videoUrl || draft.audioIds.some(item => item.startsWith("__apix_seedance25:video_ref="))
     || (draft.model.startsWith("minimax-h3/") && draft.characterIds.length),
   );
@@ -249,13 +257,13 @@ function GenerationScreen({
   const maxAudioIds = Math.max(0, Number(selectedModel?.max_audio_ids || 0));
   const maxCharacterIds = Math.max(0, Number(selectedModel?.max_character_ids || 0));
   const refsRequired = kind === "motion" || Boolean(selectedModel?.requires_reference_images) || Boolean(selectedModel && !modelSupports(selectedModel, "text") && modelSupports(selectedModel, "image"));
-  const missingReference = refsRequired && draft.referenceUrls.length === 0;
+  const missingReference = !kling4Selected && (refsRequired && draft.referenceUrls.length === 0);
   const tooManyRefs = draft.referenceUrls.length > maxRefs;
-  const missingVideo = (Boolean(selectedModel?.requires_video_input) || draft.mode === "video" || kind === "motion") && !draft.videoUrl;
+  const missingVideo = !kling4Selected && ((Boolean(selectedModel?.requires_video_input) || draft.mode === "video" || kind === "motion") && !draft.videoUrl);
   const missingPrompt = !draft.prompt.trim() && !draft.promptId && !selectedModel?.key.startsWith("higgsfield/genjutsu/");
   const maxPromptLength = promptMaxLength(kind, selectedModel?.key);
   const insufficientCredits = !referenceVideoPricePending && estimate > Number(user.credits || 0);
-  const mediaUploading = referenceUploading || videoUploading;
+  const mediaUploading = (!kling4Selected && (referenceUploading || videoUploading)) || kling4Uploading;
   const invalidSeed = Boolean(
     selectedModel?.has_seed &&
     draft.seed != null &&
@@ -299,8 +307,8 @@ function GenerationScreen({
   };
 
   const disabled = submitting || mediaUploading || !selectedModel || missingPrompt || missingReference || missingVideo || tooManyRefs || insufficientCredits || advancedInvalid || unsupportedSettings || !quoteReady || (preserveMedia && mediaInspection.issues.length > 0);
-  const showReferenceUploader = kind === "image" || draft.mode === "image" || kind === "motion" || (isWan30 && draft.mode === "video") || selectedModel?.key === SEEDANCE_25_MODEL || (preserveMedia && (allReferences.length > 0 || (mediaInspection.referenceInputsSupported && (selectedModel?.auto_route_by_inputs === true || modes.includes("multimodal")))));
-  const showVideoUploader = draft.mode === "video" || kind === "motion" || Boolean(selectedModel?.supports_video_input && !isWan30) || (preserveMedia && Boolean(draft.videoUrl));
+  const showReferenceUploader = !kling4Selected && (kind === "image" || draft.mode === "image" || kind === "motion" || (isWan30 && draft.mode === "video") || selectedModel?.key === SEEDANCE_25_MODEL || (preserveMedia && (allReferences.length > 0 || (mediaInspection.referenceInputsSupported && (selectedModel?.auto_route_by_inputs === true || modes.includes("multimodal"))))));
+  const showVideoUploader = !kling4Selected && (draft.mode === "video" || kind === "motion" || Boolean(selectedModel?.supports_video_input && !isWan30) || (preserveMedia && Boolean(draft.videoUrl)));
   const remainingRefs = Math.max(0, maxRefs - draft.referenceUrls.length);
 
   const syncSelectedModel = (modelKey: string) => {
@@ -328,6 +336,7 @@ function GenerationScreen({
       count: model?.counts?.[0] || 1,
       grokMode: model?.mode_options?.[0] || "normal",
       seed: null,
+      kling4: {},
       wanAudio: true,
       wanNsfwChecker: true,
       wanReferenceAudioUrls: [],
@@ -368,7 +377,7 @@ function GenerationScreen({
 
   return (
     <div className="apix-generation-layout grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1fr)_280px]">
-      <fieldset disabled={(preserveMedia || selectionExists) && (submitting || (mediaUploading && !photoUploads))} className="apix-generation-main grid min-w-0 gap-2.5">
+      <fieldset disabled={kling4Uploading || (preserveMedia || selectionExists) && (submitting || (mediaUploading && !photoUploads))} className="apix-generation-main grid min-w-0 gap-2.5">
         <div className="apix-generation-titlebar flex min-w-0 items-center justify-between gap-2 px-0.5">
           <div className="flex min-w-0 items-center gap-2">
             <span className="apix-generation-icon grid size-8 shrink-0 place-items-center rounded-lg bg-primary/12 text-primary"><Icon className="size-4" /></span>
@@ -417,7 +426,7 @@ function GenerationScreen({
               </div>
             </div>}
 
-            {modes.length > 1 || kind !== "image" ? (
+            {!kling4Selected && (modes.length > 1 || kind !== "image") ? (
               <LabeledChips label="Режим">
                 {modes.map((mode) => (
                   <button key={mode} type="button" className={cn(chipClass(draft.mode === mode), "shrink-0")} disabled={preserveMedia && (mediaUploading || submitting)} onClick={() => changeMode(mode)}>
@@ -442,6 +451,7 @@ function GenerationScreen({
 
             </fieldset>
 
+            {kling4Selected && onUploadKling4 ? <Kling4Materials key={`${user.id}:${draft.model}`} onBusyChange={setKling4Uploading} model={draft.model} value={draft.kling4 || {}} onChange={kling4 => onChange({ kling4, prompt: renameKling4Mentions(draft.kling4 || {}, kling4, draft.prompt) })} onUpload={onUploadKling4} /> : null}
             {showReferenceUploader ? (
               <div className="apix-uploader-card grid min-w-0 gap-2 rounded-xl border border-border/75 bg-card/40 p-2">
                 <div className="apix-uploader-head flex min-w-0 flex-wrap items-center justify-between gap-2">

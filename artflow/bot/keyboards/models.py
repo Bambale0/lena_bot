@@ -45,6 +45,22 @@ def _prompt_copy_button(gen_id: int, prompt: str | None) -> InlineKeyboardButton
     return InlineKeyboardButton(text="📋 Показать промпт", callback_data=f"gen:prompt:{gen_id}")
 
 VIDEO_CAPS: dict[str, dict] = {
+    "kling-4.0/reference-to-video": {
+        "feed_source_media": [],
+        "auto_route_by_inputs": True,
+        "modes": ["text", "image", "video"], "duration_options": list(range(3,31)),
+        "aspect_ratios": ["auto","16:9","9:16","1:1","21:9"],
+        "has_resolution": True, "resolutions": ["720p","1080p"],
+        "max_refs": 10, "supports_video_input": True, "billing_mode": "per_second",
+    },
+    "kling-4.0/keyframe-to-video": {
+        "feed_source_media": [],
+        "auto_route_by_inputs": True,
+        "modes": ["text", "image"], "duration_options": list(range(3,31)),
+        "aspect_ratios": ["auto","16:9","9:16","1:1","21:9"],
+        "has_resolution": True, "resolutions": ["720p","1080p"],
+        "max_refs": 10, "billing_mode": "per_second",
+    },
     "kling-2.6/text-to-video": {
         "modes": ["text"],
         "duration_options": [5, 10],
@@ -532,6 +548,8 @@ def _prioritize_ratio(ratios: list[str], preferred: str = "9:16") -> list[str]:
 
 
 _VIDEO_MODEL_ORDER: list[str] = [
+    VideoModel.KLING_4_REFERENCE,
+    VideoModel.KLING_4_KEYFRAME,
     VideoModel.KLING_30,
     VideoModel.VEO_3_LITE,
     VideoModel.SEEDANCE_2_FAST,
@@ -567,6 +585,7 @@ _VIDEO_GROUPS: list[tuple[str, list[str]]] = [
     (
         "fast",
         [
+            VideoModel.KLING_4_REFERENCE,
             VideoModel.KLING_30,
             VideoModel.VEO_3_LITE,
             VideoModel.SEEDANCE_2_FAST,
@@ -586,6 +605,8 @@ VideoModel.KLING_26_T2V,
     (
         "i2v",
         [
+            VideoModel.KLING_4_REFERENCE,
+            VideoModel.KLING_4_KEYFRAME,
             VideoModel.KLING_30,
             VideoModel.VEO_3,
             VideoModel.VEO_3_FAST,

@@ -312,6 +312,10 @@ def get_operation_spec(contract_id: str) -> OperationSpec:
 
 def _coerce_dataclass_params(spec: OperationSpec, params: dict[str, Any]) -> dict[str, Any]:
     result = dict(params)
+    if spec.contract_id.startswith("video.kling4."):
+        from api.kling4_contract import Kling4Input
+        raw = result.get("kling4_input") or {}
+        result["kling4_input"] = raw if isinstance(raw, Kling4Input) else Kling4Input(**raw)
     if spec.contract_id == "video.kling30":
         if isinstance(result.get("shots"), list):
             result["shots"] = [
@@ -363,6 +367,13 @@ async def resolve_operation_price(
     if not spec.billable:
         return 0
 
+    if spec.contract_id.startswith("video.kling4."):
+        from api.kling4_contract import Kling4Input
+        from api.kling4_launch import get_kling4_quote
+        raw = params.get("kling4_input") or {}
+        options = raw if isinstance(raw, Kling4Input) else Kling4Input(**raw)
+        quote = await get_kling4_quote(session, spec.model, str(params.get("prompt") or ""), options)
+        return quote.credits
     if spec.contract_id.startswith("video.genjutsu."):
         duration = await genjutsu_adapter.resolve_source_duration_seconds(
             str(params.get("video_url") or "")

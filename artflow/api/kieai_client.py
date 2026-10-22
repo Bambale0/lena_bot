@@ -77,6 +77,8 @@ async def _create_task_once(payload: dict[str, Any]) -> dict[str, Any]:
     therefore be handled as *unknown acceptance*, not as authorization for
     another provider POST.
     """
+    from api.kling4_contract import KLING4_MODELS
+    strict_kling4 = payload.get("model") in KLING4_MODELS
     path = "/api/v1/jobs/createTask"
     try:
         response = await get_client().post(path, json=payload)
@@ -107,8 +109,8 @@ async def _create_task_once(payload: dict[str, Any]) -> dict[str, Any]:
         )
     await _maybe_alert_credit_issue(f"kie.ai POST {path}", data)
     code = data.get("code")
-    if code not in (None, 200, "200"):
-        if str(code) in ("400", "401", "402", "403", "404", "422"):
+    if (code != 200 if strict_kling4 else code not in (None, 200, "200")):
+        if str(code) in ("400", "401", "402", "403", "404", "422") or strict_kling4 and str(code) in ("429", "433", "505"):
             raise KieDefiniteRejection(f"Kie createTask rejected with code {code}")
         raise KieSubmissionOutcomeUnknown(
             f"Kie createTask outcome uncertain (code {str(code)[:24]})"
@@ -308,12 +310,12 @@ async def create_task(
     # preserves unknown acceptance without restoring spendable credits.
     # Keep other products on their existing submission contract until each
     # obtains the same durable unknown-outcome reconciliation protocol.
-    from api.wan30_contract import WAN30_MODELS
-    from core.seedance_reconciliation import PRODUCT_MODELS
-
     # Wan 3.0 can bill up to 30 output+reference seconds. A network timeout
     # must never cause the old three-POST retry path to charge multiple times.
-    if request_payload.get("model") in PRODUCT_MODELS | WAN30_MODELS:
+    from api.kling4_contract import KLING4_MODELS
+    from api.wan30_contract import WAN30_MODELS
+    from core.seedance_reconciliation import PRODUCT_MODELS
+    if request_payload.get("model") in PRODUCT_MODELS | WAN30_MODELS | KLING4_MODELS:
         return await _create_task_once(request_payload)
     return await _retry_post("/api/v1/jobs/createTask", request_payload)
 

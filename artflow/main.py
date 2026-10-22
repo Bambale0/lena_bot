@@ -860,7 +860,14 @@ async def lifespan(app: FastAPI):
         run_neironych_video_reconcile_scheduler(neironych_video_reconcile_stop)
     )
 
+    from core.kling4_recovery import run_kling4_recovery
+    kling4_stop = asyncio.Event()
+    kling4_task = asyncio.create_task(run_kling4_recovery(kling4_stop))
+
     yield
+
+    kling4_stop.set()
+    await kling4_task
 
     # Shutdown
     if broadcast_scheduler_stop is not None:
@@ -1813,9 +1820,15 @@ async def kie_webhook(
             logger.warning("KIE webhook user not found for generation=%s", gen.id)
             return {"ok": True}
 
+        from api.kling4_contract import KLING4_MODELS
         from api.wan30_contract import WAN30_MODELS
-
-        strict_wan_video = gen.gen_type == GenerationType.video and gen.model in WAN30_MODELS
+        if gen.gen_type == GenerationType.video and gen.model in KLING4_MODELS:
+            # KIE HMAC does not bind the body. Always read authoritative state.
+            from api.kling4_status import canonical_kling4_status
+            payload = await canonical_kling4_status(task_id, expected_model=gen.model)
+            if is_processing(payload):
+                return {"ok": True}
+        strict_wan_video = gen.gen_type == GenerationType.video and gen.model in (WAN30_MODELS | KLING4_MODELS)
         strict_nexus_image = (
             provider == "nexus" and gen.gen_type == GenerationType.image
             and gen.model == "nano-banana-2.1"
@@ -1838,10 +1851,15 @@ async def kie_webhook(
                 gen.id,
                 err,
                 refund_note=f"kie_webhook:{user_err}"[:160],
+                **({"video_notice_kind": "failed"} if gen.model in KLING4_MODELS and _should_notify_generation_in_bot(gen) else {}),
                 **({"expected_task_id": gen.task_id} if strict_nexus_image else {}),
             )
             if not failed:
                 logger.info("KIE failure callback ignored for final generation=%s", gen.id)
+                return {"ok": True}
+            if gen.model in KLING4_MODELS:
+                from api.miniapp_routes import _deliver_pending_neironych_video_notice
+                await _deliver_pending_neironych_video_notice(session, gen.id)
                 return {"ok": True}
             if bot and _should_notify_generation_in_bot(gen):
                 try:

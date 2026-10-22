@@ -42,6 +42,7 @@ from core.feed_remix_prompt import (
     owned_generation_prompt_is_visible,
     supports_feed_source_media,
 )
+from core.kling4_access import visible_model_costs
 from db import repository as repo
 from db.models import Generation, GenerationStatus, GenerationType, User
 from db.repository import FeedGenerationCard
@@ -410,7 +411,7 @@ async def cb_feed_use(
         await call.answer("Генерация не найдена", show_alert=True)
         return
 
-    model_costs = await repo.get_all_model_costs(session)
+    model_costs = await visible_model_costs(session, await repo.get_all_model_costs(session), db_user)
     await state.clear()
     if getattr(gen, "gen_type", None) == GenerationType.video:
 

@@ -1114,3 +1114,33 @@ async def admin_save_tribute_product(
     except Exception:
         return error_response(503, "Tribute verification or catalog persistence unavailable")
     return ok(result)
+
+
+class Kling4AccessUpdate(BaseModel):
+    audience: Literal["admin", "public", "disabled"]
+
+
+@router.get("/admin/kling4/access")
+async def admin_get_kling4_access(
+    session: AsyncSession = Depends(get_session), user=Depends(get_web_user_or_none)
+):
+    if admin_error := _admin_error(user):
+        return admin_error
+    from db.models import Kling4AccessPolicy
+
+    policy = await session.get(Kling4AccessPolicy, 1)
+    return ok({"audience": policy.audience if policy else "admin"})
+
+
+@router.put("/admin/kling4/access")
+async def admin_set_kling4_access(
+    body: Kling4AccessUpdate,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if admin_error := _admin_error(user):
+        return admin_error
+    from core.kling4_access import set_kling4_access
+
+    audience = await set_kling4_access(session, body.audience, admin_tg_id=user.tg_id, source="web")
+    return ok({"audience": audience})
