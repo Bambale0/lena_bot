@@ -11,10 +11,14 @@ const state = {
   token: "",
   authConfig: null,
   authChecked: false,
+  authEpoch: 0,
   user: null,
   examples: [],
   models: [],
   modelsByKind: { image: [], video: [], music: [] },
+  modelCatalogOwner: null,
+  privateModelKinds: [],
+  publicModelsByKind: { image: [], video: [], music: [] },
   activeExample: 0,
   modelType: "all",
   generationKind: "image",
@@ -627,6 +631,7 @@ function resetAdminState() {
 }
 
 function rememberAuthSession(result = {}) {
+  state.authEpoch += 1;
   state.token = "";
   state.user = result.user || state.user || null;
   localStorage.removeItem(TOKEN_KEY);
@@ -634,10 +639,15 @@ function rememberAuthSession(result = {}) {
 }
 
 function forgetAuthSession() {
+  state.authEpoch += 1;
+  state.modelCatalogOwner = null;
+  state.privateModelKinds = [];
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(AUTH_HINT_KEY);
   state.token = "";
   state.user = null;
+  mergePublicModelCatalog();
+  renderModels();
   resetAdminState();
 }
 
@@ -5375,8 +5385,8 @@ function clearPublicData() {
   state.prompts = [];
   state.plans = [];
   state.paymentMethods = [];
-  state.models = [];
-  state.modelsByKind = { image: [], video: [], music: [] };
+  state.publicModelsByKind = { image: [], video: [], music: [] };
+  mergePublicModelCatalog();
 }
 
 async function loadFallbackData() {
@@ -5388,17 +5398,25 @@ async function ensureFallbackVisuals() {
   return;
 }
 
+function hasPrivateModelCatalog() {
+  return state.user && state.modelCatalogOwner === state.user.id;
+}
+
+function mergePublicModelCatalog() {
+  for (const kind of ["image", "video", "music"]) {
+    if (hasPrivateModelCatalog() && state.privateModelKinds.includes(kind)) continue;
+    state.modelsByKind[kind] = [...state.publicModelsByKind[kind]];
+  }
+  state.models = Object.values(state.modelsByKind).flat();
+}
+
 function applyModelPayload(grouped = {}) {
-  state.modelsByKind = {
+  state.publicModelsByKind = {
     image: (grouped.image || []).map((model) => normalizeModel(model, "image")),
     video: (grouped.video || []).map((model) => normalizeModel(model, "video")),
     music: (grouped.music || []).map((model) => normalizeModel(model, "music")),
   };
-  state.models = [
-    ...state.modelsByKind.image,
-    ...state.modelsByKind.video,
-    ...state.modelsByKind.music,
-  ];
+  mergePublicModelCatalog();
 }
 
 function applyLandingPayload(payload = {}) {
@@ -5470,10 +5488,12 @@ async function loadFeedSource(source = "feed") {
 }
 
 async function loadPrivate({ quiet = false } = {}) {
+  const authEpoch = state.authEpoch;
   let me = null;
   try {
     me = await request("/me");
   } catch (error) {
+    if (authEpoch !== state.authEpoch) return;
     state.authChecked = true;
     const authExpired = error?.status === 401 || error?.status === 403;
     if (authExpired || !state.user) {
@@ -5489,6 +5509,7 @@ async function loadPrivate({ quiet = false } = {}) {
     if (!quiet) toast("Не удалось обновить кабинет. Показываю последнюю загруженную сессию.", "info");
     return;
   }
+  if (authEpoch !== state.authEpoch) return;
   if (!me) {
     state.authChecked = true;
     forgetAuthSession();
@@ -5518,12 +5539,16 @@ async function loadPrivate({ quiet = false } = {}) {
     optionalRequest("/billing/payment-methods", []),
     optionalRequest("/billing/payment-options", []),
   ]);
+  if (authEpoch !== state.authEpoch || state.user?.id !== me.id) return;
   const [imageModels, videoModels, musicModels, history, active, imageSession, plans, billing, methods, paymentOptions] = coreResults.map((result) => result.status === "fulfilled" ? result.value : null);
-  state.modelsByKind = {
-    image: (imageModels || []).map((model) => normalizeModel(model, "image")),
-    video: (videoModels || []).map((model) => normalizeModel(model, "video")),
-    music: (musicModels || []).map((model) => normalizeModel(model, "music")),
-  };
+  const catalogs = { image: imageModels, video: videoModels, music: musicModels };
+  state.privateModelKinds = Object.keys(catalogs).filter((kind) => Array.isArray(catalogs[kind]));
+  state.modelCatalogOwner = state.privateModelKinds.length ? me.id : null;
+  for (const kind of ["image", "video", "music"]) {
+    state.modelsByKind[kind] = Array.isArray(catalogs[kind])
+      ? catalogs[kind].map((model) => normalizeModel(model, kind))
+      : [...state.publicModelsByKind[kind]];
+  }
   state.models = Object.values(state.modelsByKind).flat();
   state.history = (history || []).map(normalizeExample);
   state.queue = (active || []).map(normalizeExample);
@@ -5550,6 +5575,7 @@ async function loadPrivate({ quiet = false } = {}) {
     me.is_admin ? request("/admin/overview") : Promise.resolve(null),
     me.is_admin ? request("/admin/prompts?status=pending") : Promise.resolve({ items: [] }),
   ]);
+  if (authEpoch !== state.authEpoch || state.user?.id !== me.id) return;
   const [referrals, prompts, help, adminOverview, adminPrompts] = extraResults.map((result) => result.status === "fulfilled" ? result.value : null);
   state.referrals = referrals;
   state.prompts = prompts?.items || state.prompts;
