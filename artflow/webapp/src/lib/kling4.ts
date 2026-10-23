@@ -57,3 +57,32 @@ export function nextKling4Name(options: Kling4Options, prefix: string): string {
   const used = new Set([...(options.elements || []), ...(options.voices || [])].map(item => item.name.toLowerCase()));
   for (let index = 1; ; index += 1) if (!used.has(`${prefix}_${index}`.toLowerCase())) return `${prefix}_${index}`;
 }
+
+// Provider contract caps, also enforced by Kling4Input on the server.
+const referenceCollections = { image: ['image_urls', 10], video: ['video_urls', 5], audio: ['voices', 3] } as const;
+export type Kling4ReferenceKind = keyof typeof referenceCollections;
+
+export function kling4FileKind(file: { name: string }): Kling4ReferenceKind {
+  const extension = file.name.split('.').pop()?.toLowerCase();
+  if (['png', 'jpg', 'jpeg', 'webp'].includes(extension || '')) return 'image';
+  if (['mp4', 'mov', 'webm'].includes(extension || '')) return 'video';
+  if (['wav', 'mp3', 'm4a', 'aac', 'flac', 'ogg', 'oga', 'opus'].includes(extension || '')) return 'audio';
+  throw new Error('Поддерживаются фото, видео и аудио');
+}
+
+export function checkKling4ReferenceCapacity(value: Kling4Options, kind: Kling4ReferenceKind): void {
+  const [collection, limit] = referenceCollections[kind];
+  if ((value[collection]?.length || 0) >= limit) throw new Error(`Не больше ${limit} материалов этого типа`);
+  const total = (value.image_urls?.length || 0) + (value.video_urls?.length || 0)
+    + (value.elements?.length || 0) + (value.voices?.length || 0);
+  if (total >= 15) throw new Error('Не больше 15 материалов');
+}
+
+export function appendKling4Reference(value: Kling4Options, asset: { url: string; kind?: string }): Kling4Options {
+  if (!asset.url || !['image', 'video', 'audio'].includes(asset.kind || '')) throw new Error('Сервер не подтвердил тип материала. Повторите загрузку.');
+  const kind = asset.kind as Kling4ReferenceKind;
+  checkKling4ReferenceCapacity(value, kind);
+  if (kind === 'audio') return { ...value, voices: [...(value.voices || []), { name: nextKling4Name(value, 'Voice'), audio_url: asset.url }] };
+  const field = kind === 'image' ? 'image_urls' : 'video_urls';
+  return { ...value, [field]: [...(value[field] || []), asset.url] };
+}

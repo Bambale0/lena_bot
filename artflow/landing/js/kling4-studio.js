@@ -46,7 +46,27 @@
     prompt.value=prompt.value.replace(new RegExp('@'+escaped+'(?![\\p{L}\\p{N}_])','gu'),'@'+newName);
     prompt.dispatchEvent(new Event('input',{bubbles:true}));
   }
-  function files(parent, label, accept, multiple, action) {
+  // Caps mirror the existing provider contract; checkout remains authoritative.
+  const referenceCollections = {image:['image_urls',10],video:['video_urls',5],audio:['voices',3]};
+  const referenceKind = file => {
+    const ext=file.name.split('.').pop().toLowerCase();
+    if(['png','jpg','jpeg','webp'].includes(ext))return 'image';
+    if(['mp4','mov','webm'].includes(ext))return 'video';
+    if(['wav','mp3','m4a','aac','flac','ogg','oga','opus'].includes(ext))return 'audio';
+    throw new Error('Поддерживаются фото, видео и аудио');
+  };
+  function checkCapacity(data,kind) {
+    const [field,limit]=referenceCollections[kind];
+    if((data[field]||[]).length>=limit)throw new Error(`Не больше ${limit} материалов этого типа`);
+    if(['image_urls','video_urls','elements','voices'].reduce((sum,key)=>sum+(data[key]||[]).length,0)>=15)throw new Error('Не больше 15 материалов');
+  }
+  function addReference(data,asset) {
+    if(typeof asset.url!=='string' || !asset.url || !Object.hasOwn(referenceCollections,asset.kind))throw new Error('Сервер не подтвердил тип материала. Повторите загрузку.');
+    checkCapacity(data,asset.kind);
+    if(asset.kind==='audio')data.voices=[...(data.voices||[]),{name:nextName(data,'Voice'),audio_url:asset.url}];
+    else {const field=referenceCollections[asset.kind][0];data[field]=[...(data[field]||[]),asset.url];}
+  }
+  function files(parent, label, accept, multiple, action, automatic=false) {
     const wrapper = element('label'); wrapper.className = 'reference-upload'; wrapper.append(element('span', label));
     const node = element('input'); node.type = 'file'; node.accept = accept; node.multiple = multiple; node.setAttribute('aria-label', label);
     node.addEventListener('change', async () => {
@@ -59,17 +79,19 @@
         const urls = [];
         for (const file of values) {
           assertOwner();
+          if(automatic)checkCapacity(currentDraft(),referenceKind(file));
           const form = new FormData(); form.append('file', file); form.append('owner_id', owner);
           const response = await originalFetch('/api/web/kling4/assets', { method: 'POST', body: form, credentials: 'same-origin', signal: controller.signal });
           assertOwner();
           const payload = await response.json();
           assertOwner();
           if (!response.ok || payload.ok === false) throw new Error(payload.error || payload.detail || 'Материал не загружен');
-          urls.push((payload.data || payload).url);
+          const asset=payload.data || payload;
+          if(automatic)addReference(currentDraft(),asset);else urls.push(asset.url);
         }
         if (currentKey() !== key || currentOwner() !== owner) throw new Error('Аккаунт или модель изменились. Добавьте материалы заново.');
-        action(urls); render();
-      } catch (error) { status.textContent = error.message || 'Ошибка загрузки'; }
+        if(!automatic)action(urls); render();
+      } catch (error) { if(currentOwner()===owner && currentKey()===key){render();panel.querySelector('[role=status]').textContent=error.message||'Ошибка загрузки';} }
       finally { uploading = false; if(uploadController===controller)uploadController=null; panel?.querySelectorAll('input,button,select').forEach(control => { control.disabled = false; }); node.value = ''; }
     });
     wrapper.append(node); parent.append(wrapper);
@@ -86,20 +108,21 @@
     const key = currentKey(); if (!panel || !panel.isConnected) { panel = element('section'); panel.dataset.kling4Materials = ''; panel.setAttribute('aria-label', 'Материалы Kling 4'); form.querySelector('[data-reference-section]')?.after(panel); if (!panel.isConnected) form.append(panel); }
     panel.hidden = !isKling(key); renderedModel = key;
     if (!isKling(key)) return;
+    const advancedOpen=panel.querySelector('details')?.open || false;
     panel.replaceChildren(); const data = currentDraft();
-    panel.append(element('h3', key === KEYFRAME ? 'Ключевые кадры Kling 4' : 'Материалы Kling 4'));
-    panel.append(element('p', key === KEYFRAME ? 'Первый → промежуточные → последний. До min(10, секунды + 1) кадров. @first_frame, @keyframe_1, @last_frame.' : 'Фото @image_1, видео @video_1, персонажи и голоса @Имя. До 15 материалов; входные видео — до 30 сек суммарно.'));
+    panel.append(element('h3', key === KEYFRAME ? 'Kling 4 · заказ из истории' : 'Референсы Kling 4'));
+    panel.append(element('p', key === KEYFRAME ? 'Первый → промежуточные → последний. До min(10, секунды + 1) кадров. @first_frame, @keyframe_1, @last_frame.' : 'Добавьте фото, видео и аудио в любом порядке — тип референса определится автоматически. Ссылки в промпте: @image_1, @video_1, @Voice_1. Цена появится перед запуском.'));
     if (key === KEYFRAME) {
       for (const [field,title,multiple] of [['first_frame_url','Первый кадр',false],['keyframe_urls','Промежуточные кадры',true],['last_frame_url','Последний кадр',false]]) {
         files(panel,title,'image/png,image/jpeg,image/webp',multiple,urls => { data[field] = multiple ? [...(data[field] || []),...urls] : urls[0]; });
         list(panel, multiple ? data[field] || [] : data[field] ? [data[field]] : [], index => { if (multiple) data[field].splice(index,1); else delete data[field]; });
       }
     } else {
-      for (const [field,title,accept] of [['image_urls','Фото-референсы · до 10','image/png,image/jpeg,image/webp'],['video_urls','Видео-референсы · до 5','video/mp4,video/webm,video/quicktime']]) {
-        files(panel,title,accept,true,urls => { data[field] = [...(data[field] || []),...urls]; });
-        list(panel,data[field] || [], index => data[field].splice(index,1));
-      }
+      files(panel,'Референсы · фото, видео, аудио','image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime,audio/*',true,null,true);
+      for(const field of ['image_urls','video_urls'])list(panel,data[field]||[],index=>data[field].splice(index,1));
+      for(const voice of data.voices||[])if(voice.audio_url)panel.append(element('p',`Голос @${voice.name}: ${voice.audio_url.split('/').pop()}`));
       const label = element('label', 'Сохранить исходный звук видео'); const sound = element('input'); sound.type = 'checkbox'; sound.checked = data.keep_original_sound === true; sound.addEventListener('change', () => { data.keep_original_sound = sound.checked; }); label.prepend(sound); panel.append(label);
+      const advanced=element('details');advanced.open=advancedOpen;advanced.append(element('summary','Персонажи и голоса'));panel.append(advanced);
       const elements = data.elements || (data.elements = []);
       elements.forEach((item,index) => {
         const block = element('fieldset'); block.append(element('legend', `Элемент ${index+1}`));
@@ -113,18 +136,18 @@
         if (item.video_url) list(block,[item.video_url],()=>{delete item.video_url;});
         files(block,`Голос ${item.name} · 5–30 сек`,'audio/*',false,urls => {item.voice_url=urls[0];item.tag='character';});
         if(item.voice_url) list(block,[item.voice_url],()=>{delete item.voice_url;});
-        button(block,'Удалить элемент',()=>{elements.splice(index,1);render();}); panel.append(block);
+        button(block,'Удалить элемент',()=>{elements.splice(index,1);render();}); advanced.append(block);
       });
-      if(elements.length<7) button(panel,'Добавить элемент',()=>{elements.push({name:nextName(data,"Hero"),tag:'character'});render();});
+      if(elements.length<7) button(advanced,'Добавить элемент',()=>{elements.push({name:nextName(data,"Hero"),tag:'character'});render();});
       const voices=data.voices||(data.voices=[]);
       voices.forEach((item,index)=>{
         const block=element('fieldset'); block.append(element('legend',`Голос ${index+1}`));
         input(block,'Имя голоса для @ссылки',item.name,value=>{renamePrompt(item.name,value);item.name=value;});
         files(block,`Аудио ${item.name} · 5–30 сек`,'audio/*',false,urls=>{item.audio_url=urls[0];});
         if(item.audio_url) list(block,[item.audio_url],()=>{delete item.audio_url;});
-        button(block,'Удалить голос',()=>{voices.splice(index,1);render();});panel.append(block);
+        button(block,'Удалить голос',()=>{voices.splice(index,1);render();});advanced.append(block);
       });
-      if(voices.length<3)button(panel,'Добавить голос',()=>{voices.push({name:nextName(data,"Voice"),audio_url:''});render();});
+      if(voices.length<3)button(advanced,'Добавить голос',()=>{voices.push({name:nextName(data,"Voice"),audio_url:''});render();});
     }
     const status=element('p');status.setAttribute('role','status');status.textContent=recipeError;panel.append(status);
   }
@@ -153,6 +176,11 @@
     return originalFetch(resource,init);
   };
   function sync() {
+    const select=document.querySelector('[data-account-model-select]');
+    if(select)for(const option of Array.from(select.options)) {
+      if(option.value===REFERENCE && option.textContent!=='Kling 4')option.textContent='Kling 4';
+      if(option.value===KEYFRAME && !repeatId)option.remove();
+    }
     const owner = currentOwner();
     if(draftOwner !== null && draftOwner !== owner) {
       uploadController?.abort();

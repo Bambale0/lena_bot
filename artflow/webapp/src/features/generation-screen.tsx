@@ -1,4 +1,4 @@
-import { isKling4, kling4Body, renameKling4Mentions } from "@/lib/kling4";
+import { isKling4, KLING4_KEYFRAME, KLING4_REFERENCE, kling4Body, renameKling4Mentions } from "@/lib/kling4";
 import { Kling4Materials } from "@/components/kling4-materials";
 import { useEffect, useState, type ReactNode } from "react";
 import { AlertCircle, Film, ImageIcon, LoaderCircle, Orbit, Upload, WandSparkles, X } from "lucide-react";
@@ -183,7 +183,8 @@ function GenerationScreen({
   const availableModels =
     kind === "motion"
       ? models.filter((model) => /motion/i.test(`${model.key} ${model.display_name}`) || model.modes?.includes("motion"))
-      : models.filter((model) => !model.modes?.includes("motion") && !/motion-control/i.test(model.key));
+      : models.filter((model) => !model.modes?.includes("motion") && !/motion-control/i.test(model.key)
+        && (model.key !== KLING4_KEYFRAME || draft.model === KLING4_KEYFRAME));
   const selectedModel = availableModels.find((model) => model.key === draft.model) || (ux2 && draft.model ? undefined : availableModels[0]);
   const kling4Selected = isKling4(selectedModel?.key || "");
   const isWan30 = kind === "video" && WAN30_MODELS.has(selectedModel?.key || "");
@@ -420,7 +421,7 @@ function GenerationScreen({
               <Select value={selectedModel?.key || ""} disabled={preserveMedia && (mediaUploading || submitting)} onChange={(event) => syncSelectedModel(event.target.value)}>
                 {ux2 && !selectedModel && draft.model && <option value="" disabled>Модель черновика недоступна — выберите другую</option>}
                 {availableModels.map((model) => (
-                  <option key={model.key} value={model.key}>{model.display_name} · {formatCredits(model.credits)} кр.</option>
+                  <option key={model.key} value={model.key}>{model.key === KLING4_REFERENCE ? 'Kling 4' : model.display_name} · {formatCredits(model.credits)} кр.</option>
                 ))}
               </Select>
             </label>

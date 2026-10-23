@@ -26,7 +26,7 @@ test('admin reference editor sends structured materials after exact quote',async
  const posts=await prepare(page);
  await page.getByRole('combobox',{name:'Модель',exact:true}).selectOption(reference);
  await page.getByRole('textbox',{name:/^Промпт/}).fill('@image_1 A ball moves smoothly');
- await page.getByLabel('Фото-референсы · до 10',{exact:true}).setInputFiles({name:'reference.png',mimeType:'image/png',buffer:Buffer.from('image-fixture')});
+ await page.getByLabel('Референсы · фото, видео, аудио',{exact:true}).setInputFiles({name:'reference.png',mimeType:'image/png',buffer:Buffer.from('image-fixture')});
  await expect(page.getByText('1.png',{exact:false}).first()).toBeVisible();
  await page.getByRole('complementary').getByRole('button',{name:'Создать',exact:true}).click();
  await expect(page.getByRole('dialog')).toBeVisible();
@@ -37,15 +37,16 @@ test('admin reference editor sends structured materials after exact quote',async
  expect(posts[0].intent_id).toMatch(/^[0-9a-f-]{36}$/);
  await page.screenshot({path:info.outputPath('kling4-admin-reference.png'),fullPage:true});
 });
-test('keyframe editor exposes ordered roles and no character controls',async({page},info)=>{
+test('new orders show one Kling 4 and automatic references only',async({page},info)=>{
  await prepare(page);
- await page.getByRole('combobox',{name:'Модель',exact:true}).selectOption(keyframe);
- await expect(page.getByLabel('Первый кадр',{exact:true})).toBeVisible();
- await expect(page.getByLabel('Промежуточные кадры',{exact:true})).toBeVisible();
- await expect(page.getByLabel('Последний кадр',{exact:true})).toBeVisible();
- await expect(page.getByRole('button',{name:'Добавить элемент'})).toHaveCount(0);
+ const select=page.getByRole('combobox',{name:'Модель',exact:true});
+ await select.selectOption(reference);
+ await expect(select.locator(`option[value="${keyframe}"]`)).toHaveCount(0);
+ await expect(select.locator(`option[value="${reference}"]`)).toHaveText(/^Kling 4 ·/);
+ await expect(page.getByLabel('Референсы · фото, видео, аудио',{exact:true})).toBeAttached();
+ await expect(page.getByLabel('Первый кадр',{exact:true})).toHaveCount(0);
  expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(2);
- await page.screenshot({path:info.outputPath('kling4-keyframes.png'),fullPage:true});
+ await page.screenshot({path:info.outputPath('kling4-unified.png'),fullPage:true});
 });
 test('ordinary catalog does not expose Kling 4 or material controls',async({page})=>{
  await prepare(page,false);
@@ -62,4 +63,59 @@ test('parked generic media and Omni IDs do not block Kling quote confirmation',a
  await page.getByRole('textbox',{name:/^Промпт/}).fill('A calm landscape');
  await page.getByRole('complementary').getByRole('button',{name:'Создать',exact:true}).click();
  await expect(page.getByRole('dialog')).toBeVisible();
+});
+
+test('mixed references route automatically and preserve the exact price confirmation',async({page})=>{
+ const posts=await prepare(page);
+ let uploads=0;
+ await page.route('**/api/web/kling4/assets',route=>{const kind=['image','video','audio'][uploads++];return route.fulfill({json:{ok:true,data:{url:`https://media.example.test/${kind}`,kind}}});});
+ await page.getByRole('combobox',{name:'Модель',exact:true}).selectOption(reference);
+ await page.getByRole('textbox',{name:/^Промпт/}).fill('A scene with @image_1 and @video_1. @Voice_1 speaks.');
+ await page.getByLabel('Референсы · фото, видео, аудио',{exact:true}).setInputFiles(['ref.png','clip.mp4','voice.wav'].map(name=>({name,mimeType:'application/octet-stream',buffer:Buffer.from('fixture')})));
+ await expect(page.getByText('Голос @Voice_1:',{exact:false})).toBeVisible();
+ await page.getByRole('complementary').getByRole('button',{name:'Создать',exact:true}).click();
+ await expect(page.getByRole('dialog')).toBeVisible();expect(posts).toHaveLength(0);
+ await page.getByRole('dialog').getByRole('button',{name:/Запустить за/}).click();
+ await expect.poll(()=>posts.length).toBe(1);
+ expect(posts[0].model).toBe(reference);
+ expect(posts[0].kling4).toMatchObject({image_urls:['https://media.example.test/image'],video_urls:['https://media.example.test/video'],voices:[{name:'Voice_1',audio_url:'https://media.example.test/audio'}]});
+ expect(posts[0].quoted_credits).toBe(85.5);
+});
+
+test('failed batch retains completed uploads and invalid asset kind fails closed',async({page})=>{
+ const posts=await prepare(page);let uploads=0;
+ await page.route('**/api/web/kling4/assets',route=>++uploads===1?route.fulfill({json:{ok:true,data:{url:'https://media.example.test/kept.png',kind:'image'}}}):route.fulfill({status:503,json:{ok:false,error:'Upload unavailable'}}));
+ await page.getByRole('combobox',{name:'Модель',exact:true}).selectOption(reference);
+ await page.getByRole('textbox',{name:/^Промпт/}).fill('A calm scene');
+ const input=page.getByLabel('Референсы · фото, видео, аудио',{exact:true});
+ await input.setInputFiles(['first.png','second.png'].map(name=>({name,mimeType:'image/png',buffer:Buffer.from('fixture')})));
+ await expect(page.getByRole('alert').filter({hasText:'Upload unavailable'})).toBeVisible();
+ await expect(page.getByText('1. kept.png',{exact:true})).toBeVisible();
+ await page.route('**/api/web/kling4/assets',route=>route.fulfill({json:{ok:true,data:{url:'https://media.example.test/unknown.png'}}}));
+ await input.setInputFiles({name:'unknown.png',mimeType:'image/png',buffer:Buffer.from('fixture')});
+ await expect(page.getByRole('alert').filter({hasText:'Сервер не подтвердил тип материала'})).toBeVisible();
+ await page.getByRole('complementary').getByRole('button',{name:'Создать',exact:true}).click();
+ await page.getByRole('dialog').getByRole('button',{name:/Запустить за/}).click();
+ await expect.poll(()=>posts.length).toBe(1);
+ expect((posts[0].kling4 as any).image_urls).toEqual(['https://media.example.test/kept.png']);
+});
+
+test('eleventh automatic image is refused before storage',async({page})=>{
+ await prepare(page);let uploads=0;
+ await page.route('**/api/web/kling4/assets',route=>route.fulfill({json:{ok:true,data:{url:`https://media.example.test/${++uploads}.png`,kind:'image'}}}));
+ await page.getByRole('combobox',{name:'Модель',exact:true}).selectOption(reference);
+ await page.getByLabel('Референсы · фото, видео, аудио',{exact:true}).setInputFiles(Array.from({length:11},(_,i)=>({name:`${i}.png`,mimeType:'image/png',buffer:Buffer.from('fixture')})));
+ await expect(page.getByRole('alert').filter({hasText:'Не больше 10'})).toBeVisible();expect(uploads).toBe(10);
+});
+
+test('saved legacy keyframe draft retains frame roles and original model at checkout',async({page})=>{
+ await page.addInitScript(()=>sessionStorage.setItem('apix:ux2:drafts:v1:7',JSON.stringify({version:1,owner:7,drafts:{video:{kind:'video',model:'kling-4.0/keyframe-to-video',prompt:'@first_frame Move gently',promptId:null,sourceTitle:'',aspectRatio:'auto',quality:'basic',count:1,taskCount:1,mode:'text',duration:3,resolution:'720p',referenceUrls:[],videoUrl:'',videoStart:0,videoEnd:null,audioIds:[],characterIds:[],seed:null,grokMode:'normal',kling4:{first_frame_url:'https://media.example.test/first.png',keyframe_urls:[]}}}})));
+ const posts=await prepare(page);
+ await expect(page.getByLabel('Первый кадр',{exact:true})).toBeAttached();
+ await expect(page.getByLabel('Промежуточные кадры',{exact:true})).toBeAttached();
+ await expect(page.getByLabel('Референсы · фото, видео, аудио',{exact:true})).toHaveCount(0);
+ await page.getByRole('complementary').getByRole('button',{name:'Создать',exact:true}).click();
+ await page.getByRole('dialog').getByRole('button',{name:/Запустить за/}).click();
+ await expect.poll(()=>posts.length).toBe(1);expect(posts[0].model).toBe(keyframe);
+ expect((posts[0].kling4 as any).first_frame_url).toBe('https://media.example.test/first.png');
 });

@@ -302,3 +302,47 @@ async def test_wan_kie_notice_rejects_unmatched_or_unbound_provider_id():
     }
     row.input_params = json.dumps(data)
     assert await repo.claim_neironych_video_notice(FakeSession(row), row.id) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model", ["kling-4.0/reference-to-video", "kling-4.0/keyframe-to-video"])
+@pytest.mark.parametrize("kind", ["done", "failed"])
+async def test_bound_kling4_notice_is_claimed_and_acknowledged_once(model, kind):
+    row = _row(kind=kind)
+    row.model = model
+    row.task_id = "confirmed-kling-provider-id"
+    params = json.loads(row.input_params)
+    params[repo.KIE_VIDEO_SUBMISSION_KEY] = {"state": "bound", "provider_task_id": row.task_id}
+    row.input_params = json.dumps(params)
+    session = FakeSession(row)
+    claim = await repo.claim_neironych_video_notice(session, row.id)
+    assert claim is not None and claim.kind == kind and claim.attempt == 1
+    assert await repo.claim_neironych_video_notice(session, row.id) is None
+    assert await repo.complete_neironych_video_notice(session, row.id, claim.token, delivered=True)
+    assert json.loads(row.input_params)[repo.NEIRONYCH_VIDEO_NOTICE_KEY]["state"] == "sent"
+    assert await repo.claim_neironych_video_notice(session, row.id) is None
+    assert row.credits_spent == 42
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", ["missing", "unbound", "mismatch", "web", "unrelated_model"])
+async def test_kling4_notice_requires_matching_bound_bot_identity(case):
+    row = _row()
+    row.model = "kling-4.0/reference-to-video"
+    row.task_id = "confirmed-kling-provider-id"
+    params = json.loads(row.input_params)
+    marker = {"state": "bound", "provider_task_id": row.task_id}
+    if case == "unbound":
+        marker["state"] = "submitting"
+    if case == "mismatch":
+        marker["provider_task_id"] = "other-provider-id"
+    if case == "web":
+        row.task_id = "web:" + row.task_id
+        marker["provider_task_id"] = row.task_id
+    if case == "unrelated_model":
+        row.model = "grok-imagine/text-to-video"
+    if case != "missing":
+        params[repo.KIE_VIDEO_SUBMISSION_KEY] = marker
+    row.input_params = json.dumps(params)
+    assert await repo.claim_neironych_video_notice(FakeSession(row), row.id) is None
+    assert json.loads(row.input_params)[repo.NEIRONYCH_VIDEO_NOTICE_KEY]["attempts"] == 0
