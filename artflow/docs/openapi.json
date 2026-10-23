@@ -11399,6 +11399,211 @@
         ]
       }
     },
+    "/api/web/kling4/assets": {
+      "post": {
+        "tags": [
+          "web"
+        ],
+        "summary": "Upload Kling4 Asset",
+        "operationId": "upload_kling4_asset_api_web_kling4_assets_post",
+        "parameters": [
+          {
+            "name": "X-Dev-Tg-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-Tg-Id"
+            }
+          },
+          {
+            "name": "X-Web-Auth-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Web-Auth-Token"
+            }
+          },
+          {
+            "name": "X-Telegram-Init-Data",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Telegram-Init-Data"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_kling4_asset_api_web_kling4_assets_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
+          }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
+      }
+    },
+    "/api/web/kling4/recipe/{generation_id}": {
+      "get": {
+        "tags": [
+          "web"
+        ],
+        "summary": "Kling4 Owned Recipe",
+        "operationId": "kling4_owned_recipe_api_web_kling4_recipe__generation_id__get",
+        "parameters": [
+          {
+            "name": "generation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Generation Id"
+            }
+          },
+          {
+            "name": "X-Dev-Tg-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-Tg-Id"
+            }
+          },
+          {
+            "name": "X-Web-Auth-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Web-Auth-Token"
+            }
+          },
+          {
+            "name": "X-Telegram-Init-Data",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Telegram-Init-Data"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
+          }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ]
+      }
+    },
     "/api/web/h3/upload-reference": {
       "post": {
         "tags": [
@@ -14491,6 +14696,234 @@
         ]
       }
     },
+    "/api/web/admin/provider-routing/wan30/{variant}": {
+      "get": {
+        "tags": [
+          "web-admin"
+        ],
+        "summary": "Admin Get Wan Route",
+        "operationId": "admin_get_wan_route_api_web_admin_provider_routing_wan30__variant__get",
+        "parameters": [
+          {
+            "name": "variant",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": [
+                "standard",
+                "prime"
+              ],
+              "type": "string",
+              "title": "Variant"
+            }
+          },
+          {
+            "name": "X-Dev-Tg-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-Tg-Id"
+            }
+          },
+          {
+            "name": "X-Web-Auth-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Web-Auth-Token"
+            }
+          },
+          {
+            "name": "X-Telegram-Init-Data",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Telegram-Init-Data"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
+          }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ],
+        "x-required-role": "admin"
+      },
+      "put": {
+        "tags": [
+          "web-admin"
+        ],
+        "summary": "Admin Set Wan Route",
+        "operationId": "admin_set_wan_route_api_web_admin_provider_routing_wan30__variant__put",
+        "parameters": [
+          {
+            "name": "variant",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": [
+                "standard",
+                "prime"
+              ],
+              "type": "string",
+              "title": "Variant"
+            }
+          },
+          {
+            "name": "X-Dev-Tg-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-Tg-Id"
+            }
+          },
+          {
+            "name": "X-Web-Auth-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Web-Auth-Token"
+            }
+          },
+          {
+            "name": "X-Telegram-Init-Data",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Telegram-Init-Data"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WanRoutingUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
+          }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ],
+        "x-required-role": "admin"
+      }
+    },
     "/api/web/admin/provider-routing/qwen38/{mode}": {
       "get": {
         "tags": [
@@ -17522,6 +17955,208 @@
         "x-required-role": "admin"
       }
     },
+    "/api/web/admin/kling4/access": {
+      "get": {
+        "tags": [
+          "web-admin"
+        ],
+        "summary": "Admin Get Kling4 Access",
+        "operationId": "admin_get_kling4_access_api_web_admin_kling4_access_get",
+        "parameters": [
+          {
+            "name": "X-Dev-Tg-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-Tg-Id"
+            }
+          },
+          {
+            "name": "X-Web-Auth-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Web-Auth-Token"
+            }
+          },
+          {
+            "name": "X-Telegram-Init-Data",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Telegram-Init-Data"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
+          }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ],
+        "x-required-role": "admin"
+      },
+      "put": {
+        "tags": [
+          "web-admin"
+        ],
+        "summary": "Admin Set Kling4 Access",
+        "operationId": "admin_set_kling4_access_api_web_admin_kling4_access_put",
+        "parameters": [
+          {
+            "name": "X-Dev-Tg-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-Tg-Id"
+            }
+          },
+          {
+            "name": "X-Web-Auth-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Web-Auth-Token"
+            }
+          },
+          {
+            "name": "X-Telegram-Init-Data",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Telegram-Init-Data"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Kling4AccessUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
+          }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ],
+        "x-required-role": "admin"
+      }
+    },
     "/upload": {
       "post": {
         "summary": "Upload File",
@@ -18689,6 +19324,25 @@
         ],
         "title": "Body_upload_h3_reference_api_web_h3_upload_reference_post"
       },
+      "Body_upload_kling4_asset_api_web_kling4_assets_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "title": "File"
+          },
+          "owner_id": {
+            "type": "integer",
+            "title": "Owner Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file",
+          "owner_id"
+        ],
+        "title": "Body_upload_kling4_asset_api_web_kling4_assets_post"
+      },
       "Body_upload_media_api_web_upload_media_post": {
         "properties": {
           "file": {
@@ -19307,6 +19961,227 @@
         },
         "type": "object",
         "title": "ImageSessionCreateRequest"
+      },
+      "Kling4AccessUpdate": {
+        "properties": {
+          "audience": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "public",
+              "disabled"
+            ],
+            "title": "Audience"
+          }
+        },
+        "type": "object",
+        "required": [
+          "audience"
+        ],
+        "title": "Kling4AccessUpdate"
+      },
+      "Kling4Element": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "image_urls": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 4,
+            "title": "Image Urls"
+          },
+          "video_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Video Url"
+          },
+          "tag": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "character",
+                  "animal",
+                  "prop",
+                  "costume",
+                  "scene",
+                  "effect",
+                  "others"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tag"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "voice_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voice Url"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "Kling4Element"
+      },
+      "Kling4Input": {
+        "properties": {
+          "duration": {
+            "type": "integer",
+            "maximum": 30.0,
+            "minimum": 3.0,
+            "title": "Duration",
+            "default": 5
+          },
+          "resolution": {
+            "type": "string",
+            "enum": [
+              "720p",
+              "1080p"
+            ],
+            "title": "Resolution",
+            "default": "720p"
+          },
+          "aspect_ratio": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "16:9",
+                  "9:16",
+                  "1:1",
+                  "21:9"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aspect Ratio"
+          },
+          "image_urls": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "title": "Image Urls"
+          },
+          "video_urls": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 5,
+            "title": "Video Urls"
+          },
+          "keep_original_sound": {
+            "type": "boolean",
+            "title": "Keep Original Sound",
+            "default": false
+          },
+          "elements": {
+            "items": {
+              "$ref": "#/components/schemas/Kling4Element"
+            },
+            "type": "array",
+            "maxItems": 7,
+            "title": "Elements"
+          },
+          "voices": {
+            "items": {
+              "$ref": "#/components/schemas/Kling4Voice"
+            },
+            "type": "array",
+            "maxItems": 3,
+            "title": "Voices"
+          },
+          "first_frame_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Frame Url"
+          },
+          "keyframe_urls": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 8,
+            "title": "Keyframe Urls"
+          },
+          "last_frame_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Frame Url"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "Kling4Input"
+      },
+      "Kling4Voice": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "audio_url": {
+            "type": "string",
+            "title": "Audio Url"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "audio_url"
+        ],
+        "title": "Kling4Voice"
       },
       "LanguageRequest": {
         "properties": {
@@ -21116,6 +21991,27 @@
             "type": "string",
             "title": "Model"
           },
+          "kling4": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Kling4Input"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "intent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intent Id"
+          },
           "prompt": {
             "type": "string",
             "maxLength": 30000,
@@ -21336,6 +22232,38 @@
           "prompt"
         ],
         "title": "VideoGenRequest"
+      },
+      "WanRoutingUpdate": {
+        "properties": {
+          "policy": {
+            "type": "string",
+            "enum": [
+              "neironych_kie",
+              "neironych_only",
+              "kie_only"
+            ],
+            "title": "Policy"
+          },
+          "neironych_model_id": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_./-]+$",
+            "title": "Neironych Model Id"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Expected Revision"
+          }
+        },
+        "type": "object",
+        "required": [
+          "policy",
+          "neironych_model_id",
+          "expected_revision"
+        ],
+        "title": "WanRoutingUpdate"
       },
       "api__miniapp_routes__TelegramLoginRequest": {
         "properties": {

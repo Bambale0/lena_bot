@@ -3786,6 +3786,7 @@ function renderAdminPricing() {
   const plans = payload?.price_plans || [];
   return `
     <p><a class="button ghost" href="tribute-admin.html">Продукты Tribute</a></p>
+    <p><a class="button ghost" href="wan-routing-admin.html">Провайдеры Wan</a></p>
     <form class="admin-filterbar" data-admin-pricing-search-form>
       <label>
         <span>Поиск модели</span>

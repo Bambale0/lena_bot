@@ -23,6 +23,15 @@ from core.image_recovery_policy import get_image_recovery_policy, set_image_reco
 from core.provider_routing import get_nano21_route, set_nano21_route
 from core.qwen_routing import get_qwen_route, set_qwen_route
 from core.reporting_time import REPORTING_TZ, moscow_day_bounds_utc
+from core.wan30_routing_policy import MODELS as WAN_ROUTE_MODELS
+from core.wan30_routing_policy import (
+    WanRouteConflict,
+    get_wan30_route,
+    set_wan30_route,
+)
+from core.wan30_routing_policy import (
+    validate_route as validate_wan_route,
+)
 from db import repository as repo
 from db.models import (
     CreditLedgerEntry,
@@ -44,6 +53,60 @@ from db.repository import InsufficientReferralBalanceError
 from db.session import get_session
 
 router = APIRouter(tags=["web-admin"])
+
+
+class WanRoutingUpdate(BaseModel):
+    policy: Literal["neironych_kie", "neironych_only", "kie_only"]
+    neironych_model_id: str = Field(..., min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_./-]+$")
+    expected_revision: int = Field(..., ge=0, strict=True)
+
+
+@router.get("/admin/provider-routing/wan30/{variant}")
+async def admin_get_wan_route(
+    variant: Literal["standard", "prime"],
+    session: AsyncSession = Depends(get_session), user=Depends(get_web_user_or_none),
+):
+    if admin_error := _admin_error(user):
+        return admin_error
+    from dataclasses import asdict
+    route = await get_wan30_route(WAN_ROUTE_MODELS[variant], session)
+    return ok({**asdict(route), "credential_configured": bool(settings.NEIRONYCH_API_KEY.strip())})
+
+
+@router.put("/admin/provider-routing/wan30/{variant}")
+async def admin_set_wan_route(
+    variant: Literal["standard", "prime"], body: WanRoutingUpdate,
+    session: AsyncSession = Depends(get_session), user=Depends(get_web_user_or_none),
+):
+    if admin_error := _admin_error(user):
+        return admin_error
+    from dataclasses import asdict
+
+    from api.neironych_seedance import NeironychSeedanceClient
+    model = WAN_ROUTE_MODELS[variant]
+    try:
+        validate_wan_route(model, body.policy, body.neironych_model_id)
+        if body.policy != "kie_only":
+            if not settings.NEIRONYCH_API_KEY.strip():
+                return error_response(422, "Ключ Нейроныча не настроен.")
+            client = NeironychSeedanceClient(settings.NEIRONYCH_API_KEY, settings.NEIRONYCH_API_BASE_URL)
+            try:
+                catalog = await client.list_models()
+            except Exception:
+                return error_response(503, "Каталог Нейроныча недоступен. Изменения не сохранены.")
+            finally:
+                await client.aclose()
+            if body.neironych_model_id not in catalog:
+                return error_response(422, "Модель отсутствует в каталоге Нейроныча.")
+        route = await set_wan30_route(
+            session, model, policy=body.policy, neironych_model_id=body.neironych_model_id,
+            expected_revision=body.expected_revision, admin_tg_id=int(user.tg_id), source="web",
+        )
+    except WanRouteConflict as exc:
+        return error_response(409, str(exc))
+    except ValueError as exc:
+        return error_response(422, str(exc))
+    return ok(asdict(route))
 
 
 class Nano21ProviderRoutingUpdate(BaseModel):

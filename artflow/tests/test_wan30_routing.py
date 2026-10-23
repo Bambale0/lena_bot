@@ -116,3 +116,13 @@ async def test_primary_missing_provider_task_id_is_not_accepted_as_success():
             send_kie=k,
         )
     k.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_admin_disabled_standby_never_posts_to_kie_on_rejection():
+    rejection = NeironychSeedanceError("balance", status_code=402, payload={"detail": "insufficient_balance"})
+    kie = AsyncMock()
+    with pytest.raises(NeironychSeedanceError):
+        await submit_wan30(req(), neironych_model_id="wan-3", fetch_neironych_models=AsyncMock(return_value=["wan-3"]),
+                           send_neironych=AsyncMock(side_effect=rejection), send_kie=kie, allow_kie=False)
+    kie.assert_not_awaited()

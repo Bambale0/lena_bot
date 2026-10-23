@@ -112,3 +112,42 @@ It now shares strict pre-charge pricing and canonical recipe restoration with
 normal Wan checkout; Telegram also preserves source mode/settings before its
 confirmation. See [Wan feed repeats](wan30_feed_repeat.md) for the incident,
 input/privacy guarantees, regression evidence and live-verification boundaries.
+
+## Runtime routing control and release validation (23 October)
+
+Migration `048_wan_routing` carries effective native mappings into
+`wan_routing_settings`: configured mappings retain `neironych_kie`, while an
+explicitly empty or incompatible legacy mapping retains `kie_only`. Only
+reviewed Wan3 family/variant aliases remain active. Verified defaults are retained
+for later administrator enablement; bootstrap never re-enables a disabled
+primary. Runtime reads this table for
+new tasks; environment values are bootstrap defaults only if a row is absent.
+The shared administrator page `/wan-routing-admin.html` is linked from the
+site admin cabinet, Mini App settings and Telegram admin panel. Authenticated
+GET/PUT `/api/web/admin/provider-routing/wan30/{standard|prime}` enforce admin
+rights server-side. Operators can select Neironych with KIE standby, Neironych
+only or KIE only, and update the corresponding Wan3 native mapping. Saving a
+Neironych route checks the authenticated catalog; family/variant validation
+prevents switching the logical product to Wan2, another family or the wrong
+Prime variant. Every save compares the expected revision under a row lock
+and commits the change with actor/source/before/after audit evidence. A stale
+save returns 409. Credentials remain in the secret environment and never
+enter settings/audit/GET responses; only configured/not configured is exposed.
+
+A missing Neironych key bypasses its catalog and paid transport, selecting
+KIE when the DB policy permits standby. `neironych_only` fails closed instead.
+An unavailable DB/catalog or an unknown paid submission is never treated as
+permission to create a second paid task. Native-incompatible options retain
+KIE payload semantics when standby is enabled.
+
+Two corrected synthetic 5s/720p requests completed via the real Neironych
+adapter. Both authenticated MP4 downloads passed ffprobe: 1280x720, video and
+audio streams, approximately 5.038s; provider usage reports 5 billed seconds.
+Initial downstream-rejected test jobs were confirmed not chargeable. No APIX
+customer wallet changes or paid KIE fallback were made during validation.
+
+PR #293 initially passed all four required checks and merged, but its
+post-merge credential/control-plane findings were discovered before deploy.
+Main workflow `39921456846` was cancelled before production rollout. The
+follow-up release must include both review fixes and migration 048; no manual
+production checkout/build/configuration was used.

@@ -2,7 +2,7 @@
 
 - Version: `1.0.0`
 - OpenAPI: `3.1.0`
-- Paths: `195`
+- Paths: `199`
 
 APIX AI API for Telegram auth, content generation, billing, prompt library, feed, and provider webhooks.
 
@@ -2898,6 +2898,47 @@ Responses:
 - `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
+#### `POST /api/web/kling4/assets`
+
+- Summary: Upload Kling4 Asset
+- Operation ID: `upload_kling4_asset_api_web_kling4_assets_post`
+- Auth: yes
+- Request body: `multipart/form-data`: `Body_upload_kling4_asset_api_web_kling4_assets_post`
+
+Parameters:
+
+| Name | In | Required | Type |
+| --- | --- | --- | --- |
+| `X-Dev-Tg-Id` | `header` | no | `string | null` |
+| `X-Web-Auth-Token` | `header` | no | `string | null` |
+| `X-Telegram-Init-Data` | `header` | no | `string | null` |
+
+Responses:
+- `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `422`: Validation Error (`application/json`)
+
+#### `GET /api/web/kling4/recipe/{generation_id}`
+
+- Summary: Kling4 Owned Recipe
+- Operation ID: `kling4_owned_recipe_api_web_kling4_recipe__generation_id__get`
+- Auth: yes
+- Request body: none
+
+Parameters:
+
+| Name | In | Required | Type |
+| --- | --- | --- | --- |
+| `generation_id` | `path` | yes | `integer` |
+| `X-Dev-Tg-Id` | `header` | no | `string | null` |
+| `X-Web-Auth-Token` | `header` | no | `string | null` |
+| `X-Telegram-Init-Data` | `header` | no | `string | null` |
+
+Responses:
+- `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `422`: Validation Error (`application/json`)
+
 #### `GET /api/web/landing`
 
 - Summary: Landing Payload
@@ -3706,6 +3747,48 @@ Responses:
 - `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
 
+#### `GET /api/web/admin/kling4/access`
+
+- Summary: Admin Get Kling4 Access
+- Operation ID: `admin_get_kling4_access_api_web_admin_kling4_access_get`
+- Auth: yes
+- Request body: none
+
+Parameters:
+
+| Name | In | Required | Type |
+| --- | --- | --- | --- |
+| `X-Dev-Tg-Id` | `header` | no | `string | null` |
+| `X-Web-Auth-Token` | `header` | no | `string | null` |
+| `X-Telegram-Init-Data` | `header` | no | `string | null` |
+
+Responses:
+- `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
+- `422`: Validation Error (`application/json`)
+
+#### `PUT /api/web/admin/kling4/access`
+
+- Summary: Admin Set Kling4 Access
+- Operation ID: `admin_set_kling4_access_api_web_admin_kling4_access_put`
+- Auth: yes
+- Request body: `application/json`: `Kling4AccessUpdate`
+
+Parameters:
+
+| Name | In | Required | Type |
+| --- | --- | --- | --- |
+| `X-Dev-Tg-Id` | `header` | no | `string | null` |
+| `X-Web-Auth-Token` | `header` | no | `string | null` |
+| `X-Telegram-Init-Data` | `header` | no | `string | null` |
+
+Responses:
+- `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
+- `422`: Validation Error (`application/json`)
+
 #### `GET /api/web/admin/ledger`
 
 - Summary: Admin Ledger
@@ -3936,6 +4019,50 @@ Parameters:
 | Name | In | Required | Type |
 | --- | --- | --- | --- |
 | `mode` | `path` | yes | `string` |
+| `X-Dev-Tg-Id` | `header` | no | `string | null` |
+| `X-Web-Auth-Token` | `header` | no | `string | null` |
+| `X-Telegram-Init-Data` | `header` | no | `string | null` |
+
+Responses:
+- `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
+- `422`: Validation Error (`application/json`)
+
+#### `GET /api/web/admin/provider-routing/wan30/{variant}`
+
+- Summary: Admin Get Wan Route
+- Operation ID: `admin_get_wan_route_api_web_admin_provider_routing_wan30__variant__get`
+- Auth: yes
+- Request body: none
+
+Parameters:
+
+| Name | In | Required | Type |
+| --- | --- | --- | --- |
+| `variant` | `path` | yes | `string` |
+| `X-Dev-Tg-Id` | `header` | no | `string | null` |
+| `X-Web-Auth-Token` | `header` | no | `string | null` |
+| `X-Telegram-Init-Data` | `header` | no | `string | null` |
+
+Responses:
+- `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
+- `422`: Validation Error (`application/json`)
+
+#### `PUT /api/web/admin/provider-routing/wan30/{variant}`
+
+- Summary: Admin Set Wan Route
+- Operation ID: `admin_set_wan_route_api_web_admin_provider_routing_wan30__variant__put`
+- Auth: yes
+- Request body: `application/json`: `WanRoutingUpdate`
+
+Parameters:
+
+| Name | In | Required | Type |
+| --- | --- | --- | --- |
+| `variant` | `path` | yes | `string` |
 | `X-Dev-Tg-Id` | `header` | no | `string | null` |
 | `X-Web-Auth-Token` | `header` | no | `string | null` |
 | `X-Telegram-Init-Data` | `header` | no | `string | null` |

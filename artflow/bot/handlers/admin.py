@@ -119,6 +119,7 @@ def admin_menu_kb():
 
     from core.config import settings
     builder.button(text="💵 Каталог Tribute", web_app=WebAppInfo(url=f"{settings.WEB_PUBLIC_URL.rstrip('/')}/tribute-admin.html"))
+    builder.button(text="🌊 Провайдеры Wan", web_app=WebAppInfo(url=f"{settings.WEB_PUBLIC_URL.rstrip('/')}/wan-routing-admin.html"))
     builder.button(text="🎟 Промокоды", callback_data="adm:promos")
     builder.button(text="🧩 Nexus модели", callback_data="adm:nexus_models")
     builder.button(text="🔀 Banana 2.1 провайдер", callback_data="adm:nano21_route")
