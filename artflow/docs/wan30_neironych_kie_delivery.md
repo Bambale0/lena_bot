@@ -117,7 +117,8 @@ input/privacy guarantees, regression evidence and live-verification boundaries.
 
 Migration `048_wan_routing` carries effective native mappings into
 `wan_routing_settings`: configured mappings retain `neironych_kie`, while an
-explicitly empty mapping retains `kie_only`. Verified defaults are retained
+explicitly empty or incompatible legacy mapping retains `kie_only`. Only
+reviewed Wan3 family/variant aliases remain active. Verified defaults are retained
 for later administrator enablement; bootstrap never re-enables a disabled
 primary. Runtime reads this table for
 new tasks; environment values are bootstrap defaults only if a row is absent.

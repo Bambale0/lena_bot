@@ -14,6 +14,7 @@ depends_on = None
 
 def upgrade():
     from core.config import settings
+    from core.wan30_routing_policy import validate_route
 
     op.create_table(
         "wan_routing_settings",
@@ -50,6 +51,12 @@ def upgrade():
         ("wan/3-0-video-prime", settings.WAN30_PRIME_NEIRONYCH_MODEL_ID, "wan-3-prime"),
     ):
         native = configured.strip()
+        try:
+            validate_route(model, "neironych_kie", native)
+        except ValueError:
+            # Legacy aliases outside the reviewed Wan3 contract must remain
+            # operable through KIE, including in the administrator editor.
+            native = ""
         rows.append({
             "model_key": model,
             "policy": "neironych_kie" if native else "kie_only",

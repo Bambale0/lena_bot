@@ -138,7 +138,8 @@ async def test_admin_can_switch_to_kie_without_primary_key_or_catalog(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_migration_preserves_explicitly_disabled_primary_mapping(tmp_path, monkeypatch):
+@pytest.mark.parametrize("prime_mapping", ["", "real-wan", "wan-2.6", "wan-3", "wan-30-prime"])
+async def test_migration_preserves_explicitly_disabled_primary_mapping(tmp_path, monkeypatch, prime_mapping):
     import importlib.util
     from pathlib import Path
 
@@ -150,7 +151,7 @@ async def test_migration_preserves_explicitly_disabled_primary_mapping(tmp_path,
     from core.wan30_routing_policy import get_wan30_route
 
     monkeypatch.setattr(settings, "WAN30_NEIRONYCH_MODEL_ID", "wan-3-approved")
-    monkeypatch.setattr(settings, "WAN30_PRIME_NEIRONYCH_MODEL_ID", "")
+    monkeypatch.setattr(settings, "WAN30_PRIME_NEIRONYCH_MODEL_ID", prime_mapping)
     path = Path(__file__).resolve().parents[1] / "db/migrations/versions/048_wan_routing.py"
     spec = importlib.util.spec_from_file_location("wan_disabled_migration_test", path)
     migration = importlib.util.module_from_spec(spec)
