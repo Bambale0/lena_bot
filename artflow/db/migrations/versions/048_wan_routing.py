@@ -13,6 +13,8 @@ depends_on = None
 
 
 def upgrade():
+    from core.config import settings
+
     op.create_table(
         "wan_routing_settings",
         sa.Column("model_key", sa.String(64), primary_key=True),
@@ -40,10 +42,21 @@ def upgrade():
     )
     op.create_index("ix_wan_routing_audit_model_key", "wan_routing_audit", ["model_key"])
     table = sa.table("wan_routing_settings", sa.column("model_key"), sa.column("policy"), sa.column("neironych_model_id"), sa.column("revision"))
-    op.bulk_insert(table, [
-        {"model_key": "wan/3-0-video", "policy": "neironych_kie", "neironych_model_id": "wan-3", "revision": 1},
-        {"model_key": "wan/3-0-video-prime", "policy": "neironych_kie", "neironych_model_id": "wan-3-prime", "revision": 1},
-    ])
+    # Carry forward effective mappings, including an explicitly empty disable
+    # switch. After this one-time bootstrap the database is authoritative.
+    rows = []
+    for model, configured, verified_default in (
+        ("wan/3-0-video", settings.WAN30_NEIRONYCH_MODEL_ID, "wan-3"),
+        ("wan/3-0-video-prime", settings.WAN30_PRIME_NEIRONYCH_MODEL_ID, "wan-3-prime"),
+    ):
+        native = configured.strip()
+        rows.append({
+            "model_key": model,
+            "policy": "neironych_kie" if native else "kie_only",
+            "neironych_model_id": native or verified_default,
+            "revision": 1,
+        })
+    op.bulk_insert(table, rows)
 
 
 def downgrade():

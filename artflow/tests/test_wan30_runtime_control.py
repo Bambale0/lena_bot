@@ -135,3 +135,38 @@ async def test_admin_can_switch_to_kie_without_primary_key_or_catalog(monkeypatc
     assert setter.await_args.kwargs["admin_tg_id"] == 42
     assert setter.await_args.kwargs["source"] == "web"
     catalog.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_migration_preserves_explicitly_disabled_primary_mapping(tmp_path, monkeypatch):
+    import importlib.util
+    from pathlib import Path
+
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from core.config import settings
+    from core.wan30_routing_policy import get_wan30_route
+
+    monkeypatch.setattr(settings, "WAN30_NEIRONYCH_MODEL_ID", "wan-3-approved")
+    monkeypatch.setattr(settings, "WAN30_PRIME_NEIRONYCH_MODEL_ID", "")
+    path = Path(__file__).resolve().parents[1] / "db/migrations/versions/048_wan_routing.py"
+    spec = importlib.util.spec_from_file_location("wan_disabled_migration_test", path)
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    engine = create_async_engine("sqlite+aiosqlite:///" + str(tmp_path / "disabled.db"))
+    def upgrade(connection):
+        with Operations.context(MigrationContext.configure(connection)):
+            migration.upgrade()
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(upgrade)
+        async with async_sessionmaker(engine)() as db:
+            standard = await get_wan30_route("wan/3-0-video", db)
+            prime = await get_wan30_route("wan/3-0-video-prime", db)
+            assert standard.neironych_model_id == "wan-3-approved"
+            assert standard.policy == "neironych_kie"
+            assert prime.policy == "kie_only"
+    finally:
+        await engine.dispose()

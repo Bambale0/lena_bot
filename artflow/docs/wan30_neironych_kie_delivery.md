@@ -115,8 +115,11 @@ input/privacy guarantees, regression evidence and live-verification boundaries.
 
 ## Runtime routing control and release validation (23 October)
 
-Migration `048_wan_routing` seeds both verified native mappings and the
-`neironych_kie` policy in `wan_routing_settings`. Runtime reads this table for
+Migration `048_wan_routing` carries effective native mappings into
+`wan_routing_settings`: configured mappings retain `neironych_kie`, while an
+explicitly empty mapping retains `kie_only`. Verified defaults are retained
+for later administrator enablement; bootstrap never re-enables a disabled
+primary. Runtime reads this table for
 new tasks; environment values are bootstrap defaults only if a row is absent.
 The shared administrator page `/wan-routing-admin.html` is linked from the
 site admin cabinet, Mini App settings and Telegram admin panel. Authenticated
