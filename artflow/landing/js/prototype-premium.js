@@ -693,6 +693,7 @@ function cleanFamilyName(name) {
 function groupModels(models) {
   const groups = new Map();
   models.forEach((model) => {
+    if(model.key==='kling-4.0/keyframe-to-video' && !(new URLSearchParams(location.search).get('kling4_repeat') && state.routeModelKey===model.key))return;
     const key = modelFamilyKey(model);
     const group = groups.get(key) || {
       key,
@@ -725,7 +726,7 @@ function groupModels(models) {
     const qualityPrices = Object.assign({}, ...group.variants.map((model) => model.qualityPrices || {}));
     const mergedPriceTable = Object.assign({}, ...group.variants.map((model) => model.priceTable || {}));
     const mergedVideoInputPrices = Object.assign({}, ...group.variants.map((model) => model.videoInputPrices || {}));
-    const displayName = cleanFamilyName(preferred.name || preferred.key);
+    const displayName = preferred.key==='kling-4.0/reference-to-video' ? 'Kling 4' : cleanFamilyName(preferred.name || preferred.key);
     return {
       ...group,
       preferred: {

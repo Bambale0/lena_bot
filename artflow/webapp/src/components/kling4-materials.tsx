@@ -3,7 +3,7 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
-import { KLING4_KEYFRAME, nextKling4Name, type Kling4Element, type Kling4Options } from '@/lib/kling4';
+import { appendKling4Reference, checkKling4ReferenceCapacity, kling4FileKind, KLING4_KEYFRAME, nextKling4Name, type Kling4Element, type Kling4Options } from '@/lib/kling4';
 
 interface Props {
   model: string;
@@ -16,13 +16,15 @@ interface Props {
 export function Kling4Materials({ model, value, onChange, onUpload, onBusyChange }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const inFlight = useRef(false);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; onBusyChange(false); }; }, [onBusyChange]);
   const keyframe = model === KLING4_KEYFRAME;
   const elements = value.elements || [];
   const voices = value.voices || [];
   async function upload(files: FileList | null, apply: (urls: string[]) => void) {
-    if (!files?.length || busy) return;
+    if (!files?.length || inFlight.current) return;
+    inFlight.current = true;
     setError(''); setBusy(true); onBusyChange(true);
     try {
       const urls: string[] = [];
@@ -34,7 +36,23 @@ export function Kling4Materials({ model, value, onChange, onUpload, onBusyChange
       }
       if (mounted.current) apply(urls);
     } catch (cause) { if (mounted.current) setError(cause instanceof Error ? cause.message : 'Не удалось загрузить материал'); }
-    finally { if (mounted.current) { setBusy(false); onBusyChange(false); } }
+    finally { inFlight.current = false; if (mounted.current) { setBusy(false); onBusyChange(false); } }
+  }
+  async function uploadReferences(files: FileList | null) {
+    if (!files?.length || inFlight.current) return;
+    inFlight.current = true; setError(''); setBusy(true); onBusyChange(true);
+    let next = value;
+    try {
+      for (const file of Array.from(files)) {
+        if (!mounted.current) return;
+        checkKling4ReferenceCapacity(next, kling4FileKind(file));
+        const asset = await onUpload(file);
+        if (!mounted.current) return;
+        next = appendKling4Reference(next, asset);
+        onChange(next);
+      }
+    } catch (cause) { if (mounted.current) setError(cause instanceof Error ? cause.message : 'Не удалось загрузить материал'); }
+    finally { inFlight.current = false; if (mounted.current) { setBusy(false); onBusyChange(false); } }
   }
   function fileInput(label: string, accept: string, multiple: boolean, apply: (urls: string[]) => void) {
     return <label className="grid cursor-pointer gap-1 rounded-lg border border-dashed border-border p-2 text-xs"><span>{label}</span><span className="text-primary">{busy ? "Загрузка…" : multiple ? "Добавить файлы" : "Добавить файл"}</span><input className="sr-only" aria-label={label} type="file" accept={accept} multiple={multiple} disabled={busy} onChange={event => { const files = event.target.files; void upload(files, apply); event.target.value = ''; }} /></label>;
@@ -46,8 +64,8 @@ export function Kling4Materials({ model, value, onChange, onUpload, onBusyChange
     onChange({ ...value, elements: elements.map((item,i) => i===index ? {...item,...patch} : item) });
   }
   return <section aria-label="Материалы Kling 4" className="grid gap-3 rounded-xl border border-border p-3">
-    <p className="text-sm font-semibold">{keyframe ? 'Ключевые кадры Kling 4' : 'Материалы Kling 4'}</p>
-    <p className="text-xs text-muted-foreground">{keyframe ? 'Первый → промежуточные → последний. Для 3 секунд — до 4 кадров, от 9 секунд — до 10. Пропорции задаёт первый кадр.' : 'Упоминайте материалы в промпте: @image_1, @video_1 или @имя персонажа/голоса. Общий лимит — 15 материалов и 30 секунд входных видео.'}</p>
+    <p className="text-sm font-semibold">{keyframe ? 'Kling 4 · заказ из истории' : 'Референсы Kling 4'}</p>
+    <p className="text-xs text-muted-foreground">{keyframe ? 'Первый → промежуточные → последний. Для 3 секунд — до 4 кадров, от 9 секунд — до 10. Пропорции задаёт первый кадр.' : 'Добавьте фото, видео и аудио в любом порядке — тип референса определится автоматически. Ссылки в промпте: @image_1, @video_1, @Voice_1. Цена появится перед запуском.'}</p>
     <fieldset disabled={busy} className="grid min-w-0 gap-3">
     {keyframe ? <>
       {fileInput('Первый кадр','image/png,image/jpeg,image/webp',false, urls => onChange({...value,first_frame_url:urls[0]}))}
@@ -57,10 +75,10 @@ export function Kling4Materials({ model, value, onChange, onUpload, onBusyChange
       {fileInput('Последний кадр','image/png,image/jpeg,image/webp',false,urls => onChange({...value,last_frame_url:urls[0]}))}
       {value.last_frame_url ? list([value.last_frame_url], () => onChange({...value,last_frame_url:null})) : null}
     </> : <>
-      {fileInput('Фото-референсы · до 10','image/png,image/jpeg,image/webp',true,urls=>onChange({...value,image_urls:[...(value.image_urls||[]),...urls]}))}
+      <label className="grid cursor-pointer gap-1 rounded-lg border border-dashed border-border p-2 text-xs"><span>Референсы · фото, видео, аудио</span><span className="text-primary">{busy ? 'Загрузка…' : 'Добавить файлы'}</span><input className="sr-only" aria-label="Референсы · фото, видео, аудио" type="file" accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime,audio/*" multiple disabled={busy} onChange={event => { void uploadReferences(event.target.files); event.target.value = ''; }} /></label>
       {list(value.image_urls||[], index=>onChange({...value,image_urls:value.image_urls?.filter((_,i)=>i!==index)}))}
-      {fileInput('Видео-референсы · до 5','video/mp4,video/webm,video/quicktime',true,urls=>onChange({...value,video_urls:[...(value.video_urls||[]),...urls]}))}
       {list(value.video_urls||[],index=>onChange({...value,video_urls:value.video_urls?.filter((_,i)=>i!==index)}))}
+      {voices.map(voice => <p key={voice.name} className="text-xs">Голос @{voice.name}: {voice.audio_url.split('/').pop()}</p>)}
       <label className="flex gap-2 text-xs"><input type="checkbox" checked={value.keep_original_sound===true} onChange={event=>onChange({...value,keep_original_sound:event.target.checked})}/>Сохранить исходный звук видео</label>
       <details className="grid gap-2"><summary className="cursor-pointer text-sm">Персонажи и другие элементы · {elements.length}/7</summary>
         {elements.map((element,index)=><div key={index} className="my-3 grid gap-2 rounded-lg border border-border p-2">
