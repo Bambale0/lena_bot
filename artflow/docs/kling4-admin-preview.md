@@ -4,7 +4,7 @@ The integration is available only to Telegram administrators listed in server-si
 
 ## Operations
 
-- `/kling4` opens the guided Telegram editor. Both models also appear in the administrator video catalog.
+- `/kling4` and the single **Kling 4** Telegram catalog entry open the reference collector directly. Text becomes the prompt; photos, videos and audio become references automatically, including files sent as documents. A file caption sets the prompt. Send materials in any order, then calculate and confirm the price. Character/voice bindings are optional advanced controls. Old keyframe start buttons open a new reference draft. Existing keyframe orders restored from history retain their model, tariff and explicit frame controls; unassigned uploads ask the user to select a frame role. The website/Mini App retain both studio models; this Telegram simplification does not change provider contracts or tariffs.
 - `/kling4_access admin` retains the administrator preview. `/kling4_access public` opens it to everyone; run only after the owner explicitly requests public rollout. `/kling4_access disabled` stops new admissions while existing tasks continue recovery/delivery.
 - Authenticated web administrators can GET/PUT `/api/web/admin/kling4/access` with `{ "audience": "admin" | "public" | "disabled" }`. Changes record actor, time and source.
 - Existing `/admin/pricing` and bot model pricing controls manage the six resolution/input tariffs. Migration 047 seeds provider-credit-equivalent retail defaults (no conversion or markup inferred). Review retail prices before public release. Base rows are catalog entries; checkout requires the exact active tariff row and never silently falls back.

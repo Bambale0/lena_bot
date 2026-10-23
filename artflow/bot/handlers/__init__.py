@@ -6,6 +6,7 @@ capability patches are installed before keyboards and handlers render models.
 from aiogram import Router
 from aiogram.types import InlineKeyboardButton
 
+from api.kling4_contract import REFERENCE_MODEL
 from api.minimax_h3_adapter import install_minimax_h3_wizard_support
 from api.repeat_runtime import install_image_launch_snapshot
 from bot.keyboards import models as _model_keyboards
@@ -26,7 +27,10 @@ install_grok_versions()
 def _public_model_button(mc, prefix: str, model_costs: list) -> InlineKeyboardButton:
     """Render a provider route as one user-facing model family."""
     price_txt = _model_keyboards.model_cost_display_text(mc, model_costs=model_costs)
-    public_name = model_display_name(mc.model_key, getattr(mc, "display_name", None))
+    public_name = (
+        "🎬 Kling 4" if mc.model_key == REFERENCE_MODEL
+        else model_display_name(mc.model_key, getattr(mc, "display_name", None))
+    )
     return InlineKeyboardButton(
         text=f"{public_name} · {price_txt}",
         callback_data=f"{prefix}:{mc.model_key}",

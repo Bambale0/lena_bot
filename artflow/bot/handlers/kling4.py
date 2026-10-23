@@ -1,4 +1,4 @@
-"""Kling 4 guided editor: references, ordered frames, characters and voices."""
+"""Kling 4 automatic reference collector with optional character/voice controls."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import re
 import secrets
 from copy import deepcopy
 from html import escape
+from pathlib import Path
 from uuid import uuid4
 
 from aiogram import F, Router
@@ -14,7 +15,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from fastapi import HTTPException
 
-from api.kling4_assets import MAX_ASSET_BYTES, store_kling4_asset
+from api.kling4_assets import EXTENSIONS, MAX_ASSET_BYTES, store_kling4_asset
 from api.kling4_contract import (
     KEYFRAME_MODEL,
     KLING4_MODELS,
@@ -64,11 +65,11 @@ async def allowed(event, session, user):
 async def render(message, state):
     data = await state.get_data()
     revision = secrets.token_hex(4)
-    await state.update_data(k4_revision=revision)
+    await state.update_data(k4_revision=revision, k4_field=None)
     options = Kling4Input(**data.get("kling4", {}))
     keyframe = data["model_key"] == KEYFRAME_MODEL
     lines = [
-        "🎬 <b>Kling 4 · " + ("Ключевые кадры" if keyframe else "Референсы") + "</b>",
+        "🎬 <b>Kling 4" + (" · Ключевые кадры из истории" if keyframe else "") + "</b>",
         f'{options.duration} сек · {options.resolution} · {options.aspect_ratio or "авто"}',
         "\nПромпт: " + escape(str(data.get("prompt") or "ещё не задан")[:500]),
     ]
@@ -93,7 +94,12 @@ async def render(message, state):
             media.append((f"Голос @{element.name}", f"bound_{i}"))
         lines.extend(f"Голос @{voice.name}" for voice in options.voices)
     lines.append(
-        "\nДобавь материалы, затем упомяни их в промпте: "
+        (
+            "\nЭто заказ из истории. Для замены кадра выбери его кнопку. Ссылки в промпте: "
+            if keyframe else
+            "\nПришли описание и фото, видео или аудио в любом порядке. Тип референса определится автоматически. "
+            "Описание можно добавить подписью к файлу. Материалы можно упомянуть в промпте: "
+        )
         + (
             "@first_frame, @keyframe_1, @last_frame"
             if keyframe
@@ -108,8 +114,9 @@ async def render(message, state):
             ("Формат " + (options.aspect_ratio or "auto"), "k4:ratio"),
         ],
     ]
-    rows += [[(label, f"k4:media:{role}")] for label, role in media]
-    if not keyframe:
+    if keyframe or data.get("k4_advanced"):
+        rows += [[(label, f"k4:media:{role}")] for label, role in media]
+    if not keyframe and data.get("k4_advanced"):
         rows += [
             [("Персонаж по фото", "k4:element:image"), ("По видео", "k4:element:video")],
             [
@@ -154,6 +161,8 @@ async def render(message, state):
                 ("Удалить голос", f"k4:remove:voices:{index}"),
             ]
         )
+    if not keyframe:
+        rows.append([("Персонажи и голоса", "k4:advanced")])
     rows += [
         [("Очистить материалы", "k4:clear")],
         [("Рассчитать стоимость", "k4:quote")],
@@ -194,12 +203,12 @@ async def start_kling4(call, state, session, db_user, model_key):
         return
     if (await state.get_data()).get("feed_force_reference"):
         await call.answer(
-            "Kling 4 открывается отдельным заказом через /kling4; текущий повтор сохранён",
+            "Текущий повтор сохранён. Открой новый заказ Kling 4 из меню видео",
             show_alert=True,
         )
         return
     await state.set_data(
-        {"model_key": model_key, "kling4": Kling4Input().model_dump(), "intent_id": str(uuid4())}
+        {"model_key": REFERENCE_MODEL, "kling4": Kling4Input().model_dump(), "intent_id": str(uuid4())}
     )
     await call.answer()
     await render(call.message, state)
@@ -232,16 +241,13 @@ async def rollout(message: Message, session, db_user):
 async def open_kling4(message: Message, session, db_user, state):
     if not await allowed(message, session, db_user):
         return
-    await state.clear()
-    await message.answer(
-        "🎬 <b>Kling 4</b>\nРеференсы — текст, фото, видео, персонажи и голоса. Ключевые кадры — первый, промежуточные и последний кадры.",
-        reply_markup=keyboard(
-            [
-                [("Референсы", f"k4:start:{REFERENCE_MODEL}")],
-                [("Ключевые кадры", f"k4:start:{KEYFRAME_MODEL}")],
-            ]
-        ),
+    if (await state.get_data()).get("feed_force_reference"):
+        await message.answer("Текущий повтор сохранён. Заверши его или открой новый заказ из меню видео.")
+        return
+    await state.set_data(
+        {"model_key": REFERENCE_MODEL, "kling4": Kling4Input().model_dump(), "intent_id": str(uuid4())}
     )
+    await render(message, state)
 
 
 @router.callback_query(F.data.startswith("k4:start:"))
@@ -282,7 +288,10 @@ async def action(call: CallbackQuery, state, session, db_user):
         await call.answer("Карточка обновилась. Используй последние кнопки", show_alert=True)
         return
     options = dict(data["kling4"])
-    if action.startswith("text:"):
+    if action == "advanced":
+        await state.update_data(k4_advanced=not data.get("k4_advanced"))
+        await render(call.message, state)
+    elif action.startswith("text:"):
         field = action.split(":")[1]
         await state.update_data(k4_field=field)
         await state.set_state(Kling4FSM.text)
@@ -432,7 +441,9 @@ async def action(call: CallbackQuery, state, session, db_user):
     await call.answer()
 
 
-@router.message(Kling4FSM.text, F.text)
+@router.message(Kling4FSM.text, F.text, ~F.text.startswith("/"))
+@router.message(Kling4FSM.edit, F.text, ~F.text.startswith("/"))
+@router.message(Kling4FSM.confirm, F.text, ~F.text.startswith("/"))
 async def text_value(message: Message, state, session, db_user):
     if not await allowed(message, session, db_user):
         return
@@ -471,11 +482,13 @@ async def text_value(message: Message, state, session, db_user):
             await message.answer("Промпт должен содержать 1–8000 символов")
             return
         await state.update_data(prompt=value)
-    await state.update_data(intent_id=str(uuid4()), quoted_credits=None)
+    await state.update_data(intent_id=str(uuid4()), quoted_credits=None, k4_quote_token=None)
     await render(message, state)
 
 
 @router.message(Kling4FSM.media)
+@router.message(Kling4FSM.edit, F.photo | F.video | F.audio | F.voice | F.document)
+@router.message(Kling4FSM.confirm, F.photo | F.video | F.audio | F.voice | F.document)
 async def media_value(message: Message, state, session, db_user, bot):
     if not await allowed(message, session, db_user):
         return
@@ -489,15 +502,36 @@ async def media_value(message: Message, state, session, db_user, bot):
         return
     data = await state.get_data()
     field = data.get("k4_field")
-    options = dict(data["kling4"])
+    automatic = field is None
+    if automatic and data["model_key"] == KEYFRAME_MODEL:
+        await message.answer("Для заказа из истории выбери кнопку первого, промежуточного или последнего кадра.")
+        return
+    caption = (message.caption or "").strip() if automatic else ""
+    if len(caption) > 8000:
+        await message.answer("Промпт должен содержать 1–8000 символов")
+        return
+    options = deepcopy(data["kling4"])
     info = await bot.get_file(media.file_id)
+    filename = getattr(media, "file_name", None) or info.file_path
+    if automatic:
+        kind = EXTENSIONS.get(Path(filename).suffix.lower())
+        collection = {"image": "image_urls", "video": "video_urls", "audio": "voices"}.get(kind)
+        if collection:
+            limit = Kling4Input.model_json_schema()["properties"][collection]["maxItems"]
+            if len(options[collection]) >= limit:
+                await message.answer(f"Не больше {limit} материалов этого типа. Удали лишний перед загрузкой.")
+                return
     content = await bot.download_file(info.file_path)
     try:
         asset = await store_kling4_asset(
-            content.read(), getattr(media, "file_name", None) or info.file_path, user_id=db_user.id
+            content.read(), filename, user_id=db_user.id
         )
         url = asset["url"]
         kind = asset["kind"]
+        if automatic:
+            field = {"image": "image_urls", "video": "video_urls", "audio": "voice"}.get(kind)
+            if field is None:
+                raise ValueError("Пришли фото, видео или аудио")
         if field in {"voice"} or str(field).startswith("bound_"):
             if kind != "audio":
                 raise ValueError("Нужен аудиофайл")
@@ -533,12 +567,16 @@ async def media_value(message: Message, state, session, db_user, bot):
                 raise ValueError("Выбери роль материала заново")
         validated = Kling4Input(**options)
         await state.update_data(
-            kling4=validated.model_dump(), intent_id=str(uuid4()), quoted_credits=None
+            kling4=validated.model_dump(), intent_id=str(uuid4()), quoted_credits=None,
+            k4_quote_token=None, **({"prompt": caption} if caption else {}),
         )
-        await message.answer(
-            "Материал добавлен.",
-            reply_markup=keyboard([[("Готово", "k4:done")]], revision=data.get("k4_revision")),
-        )
+        if automatic:
+            await render(message, state)
+        else:
+            await message.answer(
+                "Материал добавлен.",
+                reply_markup=keyboard([[("Готово", "k4:done")]], revision=data.get("k4_revision")),
+            )
     except (ValueError, OSError) as exc:
         await message.answer(escape(str(exc))[:1500])
 

@@ -8,6 +8,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from api.image_service import MODEL_ASPECT_RATIOS, ImageModel
 from api.kie_model_specs import SEEDANCE_MINI_MAX_IMAGE_REFS
+from api.kling4_contract import KEYFRAME_MODEL
 from api.video_service import MotionDirection, VideoModel
 from core.gemini_omni import (
     GEMINI_OMNI_ASPECT_RATIOS,
@@ -976,7 +977,7 @@ def video_models_kb(
     group_key: str | None = None,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    supported_video_keys = set(VIDEO_CAPS.keys())
+    supported_video_keys = set(VIDEO_CAPS.keys()) - {KEYFRAME_MODEL}
     if group_key:
         keys = dict(_VIDEO_GROUPS).get(group_key, [])
         for mc in _sorted_models([mc for mc in model_costs if mc.model_key in supported_video_keys], keys):
