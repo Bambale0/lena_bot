@@ -166,7 +166,10 @@ def _install_public_model_pickers() -> None:
 
     def public_model_button(mc, prefix: str, model_costs: list) -> InlineKeyboardButton:
         price = _models.model_cost_display_text(mc, model_costs=model_costs)
-        name = model_display_name(mc.model_key, getattr(mc, "display_name", None))
+        name = (
+            "🎬 Kling 4" if mc.model_key == VideoModel.KLING_4_REFERENCE
+            else model_display_name(mc.model_key, getattr(mc, "display_name", None))
+        )
         return InlineKeyboardButton(
             text=f"{name} · {price}",
             callback_data=f"{prefix}:{mc.model_key}",
