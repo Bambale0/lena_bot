@@ -136,6 +136,9 @@ jobs:
       - name: Wan feed repeat quote and submission parity
         run: pytest -q tests/test_wan30_feed_repeat.py tests/test_wan30_repeat_modes.py tests/test_wan30_durable_fallback.py
 
+      - name: Wan verified Neironych primary and safe KIE standby
+        run: pytest -q tests/test_wan30_contract.py tests/test_wan30_provider.py tests/test_wan30_routing.py tests/test_wan30_neironych_transport.py
+
       - name: Provider contract tests
         run: |
           pytest -q \

@@ -1695,3 +1695,19 @@ async def test_wan_feed_done_requires_recipe_photo_count(mode):
         await video_gen.cb_video_ref_done_multi(call, state, AsyncMock())
     assert not state.set_state.called
     assert "4" in call.answer.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_wan30_prime_new_telegram_draft_uses_native_fixed_ratio(monkeypatch):
+    call = make_callback(data="vid_model:wan/3-0-video-prime")
+    call.message.edit_text = AsyncMock()
+    call.answer = AsyncMock()
+    state = _fake_state()
+    model_cost = _make_video_model_cost("wan/3-0-video-prime", 18, "Wan 3.0 Prime")
+    monkeypatch.setattr(video_gen, "_resolve_video_model_cost", AsyncMock(return_value=model_cost))
+    await video_gen.cb_video_model(call, AsyncMock(), state,
+        SimpleNamespace(id=42, credits=1000, language="ru"))
+    data = await state.get_data()
+    assert data["aspect_ratio"] == "16:9"
+    assert data["duration"] == 5
+    assert data["resolution"] == "720p"

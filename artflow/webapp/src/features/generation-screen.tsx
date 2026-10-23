@@ -326,10 +326,16 @@ function GenerationScreen({
     const nextResolutions = listOr(model?.resolution_options, model?.resolutions, ["720p"]);
     const nextMode = model?.modes?.[0] || (kind === "motion" ? "motion" : "text");
     const ratioAllowed = (model?.aspect_ratio_modes?.length ? model.aspect_ratio_modes : model?.modes || []).includes(nextMode);
+    let nextAspectRatio = draft.aspectRatio;
+    if (WAN30_MODELS.has(modelKey)) {
+      nextAspectRatio = model?.aspect_ratios?.[0] || "adaptive";
+    } else if (ratioAllowed) {
+      nextAspectRatio = model?.aspect_ratios?.[0] || draft.aspectRatio;
+    }
     onChange({
       model: modelKey,
       mode: nextMode,
-      aspectRatio: WAN30_MODELS.has(modelKey) ? "adaptive" : ratioAllowed ? model?.aspect_ratios?.[0] || draft.aspectRatio : draft.aspectRatio,
+      aspectRatio: nextAspectRatio,
       quality: model?.quality_options?.[0]?.value || "basic",
       duration: WAN30_MODELS.has(modelKey) ? 5 : nextDurations[0] || draft.duration || 5,
       resolution: WAN30_MODELS.has(modelKey) ? "720p" : nextResolutions[0] || draft.resolution || "720p",
