@@ -6,6 +6,7 @@ import re
 import secrets
 from copy import deepcopy
 from html import escape
+from pathlib import Path
 from uuid import uuid4
 
 from aiogram import F, Router
@@ -14,7 +15,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from fastapi import HTTPException
 
-from api.kling4_assets import MAX_ASSET_BYTES, store_kling4_asset
+from api.kling4_assets import EXTENSIONS, MAX_ASSET_BYTES, store_kling4_asset
 from api.kling4_contract import (
     KEYFRAME_MODEL,
     KLING4_MODELS,
@@ -440,9 +441,9 @@ async def action(call: CallbackQuery, state, session, db_user):
     await call.answer()
 
 
-@router.message(Kling4FSM.text, F.text)
-@router.message(Kling4FSM.edit, F.text)
-@router.message(Kling4FSM.confirm, F.text)
+@router.message(Kling4FSM.text, F.text, ~F.text.startswith("/"))
+@router.message(Kling4FSM.edit, F.text, ~F.text.startswith("/"))
+@router.message(Kling4FSM.confirm, F.text, ~F.text.startswith("/"))
 async def text_value(message: Message, state, session, db_user):
     if not await allowed(message, session, db_user):
         return
@@ -511,10 +512,19 @@ async def media_value(message: Message, state, session, db_user, bot):
         return
     options = deepcopy(data["kling4"])
     info = await bot.get_file(media.file_id)
+    filename = getattr(media, "file_name", None) or info.file_path
+    if automatic:
+        kind = EXTENSIONS.get(Path(filename).suffix.lower())
+        collection = {"image": "image_urls", "video": "video_urls", "audio": "voices"}.get(kind)
+        if collection:
+            limit = Kling4Input.model_json_schema()["properties"][collection]["maxItems"]
+            if len(options[collection]) >= limit:
+                await message.answer(f"Не больше {limit} материалов этого типа. Удали лишний перед загрузкой.")
+                return
     content = await bot.download_file(info.file_path)
     try:
         asset = await store_kling4_asset(
-            content.read(), getattr(media, "file_name", None) or info.file_path, user_id=db_user.id
+            content.read(), filename, user_id=db_user.id
         )
         url = asset["url"]
         kind = asset["kind"]

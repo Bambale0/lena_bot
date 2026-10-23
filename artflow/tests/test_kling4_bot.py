@@ -353,3 +353,88 @@ async def test_legacy_keyframe_recipe_does_not_accept_reference_upload(monkeypat
     await kling4.media_value(message, state, None, SimpleNamespace(id=1), bot)
     assert await state.get_data() == before
     assert "кадр" in message.answer.await_args.args[0].lower()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("command", ["/cancel", "/promo", "/prompts", "/admin"])
+@pytest.mark.parametrize("current", [kling4.Kling4FSM.edit, kling4.Kling4FSM.confirm])
+async def test_direct_prompt_collector_does_not_consume_commands(
+    monkeypatch, state, current, command
+):
+    from aiogram.dispatcher.event.bases import UNHANDLED
+
+    from bot.handlers import video_gen
+    from tests.factories import make_message
+
+    monkeypatch.setattr(kling4, "allowed", AsyncMock(return_value=True))
+    await state.set_data(
+        {
+            "model_key": REFERENCE_MODEL,
+            "kling4": Kling4Input().model_dump(),
+            "prompt": "Сцена",
+            "intent_id": "before",
+        }
+    )
+    await state.set_state(current)
+    before = await state.get_data()
+    message = make_message(text=command)
+    result = await video_gen.router.propagate_event(
+        "message",
+        message,
+        state=state,
+        raw_state=await state.get_state(),
+        session=None,
+        db_user=SimpleNamespace(id=1),
+        bot=message.bot,
+    )
+    assert result is UNHANDLED
+    assert await state.get_data() == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "kind,options,suffix",
+    [
+        ("image", Kling4Input(image_urls=["https://cdn.example/a"] * 10), "jpg"),
+        ("video", Kling4Input(video_urls=["https://cdn.example/a"] * 5), "mp4"),
+        (
+            "audio",
+            Kling4Input(
+                voices=[
+                    {"name": f"Voice_{i}", "audio_url": "https://cdn.example/a"} for i in range(3)
+                ]
+            ),
+            "wav",
+        ),
+    ],
+)
+async def test_automatic_limit_refuses_before_downloading_or_storing(
+    monkeypatch, state, kind, options, suffix
+):
+    import io
+
+    monkeypatch.setattr(kling4, "allowed", AsyncMock(return_value=True))
+    store = AsyncMock(return_value={"url": "https://cdn.example/extra", "kind": kind})
+    monkeypatch.setattr(kling4, "store_kling4_asset", store)
+    await state.set_data(
+        {"model_key": REFERENCE_MODEL, "kling4": options.model_dump(), "intent_id": "before"}
+    )
+    await state.set_state(kling4.Kling4FSM.edit)
+    message = SimpleNamespace(
+        photo=[],
+        video=None,
+        audio=None,
+        voice=None,
+        document=SimpleNamespace(file_id="f", file_size=100, file_name=f"a.{suffix}"),
+        caption=None,
+        answer=AsyncMock(),
+    )
+    bot = SimpleNamespace(
+        get_file=AsyncMock(return_value=SimpleNamespace(file_path=f"a.{suffix}")),
+        download_file=AsyncMock(return_value=io.BytesIO(b"content")),
+    )
+    before = await state.get_data()
+    await kling4.media_value(message, state, None, SimpleNamespace(id=1), bot)
+    assert await state.get_data() == before
+    assert store.await_count == 0
+    assert bot.download_file.await_count == 0
