@@ -10,6 +10,7 @@ from sqlalchemy import (
     JSON,
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     Enum,
     Float,
@@ -773,3 +774,32 @@ class Kling4Intent(Base):
     generation_id: Mapped[int] = mapped_column(Integer, ForeignKey('generations.id'), nullable=False, unique=True)
     payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class WanRoutingSetting(Base):
+    __tablename__ = "wan_routing_settings"
+    __table_args__ = (
+        CheckConstraint("model_key IN ('wan/3-0-video','wan/3-0-video-prime')", name="ck_wan_route_model"),
+        CheckConstraint("policy IN ('neironych_kie','neironych_only','kie_only')", name="ck_wan_route_policy"),
+        CheckConstraint("revision >= 0", name="ck_wan_route_revision"),
+    )
+    model_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    policy: Mapped[str] = mapped_column(String(24), nullable=False)
+    neironych_model_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_by_admin_tg_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class WanRoutingAudit(Base):
+    __tablename__ = "wan_routing_audit"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    model_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    previous_policy: Mapped[str] = mapped_column(String(24), nullable=False)
+    new_policy: Mapped[str] = mapped_column(String(24), nullable=False)
+    previous_model_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    new_model_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    changed_by_admin_tg_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+    changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

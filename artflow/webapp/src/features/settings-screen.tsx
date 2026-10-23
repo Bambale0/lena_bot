@@ -49,6 +49,11 @@ function SettingsScreen({ user, busy, onLanguageChange, onResetApp, previewEnabl
         </CardContent>
       </Card>}
 
+      {user.is_admin && <Card>
+        <CardHeader><CardTitle>Провайдеры Wan</CardTitle></CardHeader>
+        <CardContent><a href="/wan-routing-admin.html" className="text-primary underline">Открыть настройки маршрутизации</a></CardContent>
+      </Card>}
+
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="flex items-center gap-2"><Palette className="size-4" /> {copy.settings.schemeTitle}</CardTitle>

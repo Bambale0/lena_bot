@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow"><title>Провайдеры Wan | APIX</title>
+  <link rel="stylesheet" href="css/prototype-premium.css">
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="js/wan-routing-admin.js" defer></script>
+  <style>
+    main{max-width:760px;margin:32px auto;padding:20px}form{display:grid;gap:16px}form[hidden]{display:none}
+    label{display:grid;gap:6px}input,select,button{min-height:44px}#wan-status{white-space:pre-wrap;overflow-wrap:anywhere}
+  </style>
+</head>
+<body><main>
+  <a href="account.html#admin">← Администрирование</a>
+  <h1>Провайдеры Wan</h1>
+  <p>Изменения действуют для новых задач на сайте, в Mini App и боте. Уже принятые задания остаются у своего провайдера.</p>
+  <p id="wan-status" role="status" aria-live="polite">Проверяем доступ…</p>
+  <form id="wan-routing" hidden>
+    <label>Модель<select name="variant"><option value="standard">Wan 3.0</option><option value="prime">Wan 3.0 Prime</option></select></label>
+    <label>Маршрут<select name="policy"><option value="neironych_kie">Нейроныч основной, KIE резерв</option><option value="neironych_only">Только Нейроныч</option><option value="kie_only">Только KIE</option></select></label>
+    <label>ID модели Нейроныча<input name="neironych_model_id" maxlength="80" pattern="[A-Za-z0-9_./-]+" required></label>
+    <p>Сохранение маршрута Нейроныча проверяет доступность ID в его каталоге. Платная генерация не запускается. При неопределённом исходе повторная отправка запрещена.</p>
+    <button type="submit" class="button">Проверить и сохранить</button>
+    <button type="button" id="wan-reload" class="button ghost">Обновить</button>
+  </form>
+</main></body></html>

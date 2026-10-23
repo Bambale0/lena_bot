@@ -58,6 +58,7 @@ async def submit_wan30(
     fetch_neironych_models: Callable[[], Awaitable[list[str]]],
     send_neironych: Callable[[dict], Awaitable[str]],
     send_kie: Callable[[dict], Awaitable[str]],
+    allow_kie: bool = True,
 ) -> Wan30Submitted:
     kie_payload = build_kie_wan30_payload(request)  # all validation before POST
     primary_model = str(neironych_model_id or "").strip()
@@ -81,7 +82,7 @@ async def submit_wan30(
             except (NeironychSubmissionUnknown, NeironychPreSubmitFailure):
                 raise
             except NeironychSeedanceError as exc:
-                if not _confirmed_no_neironych_submission(exc):
+                if not allow_kie or not _confirmed_no_neironych_submission(exc):
                     raise
                 logger.warning(
                     "Wan3 Neironych rejected at admission; KIE backup model=%s code=%s",
@@ -94,5 +95,7 @@ async def submit_wan30(
             request.model,
             "model mapping unavailable" if not primary_model else "unsupported primary input",
         )
+    if not allow_kie:
+        raise ValueError("Wan request cannot use Neironych and KIE standby is disabled")
     task_id = await send_kie(kie_payload)
     return Wan30Submitted(task_id=task_id, provider="kieai")

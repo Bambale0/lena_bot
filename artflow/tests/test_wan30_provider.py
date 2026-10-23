@@ -9,6 +9,18 @@ from api.neironych_seedance_runtime import SubmissionContext
 from api.wan30_contract import Wan30Request
 
 
+@pytest.fixture(autouse=True)
+def isolated_route(monkeypatch):
+    from core.wan30_routing_policy import WanRoute
+
+    async def route(model):
+        native = (wan30_provider.settings.WAN30_PRIME_NEIRONYCH_MODEL_ID
+                  if model.endswith("prime") else wan30_provider.settings.WAN30_NEIRONYCH_MODEL_ID)
+        return WanRoute(model, "neironych_kie", native)
+    monkeypatch.setattr(wan30_provider, "get_wan30_route", route)
+    monkeypatch.setattr(wan30_provider.settings, "NEIRONYCH_API_KEY", "test-neironych-key")
+
+
 @pytest.mark.asyncio
 async def test_provider_uses_kie_if_neironych_catalog_does_not_offer_wan(monkeypatch):
     model="wan/3-0-video-prime"
@@ -157,6 +169,7 @@ async def test_verified_default_mapping_sends_both_models_to_neironych(monkeypat
     for name in ("WAN30_NEIRONYCH_MODEL_ID", "WAN30_PRIME_NEIRONYCH_MODEL_ID"):
         monkeypatch.delenv(name, raising=False)
     config = Settings(_env_file=None)
+    config.NEIRONYCH_API_KEY = "test-neironych-key"
     monkeypatch.setattr(wan30_provider, "settings", config)
     monkeypatch.setattr(NeironychSeedanceClient, "list_models", AsyncMock(return_value=["wan-3", "wan-3-prime"]))
     primary = AsyncMock(return_value="verified_primary_job")
@@ -171,3 +184,25 @@ async def test_verified_default_mapping_sends_both_models_to_neironych(monkeypat
     assert result.provider == "neironych"
     assert primary.await_args.kwargs["payload"]["model"] == expected
     standby.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_missing_neironych_key_uses_kie_without_catalog_or_paid_primary(monkeypatch):
+    monkeypatch.setattr(wan30_provider.settings, "NEIRONYCH_API_KEY", "")
+    monkeypatch.setattr(wan30_provider.settings, "WAN30_NEIRONYCH_MODEL_ID", "wan-3")
+    lookup = AsyncMock(side_effect=AssertionError("No key: no catalog request"))
+    monkeypatch.setattr(NeironychSeedanceClient, "list_models", lookup)
+    primary = AsyncMock()
+    monkeypatch.setattr(wan30_provider, "post_wan30_neironych", primary)
+    kie = AsyncMock(return_value={"data": {"taskId": "kie_without_primary_key"}})
+    monkeypatch.setattr(wan30_provider.kieai_client, "create_task", kie)
+    result = await wan30_provider.submit_wan30_provider(
+        Wan30Request(model="wan/3-0-video", prompt="A paper boat"), idempotency_key="missing-key-case",
+        submission_context=SubmissionContext(
+            client_request_id="d4496f2e-37d8-4b87-bba2-330374892b49", before_submit=AsyncMock(), before_kie_submit=AsyncMock(),
+        ),
+    )
+    assert result.provider == "kieai"
+    lookup.assert_not_awaited()
+    primary.assert_not_awaited()
+    kie.assert_awaited_once()

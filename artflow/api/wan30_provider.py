@@ -5,6 +5,8 @@ integration is independently audited. Neironych POST requires durable admission.
 """
 from __future__ import annotations
 
+import logging
+
 import httpx
 
 from api import kieai_client
@@ -14,13 +16,9 @@ from api.wan30_contract import Wan30Request
 from api.wan30_neironych_transport import post_wan30_neironych
 from api.wan30_routing import Wan30Submitted, submit_wan30
 from core.config import settings
+from core.wan30_routing_policy import get_wan30_route
 
-
-def _primary_id(model: str) -> str:
-    return str(
-        settings.WAN30_PRIME_NEIRONYCH_MODEL_ID
-        if model == "wan/3-0-video-prime" else settings.WAN30_NEIRONYCH_MODEL_ID
-    ).strip()
+logger = logging.getLogger(__name__)
 
 
 async def submit_wan30_provider(
@@ -31,6 +29,16 @@ async def submit_wan30_provider(
     submission_context: SubmissionContext | None = None,
 ) -> Wan30Submitted:
     """Submit at most once to Neironych or KIE, preserving provider task ID."""
+    route = await get_wan30_route(request.model)
+    primary_id = (
+        route.neironych_model_id
+        if route.policy != "kie_only" and settings.NEIRONYCH_API_KEY.strip()
+        else ""
+    )
+    logger.info(
+        "Wan route model=%s policy=%s revision=%s source=%s primary_configured=%s",
+        request.model, route.policy, route.revision, route.source, bool(primary_id),
+    )
     async with httpx.AsyncClient(
         base_url=settings.NEIRONYCH_API_BASE_URL,
         timeout=httpx.Timeout(settings.NEIRONYCH_HTTP_TIMEOUT_SECONDS, connect=15.0),
@@ -71,8 +79,9 @@ async def submit_wan30_provider(
 
         return await submit_wan30(
             request,
-            neironych_model_id=_primary_id(request.model),
+            neironych_model_id=primary_id,
             fetch_neironych_models=neironych.list_models,
             send_neironych=send_neironych,
             send_kie=send_kie,
+            allow_kie=route.policy != "neironych_only",
         )
