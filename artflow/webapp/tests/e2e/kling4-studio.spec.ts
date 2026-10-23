@@ -180,7 +180,7 @@ test('site catalog shows one Kling 4 while preserving legacy history routing',as
  await page.route('**/kling4-catalog-harness**',route=>route.fulfill({contentType:'text/html',body:'<!doctype html><html><body><div data-model-grid></div><select data-account-model-select></select></body></html>'}));
  await page.route('**/api/web/**',route=>{
   const pathname=new URL(route.request().url()).pathname;
-  const data=pathname==='/api/web/me'?{id:7,credits:1000}:pathname==='/api/web/models/video'?[model,'kling-4.0/keyframe-to-video'].map(key=>({key,gen_type:'video',display_name:key===model?'Kling 4 · Референсы':'Kling 4 · Ключевые кадры',credits:28.5,modes:['text','image']})):pathname==='/api/web/landing'?{models:{image:[],video:[],music:[]},examples:[],prompts:{items:[]},plans:[]}:{};
+  const data=pathname==='/api/web/me'?{id:7,credits:1000}:pathname==='/api/web/models/video'?[model,'kling-4.0/keyframe-to-video'].map(key=>({key,gen_type:'video',display_name:key===model?'Kling 4 · Референсы':'Kling 4 · Ключевые кадры',credits:28.5,modes:['text','image']})):pathname==='/api/web/landing'?{models:{image:[],video:[],music:[]},examples:[],prompts:{items:[]},plans:[]}:[];
   return route.fulfill({json:{ok:true,data}});
  });
  await page.goto('/kling4-catalog-harness?type=video');await page.addScriptTag({path:path.resolve(process.cwd(),'../landing/js/prototype-premium.js')});
