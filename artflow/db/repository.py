@@ -18,6 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
 
+from api.kling4_contract import KLING4_MODELS
 from api.public_files import mirror_url, public_url_is_available
 from core.config import settings
 from core.model_pricing import image_pricing_keys, pricing_variant_key, video_pricing_keys
@@ -2181,8 +2182,8 @@ async def claim_neironych_video_notice(
     state = data.get("state")
     task_identity = str(generation.task_id or "")
     kie_marker = params.get(KIE_VIDEO_SUBMISSION_KEY)
-    confirmed_wan_kie = (
-        getattr(generation, "model", None) in {"wan/3-0-video", "wan/3-0-video-prime"}
+    confirmed_bound_kie = (
+        getattr(generation, "model", None) in {"wan/3-0-video", "wan/3-0-video-prime", *KLING4_MODELS}
         and isinstance(kie_marker, dict)
         and kie_marker.get("state") == "bound"
         and bool(task_identity)
@@ -2191,7 +2192,7 @@ async def claim_neironych_video_notice(
     )
     known_provider_task = (
         task_identity.startswith(("neironych:", "neironych-submit:", "kie-submit:"))
-        or confirmed_wan_kie
+        or confirmed_bound_kie
     )
     refunded_without_identity = (
         kind == "failed" and status == "failed"
