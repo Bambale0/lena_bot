@@ -364,7 +364,7 @@ _DEFAULT_DURATION: dict[str, int] = {
 }
 _DEFAULT_RATIO: dict[str, str] = {
     VideoModel.WAN_30: "adaptive",
-    VideoModel.WAN_30_PRIME: "adaptive",
+    VideoModel.WAN_30_PRIME: "16:9",
     VideoModel.KLING_26_T2V: "16:9",
     VideoModel.KLING_30: "16:9",
     VideoModel.WAN_27_T2V: "16:9",

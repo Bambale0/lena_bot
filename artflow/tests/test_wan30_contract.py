@@ -112,7 +112,7 @@ def test_neironych_media_roles_and_false_audio_are_translated():
     assert wan30_supported_by_neironych(task)
     body = build_neironych_wan30_payload(task,provider_model="wan-approved-model")
     assert body["model"]=="wan-approved-model"
-    assert body["mode"]=="reference"
+    assert "mode" not in body
     assert body["reference_images"]==[{"url":"https://example.test/person.jpg"}]
     assert body["generate_audio"] is False
     assert body["seed"] == 0
@@ -128,3 +128,42 @@ def test_neironych_unavailable_for_options_it_cannot_preserve(case):
                         **case)
     assert not wan30_supported_by_neironych(task)
     assert build_kie_wan30_payload(task)["input"]["prompt"] == "A mountain"
+
+
+@pytest.mark.parametrize("case", [
+    {"duration": 2}, {"duration": 3}, {"duration": -1},
+    {"aspect_ratio": "adaptive"}, {"aspect_ratio": "4:3"}, {"aspect_ratio": "3:4"},
+    {"audio": False}, {"seed": 0},
+    {"first_frame_url": "https://example.test/frame.png", "aspect_ratio": "adaptive"},
+    {"reference_audio_urls": ("https://example.test/voice.mp3",), "reference_audio_durations": (2.0,)},
+])
+def test_prime_unsupported_native_options_use_standby(case):
+    task = Wan30Request(**{
+        "model": "wan/3-0-video-prime", "prompt": "A paper boat",
+        "duration": 5, "aspect_ratio": "16:9", **case,
+    })
+    assert not wan30_supported_by_neironych(task)
+    with pytest.raises(ValueError):
+        build_neironych_wan30_payload(task, provider_model="wan-3-prime")
+    assert build_kie_wan30_payload(task)["model"] == task.model
+
+
+def test_prime_supported_native_request_preserves_audio_without_unsupported_toggle():
+    task = Wan30Request(model="wan/3-0-video-prime", prompt="A paper boat", duration=4, aspect_ratio="16:9")
+    assert wan30_supported_by_neironych(task)
+    payload = build_neironych_wan30_payload(task, provider_model="wan-3-prime")
+    assert "generate_audio" not in payload
+    assert payload["duration"] == 4
+    assert payload["aspect_ratio"] == "16:9"
+
+
+def test_fixed_duration_edit_remains_on_kie_to_preserve_quoted_output_seconds():
+    task = Wan30Request(model="wan/3-0-video", prompt="Make the sky blue", mode="edit",
+                        reference_video_urls=("https://example.test/source.mp4",),
+                        reference_video_durations=(3.0,), duration=5)
+    assert not wan30_supported_by_neironych(task)
+
+
+def test_native_wan_body_uses_documented_fields_without_forwarding_product_mode():
+    task = Wan30Request(model="wan/3-0-video", prompt="A cup", duration=5, aspect_ratio="16:9")
+    assert "mode" not in build_neironych_wan30_payload(task, provider_model="wan-3")

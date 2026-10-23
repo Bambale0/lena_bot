@@ -144,3 +144,30 @@ async def test_kie_journal_commit_failure_stops_before_paid_post(monkeypatch):
             submission_context=context,
         )
     kie.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model, expected", [
+    ("wan/3-0-video", "wan-3"),
+    ("wan/3-0-video-prime", "wan-3-prime"),
+])
+async def test_verified_default_mapping_sends_both_models_to_neironych(monkeypatch, model, expected):
+    from core.config import Settings
+
+    for name in ("WAN30_NEIRONYCH_MODEL_ID", "WAN30_PRIME_NEIRONYCH_MODEL_ID"):
+        monkeypatch.delenv(name, raising=False)
+    config = Settings(_env_file=None)
+    monkeypatch.setattr(wan30_provider, "settings", config)
+    monkeypatch.setattr(NeironychSeedanceClient, "list_models", AsyncMock(return_value=["wan-3", "wan-3-prime"]))
+    primary = AsyncMock(return_value="verified_primary_job")
+    monkeypatch.setattr(wan30_provider, "post_wan30_neironych", primary)
+    standby = AsyncMock()
+    monkeypatch.setattr(wan30_provider.kieai_client, "create_task", standby)
+    context = SubmissionContext(client_request_id="d4496f2e-37d8-4b87-bba2-330374892b49", before_submit=AsyncMock())
+    result = await wan30_provider.submit_wan30_provider(
+        Wan30Request(model=model, prompt="A paper boat", duration=5, aspect_ratio="16:9"),
+        idempotency_key="wan-verified-default", submission_context=context,
+    )
+    assert result.provider == "neironych"
+    assert primary.await_args.kwargs["payload"]["model"] == expected
+    standby.assert_not_awaited()

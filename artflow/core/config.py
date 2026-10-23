@@ -59,10 +59,10 @@ class Settings(BaseSettings):
     # Neironych API — Seedance 2.0/2.5 production provider + admin lab
     NEIRONYCH_API_KEY: str = ""
     NEIRONYCH_API_BASE_URL: str = "https://api.xn--e1aikcel5c5a.online"
-    # Wan 3.0: populate ONLY with confirmed IDs from this partner's GET /v1/models.
-    # Empty means no paid probe to an unavailable model: route directly to KIE backup.
-    WAN30_NEIRONYCH_MODEL_ID: str = ""
-    WAN30_PRIME_NEIRONYCH_MODEL_ID: str = ""
+    # Verified with this partner's GET /v1/models on 2026-10-23.
+    # Empty override disables the primary; availability is rechecked before POST.
+    WAN30_NEIRONYCH_MODEL_ID: str = "wan-3"
+    WAN30_PRIME_NEIRONYCH_MODEL_ID: str = "wan-3-prime"
     NEIRONYCH_HTTP_TIMEOUT_SECONDS: float = 120.0
     NEIRONYCH_QWEN38_MODEL: str = "qwen3.8-max"
     NEIRONYCH_QWEN38_TIMEOUT_SECONDS: float = Field(default=90.0, ge=1.0, le=180.0)

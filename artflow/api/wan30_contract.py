@@ -204,6 +204,22 @@ def build_kie_wan30_payload(request: Wan30Request) -> dict:
 
 def wan30_supported_by_neironych(request: Wan30Request) -> bool:
     mode, _ = validate_wan30_request(request)
+    # Current native edit derives output length from the input clip and forbids
+    # duration. Keep fixed-duration quoted edits on KIE to preserve the order.
+    if mode == "edit":
+        return False
+    if request.model == "wan/3-0-video-prime" and (
+        request.duration < 4
+        or request.aspect_ratio not in {"16:9", "1:1", "9:16"}
+        or not request.audio
+        or request.seed is not None
+        or request.first_frame_url is not None
+        or request.last_frame_url is not None
+        or (request.reference_audio_urls and not (
+            request.reference_image_urls or request.reference_video_urls
+        ))
+    ):
+        return False
     # Neironych public guide has no verified file/link input fields.
     return (
         mode not in {"file", "link"}
@@ -221,22 +237,18 @@ def wan30_supported_by_neironych(request: Wan30Request) -> bool:
 
 def build_neironych_wan30_payload(request: Wan30Request, *, provider_model: str) -> dict:
     if not wan30_supported_by_neironych(request):
-        raise ValueError("Wan file/link mode is not documented for Neironych")
+        raise ValueError("Wan input options are not supported by the Neironych contract")
     if not provider_model or not provider_model.strip():
         raise ValueError("Neironych Wan model ID must be verified from /v1/models")
-    mode, _ = validate_wan30_request(request)
-    native_mode = {
-        "text": "text", "first": "image", "first_last": "image",
-        "reference": "reference", "edit": "edit",
-    }[mode]
+    validate_wan30_request(request)
     result = {
         "model": provider_model,
-        "mode": native_mode,
         "prompt": request.prompt,
         "duration": request.duration,
         "resolution": request.resolution.lower(),
-        "generate_audio": request.audio,
     }
+    if request.model != "wan/3-0-video-prime":
+        result["generate_audio"] = request.audio
     if not request.first_frame_url:
         result["aspect_ratio"] = request.aspect_ratio
     if request.first_frame_url:

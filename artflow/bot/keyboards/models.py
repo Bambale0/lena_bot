@@ -133,7 +133,7 @@ VIDEO_CAPS: dict[str, dict] = {
     "wan/3-0-video-prime": {
         "modes": ["text", "image", "video"],
         "duration_options": [2, 3, 5, 8, 10, 15, 20, 25, 30],
-        "aspect_ratios": ["adaptive", "16:9", "9:16", "1:1", "4:3", "3:4"],
+        "aspect_ratios": ["16:9", "9:16", "1:1", "adaptive", "4:3", "3:4"],
         "resolutions": ["480p", "720p", "1080p"],
         "has_resolution": True, "max_refs": 10,
         "supports_video_input": True, "auto_route_by_inputs": True,

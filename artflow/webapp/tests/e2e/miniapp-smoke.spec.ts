@@ -382,3 +382,26 @@ for (const trend of trends) {
     expect(genericRequests).toEqual([]);
   });
 }
+
+
+test("new Wan Prime draft quotes native-compatible defaults and retains explicit standby options", async ({ page }) => {
+  const quotes: Record<string, unknown>[] = [];
+  await page.route("**/api/v1/models/video", route => route.fulfill({ json: [...videoModels, {
+    key: "wan/3-0-video-prime", display_name: "Wan 3.0 Prime", credits: 18,
+    modes: ["text", "image", "video"], aspect_ratios: ["16:9", "9:16", "1:1", "adaptive", "4:3", "3:4"],
+    aspect_ratio_modes: ["text", "image", "video"], duration_options: [2, 3, 5, 8],
+    resolution_options: ["480p", "720p", "1080p"], max_refs: 10,
+  }] }));
+  await page.route("**/api/v1/generate/video/quote", route => {
+    quotes.push(route.request().postDataJSON());
+    return route.fulfill({ json: { credits: 90, rate: 18, billable_seconds: 5, input_video_seconds: 0 } });
+  });
+  await page.goto("/?tgWebAppData=test");
+  await page.getByRole("tab", { name: "Видео", exact: true }).click();
+  await page.getByRole("combobox", { name: "Модель", exact: true }).selectOption("wan/3-0-video-prime");
+  await expect.poll(() => quotes.at(-1)?.aspect_ratio).toBe("16:9");
+  expect(quotes.at(-1)?.duration).toBe(5);
+  expect(quotes.at(-1)?.resolution).toBe("720p");
+  await page.getByRole("button", { name: "adaptive", exact: true }).click();
+  await expect.poll(() => quotes.at(-1)?.aspect_ratio).toBe("adaptive");
+});

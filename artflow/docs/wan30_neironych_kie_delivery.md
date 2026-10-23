@@ -1,14 +1,35 @@
 # Wan 3.0 / Wan 3.0 Prime - APIX release
 
-## Provider routing (checked 15 October 2026)
+## Provider routing (checked 23 October 2026)
 
-Neironych is primary, KIE is standby. The real APIX Neironych key
-GET /v1/models returned 13 models, none Wan3/Prime. Therefore today
-all Wan3 jobs will use KIE. Do not claim Neironych completed them
-until the partner grants access and WAN30_NEIRONYCH_MODEL_ID and
-WAN30_PRIME_NEIRONYCH_MODEL_ID are configured from verified model IDs.
-No paid probe to guessed IDs. 5xx, timeout, unknown acceptance may NOT
-create a second paid task. KIE createTask is single-shot.
+Neironych is primary, KIE is standby. The authenticated partner catalog now
+advertises `wan-3` and `wan-3-prime`; these verified IDs are the configurable
+defaults for `WAN30_NEIRONYCH_MODEL_ID` and `WAN30_PRIME_NEIRONYCH_MODEL_ID`.
+An explicitly empty override disables that primary mapping. The production
+container had neither environment override configured at preflight.
+Availability is rechecked against `/v1/models` before a paid POST. Catalog
+membership does not alone prove successful generation.
+
+The native body uses documented fields only: the product's `mode` must not
+be forwarded upstream. Real tests with that extra field failed downstream
+with `argolink_400`; corrected bodies reached asynchronous generation.
+All site, Mini App and Telegram checkout paths share this adapter. A new
+Prime draft uses 16:9, 5s, 720p and sound enabled; saved explicit choices
+remain intact.
+
+Prime's native contract requires 4–30s, 16:9/1:1/9:16, sound enabled, no
+seed or start/end frames; audio references require visual references.
+Unsupported native options use the existing KIE standby with the original
+model and settings. This includes file/link inputs, disabled safety,
+fixed-ratio frame input, and edit operations: native Wan edit forbids a
+fixed output duration, so it cannot preserve APIX's quoted duration.
+Normal Wan retains 2–30s and silent output support. No unsupported option
+is silently discarded or translated into a different paid operation.
+
+Definite admission rejections may use KIE. 5xx, timeout, unknown acceptance
+and an unavailable catalog may NOT create a second paid task. Already
+accepted tasks are reconciled on their original provider. KIE createTask
+is single-shot.
 
 Official KIE documentation:
 https://docs.kie.ai/market/wan/3-0-video
