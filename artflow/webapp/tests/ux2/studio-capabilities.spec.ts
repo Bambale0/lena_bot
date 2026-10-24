@@ -234,3 +234,12 @@ test("library trend uses the existing trend runner without a generic paid launch
   await expect(page.getByRole("dialog")).toContainText("Добавьте фото в мастер тренда");
   expect(writes.filter(row => row.path.includes("/generate/") || row.path.endsWith("/run"))).toHaveLength(0);
 });
+
+test("music library text is consumed once instead of resurrecting on the next visit", async ({ page }) => {
+  await prepare(page);
+  await page.route("**/api/v1/prompts?**", route => route.fulfill({ json: { items: [{ id: 64, title: "Музыкальная идея", model: "music-fixture", prompt_text: "Мягкий соул под дождём", status: "approved" }], total: 1 } }));
+  await page.goto("/?ux=3"); await page.getByRole("button", { name: "Библиотека промптов", exact: true }).click(); await page.getByRole("button", { name: /Музыкальная идея/ }).click(); await page.getByRole("button", { name: "Использовать задание", exact: true }).click();
+  await expect(page.getByPlaceholder("Текст песни или идея трека")).toHaveValue("Мягкий соул под дождём");
+  await page.getByRole("tab", { name: "Главная", exact: true }).click(); await page.getByRole("button", { name: "Создать музыку", exact: true }).click();
+  await expect(page.getByPlaceholder("Текст песни или идея трека")).toHaveValue("");
+});

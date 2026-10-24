@@ -245,6 +245,7 @@ function App() {
   const [videoUploadingKind, setVideoUploadingKind] = useState<GenerationDraft["kind"] | null>(null);
   const [musicModel, setMusicModel] = useState("");
   const [musicPrompt, setMusicPrompt] = useState("");
+  const consumeMusicPrompt = useCallback(() => setMusicPrompt(""), []);
   const [imageDraft, setImageDraft] = useState<GenerationDraft>(() => emptyDraft("image"));
   const [videoDraft, setVideoDraft] = useState<GenerationDraft>(() => emptyDraft("video"));
   const [motionDraft, setMotionDraft] = useState<GenerationDraft>(() => emptyDraft("motion"));
@@ -1145,7 +1146,7 @@ function App() {
       if (activeTab === "create") return <LilacCreate onNavigate={navigateStudio} />;
       if (activeTab === "ideas") return <LilacIdeas onNavigate={setActiveTab} />;
       if (activeTab === "assistant") return <LilacAssistant messages={assistantMessages} busy={assistantBusy} onSend={message => void sendAssistant(message)} />;
-      if (activeTab === "music") return <div className="lilac-page"><header className="lilac-title"><p>Музыка и собственные голоса</p><h1>Создать музыку</h1><span>Выберите модель, опишите звучание и проверьте стоимость.</span></header><MusicSunoPanel key={data.user.id} audioToolsApi={api} initialModel={musicModel} initialPrompt={musicPrompt} onCreated={task => { if (latestActor.current !== data.user.id) return; setData(current => current ? { ...current, recentTasks: [task, ...current.recentTasks.filter(row => row.id !== task.id)] } : current); openTask(task); void refreshCore(); }} /></div>;
+      if (activeTab === "music") return <div className="lilac-page"><header className="lilac-title"><p>Музыка и собственные голоса</p><h1>Создать музыку</h1><span>Выберите модель, опишите звучание и проверьте стоимость.</span></header><MusicSunoPanel key={data.user.id} audioToolsApi={api} initialModel={musicModel} initialPrompt={musicPrompt} onInitialPromptConsumed={consumeMusicPrompt} onCreated={task => { if (latestActor.current !== data.user.id) return; setData(current => current ? { ...current, recentTasks: [task, ...current.recentTasks.filter(row => row.id !== task.id)] } : current); openTask(task); void refreshCore(); }} /></div>;
       if (activeTab === "models") return <LilacModels api={api} imageModels={data.imageModels} videoModels={data.videoModels} onSelect={(model, kind) => {
         if (photoQueue.hasPending() || referenceUploadingKind || videoUploadingKind || submitting) { toast.info("Дождитесь завершения текущей операции."); return; }
         if (kind === "music") { setMusicModel(model.key); setActiveTab("music"); return; }

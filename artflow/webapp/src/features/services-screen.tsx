@@ -341,7 +341,7 @@ function ServicesScreen({
   );
 }
 
-function MusicSunoPanel({ onCreated, initialModel, initialPrompt, audioToolsApi }: { onCreated?: (task: GenerationTask) => void; initialModel?: string; initialPrompt?: string; audioToolsApi?: MiniAppApi } = {}) {
+function MusicSunoPanel({ onCreated, initialModel, initialPrompt, onInitialPromptConsumed, audioToolsApi }: { onCreated?: (task: GenerationTask) => void; initialModel?: string; initialPrompt?: string; onInitialPromptConsumed?: () => void; audioToolsApi?: MiniAppApi } = {}) {
   const copy = t("ru").services;
   const [models, setModels] = useState<MusicModel[]>([]);
   const [voices, setVoices] = useState<SunoVoice[]>([]);
@@ -349,6 +349,7 @@ function MusicSunoPanel({ onCreated, initialModel, initialPrompt, audioToolsApi 
   const [busy, setBusy] = useState(false);
   const [modelKey, setModelKey] = useState(initialModel || "");
   const [prompt, setPrompt] = useState(initialPrompt || "");
+  useEffect(() => { if (initialPrompt) onInitialPromptConsumed?.(); }, [initialPrompt, onInitialPromptConsumed]);
   const [title, setTitle] = useState("");
   const [style, setStyle] = useState("");
   const [instrumental, setInstrumental] = useState(false);
