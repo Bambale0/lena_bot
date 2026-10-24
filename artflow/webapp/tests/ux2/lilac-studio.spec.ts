@@ -89,6 +89,9 @@ for (const width of [320, 390, 768, 1280]) {
     await page.goto("/?ux=3");
     const tabs = page.getByRole("tablist", { name: "Разделы Mini App" }).getByRole("tab");
     await expect(tabs).toHaveCount(5);
+    await expect(tabs.nth(2)).toHaveAccessibleName("Создать");
+    const createBox = await tabs.nth(2).boundingBox();
+    expect(Math.abs(createBox!.x + createBox!.width / 2 - width / 2)).toBeLessThanOrEqual(2);
     for (const tab of await tabs.all()) {
       const box = await tab.boundingBox();
       expect(box && box.x >= 0 && box.x + box.width <= width + 1).toBeTruthy();

@@ -7,7 +7,7 @@ export function lilacRequested(user: UserProfile, search: string): boolean {
 export function lilacPrimaryTab(tab: AppTab): AppTab {
   if (["home", "create", "ideas", "works", "profile"].includes(tab)) return tab;
   if (["feed", "studio", "trends", "library"].includes(tab)) return "ideas";
-  if (["settings", "help", "billing", "owner"].includes(tab)) return "profile";
+  if (["settings", "help", "billing", "owner", "account"].includes(tab)) return "profile";
   return "create";
 }
 

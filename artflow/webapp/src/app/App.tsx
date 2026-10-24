@@ -29,10 +29,13 @@ import { LilacLibrary, type LibraryPrompt } from "@/features/lilac/library-scree
 import { LilacAssistant } from "@/features/lilac/assistant-screen";
 import { LilacHelp, LilacBilling } from "@/features/lilac/account-screens";
 import { LilacOwner } from "@/features/lilac/owner-screen";
+import { LilacAccountEditor } from "@/features/lilac/account-editor";
 import { LilacImageSeries } from "@/features/lilac/image-series";
 import { lilacRequested } from "@/lib/lilac";
 import { SettingsScreen } from "@/features/settings-screen";
 import { TrendsScreen } from "@/features/trends-screen";
+import { openTrendRunner } from "@/features/trend-runner";
+import { supportsPlan, checkoutPrice } from "@/lib/billing-methods";
 import { ApiError, FEED_PAGE_SIZE, MAX_HISTORY_ITEMS, MiniAppApi } from "@/lib/api";
 import {
   configureTelegramWebApp,
@@ -60,9 +63,10 @@ import type {
   TrendItem,
   VideoPromptResult,
 } from "@/lib/types";
-import { firstMedia, isPendingTask } from "@/lib/utils";
+import { firstMedia, isPendingTask, safeExternalUrl } from "@/lib/utils";
+import { saveDownload } from "@/lib/download";
 
-window.__APIX_MINIAPP_BUILD_ID__ = "20261024-lilac-admin-studio-v3";
+window.__APIX_MINIAPP_BUILD_ID__ = "20261024-studio-central-create-capabilities";
 
 type FeedSource = "recent" | "top_day" | "top";
 type VideoQuote = Awaited<ReturnType<MiniAppApi["quoteVideo"]>>;
@@ -214,6 +218,8 @@ function App() {
   const [taskBusy, setTaskBusy] = useState(false);
   const [balanceOpen, setBalanceOpen] = useState(false);
   const [paymentBusy, setPaymentBusy] = useState(false);
+  const paymentRequest = useRef(false);
+  const [paymentError, setPaymentError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [videoConfirmation, setVideoConfirmation] = useState<VideoConfirmation | null>(null);
   const [remixingId, setRemixingId] = useState<number | null>(null);
@@ -238,6 +244,7 @@ function App() {
   const [referenceUploadingKind, setReferenceUploadingKind] = useState<GenerationDraft["kind"] | null>(null);
   const [videoUploadingKind, setVideoUploadingKind] = useState<GenerationDraft["kind"] | null>(null);
   const [musicModel, setMusicModel] = useState("");
+  const [musicPrompt, setMusicPrompt] = useState("");
   const [imageDraft, setImageDraft] = useState<GenerationDraft>(() => emptyDraft("image"));
   const [videoDraft, setVideoDraft] = useState<GenerationDraft>(() => emptyDraft("video"));
   const [motionDraft, setMotionDraft] = useState<GenerationDraft>(() => emptyDraft("motion"));
@@ -1012,19 +1019,29 @@ function App() {
   }, [api, videoPromptBusy]);
 
   const pay = useCallback(async (provider: "tbank" | "crypto" | "tribute" | "lava", plan: PaymentPlan) => {
-    if (!api || paymentBusy) return;
-    setPaymentBusy(true);
+    if (!api || !data || paymentRequest.current) return;
+    const owner = data.user.id;
+    paymentRequest.current = true; setPaymentBusy(true); setPaymentError("");
     try {
+      const [plans, providers, options] = await Promise.all([api.request<PaymentPlan[]>("/plans"), api.request<string[]>("/payment-methods"), api.request<{ lava_plan_keys?: string[] }>("/payment-options")]);
+      if (latestActor.current !== owner) return;
+      if (!Array.isArray(plans) || !Array.isArray(providers)) throw new Error("Не удалось проверить условия оплаты. Обновите баланс.");
+      const keys = Array.isArray(options.lava_plan_keys) ? options.lava_plan_keys : [];
+      const fresh = plans.find(row => row.key === plan.key);
+      setData(current => current?.user.id === owner ? { ...current, paymentPlans: plans, paymentMethods: providers, lavaPlanKeys: keys } : current);
+      if (!fresh || !providers.includes(provider) || !supportsPlan(provider, fresh, keys)) throw new Error("Этот способ оплаты больше не доступен для пакета. Выберите другой.");
+      if (fresh.credits !== plan.credits || checkoutPrice(provider, fresh) !== checkoutPrice(provider, plan)) throw new Error("Условия пакета изменились. Проверьте новую цену и количество кредитов перед оплатой.");
       const result = await api.createPayment(provider, plan.key);
-      const url = String(result.invoice_link || result.invoice_url || result.pay_url || result.url || "");
+      if (latestActor.current !== owner) return;
+      const url = safeExternalUrl(String(result.invoice_link || result.invoice_url || result.pay_url || result.url || ""));
       if (!url) throw new Error("Платёжная ссылка не получена");
       openExternalUrl(url);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Не удалось создать платёж");
+      if (latestActor.current === owner) setPaymentError(error instanceof Error ? error.message : "Не удалось создать платёж. Проверьте историю платежей перед повтором.");
     } finally {
-      setPaymentBusy(false);
+      paymentRequest.current = false; setPaymentBusy(false);
     }
-  }, [api, paymentBusy, refreshCore]);
+  }, [api, data]);
 
   const changeLanguage = useCallback(async (language: AppLanguage) => {
     if (!api || !data || languageBusy) return;
@@ -1128,7 +1145,7 @@ function App() {
       if (activeTab === "create") return <LilacCreate onNavigate={navigateStudio} />;
       if (activeTab === "ideas") return <LilacIdeas onNavigate={setActiveTab} />;
       if (activeTab === "assistant") return <LilacAssistant messages={assistantMessages} busy={assistantBusy} onSend={message => void sendAssistant(message)} />;
-      if (activeTab === "music") return <div className="lilac-page"><header className="lilac-title"><p>Музыка и собственные голоса</p><h1>Создать музыку</h1><span>Выберите модель, опишите звучание и проверьте стоимость.</span></header><MusicSunoPanel audioToolsApi={api} initialModel={musicModel} onCreated={task => { setData(current => current ? { ...current, recentTasks: [task, ...current.recentTasks.filter(row => row.id !== task.id)] } : current); openTask(task); void refreshCore(); }} /></div>;
+      if (activeTab === "music") return <div className="lilac-page"><header className="lilac-title"><p>Музыка и собственные голоса</p><h1>Создать музыку</h1><span>Выберите модель, опишите звучание и проверьте стоимость.</span></header><MusicSunoPanel key={data.user.id} audioToolsApi={api} initialModel={musicModel} initialPrompt={musicPrompt} onCreated={task => { if (latestActor.current !== data.user.id) return; setData(current => current ? { ...current, recentTasks: [task, ...current.recentTasks.filter(row => row.id !== task.id)] } : current); openTask(task); void refreshCore(); }} /></div>;
       if (activeTab === "models") return <LilacModels api={api} imageModels={data.imageModels} videoModels={data.videoModels} onSelect={(model, kind) => {
         if (photoQueue.hasPending() || referenceUploadingKind || videoUploadingKind || submitting) { toast.info("Дождитесь завершения текущей операции."); return; }
         if (kind === "music") { setMusicModel(model.key); setActiveTab("music"); return; }
@@ -1138,10 +1155,30 @@ function App() {
         else patchDraft(target, current => switchDraftModel(current, model));
         setActiveTab(target === "image" ? "photo" : target);
       }} />;
-      if (activeTab === "library") return <LilacLibrary api={api} onUse={(prompt: LibraryPrompt) => { setImageDraft(current => ({ ...selectGenerationInputs(current), promptId: prompt.id, prompt: prompt.prompt_text || "Использовать задание из библиотеки", sourceTitle: prompt.title, model: data.imageModels.some(model => model.key === prompt.model) ? prompt.model! : current.model })); setActiveTab("photo"); }} />;
+      if (activeTab === "library") return <LilacLibrary key={data.user.id} api={api} onUse={async (prompt: LibraryPrompt, signal) => {
+        if (photoQueue.hasPending() || referenceUploadingKind || videoUploadingKind || submitting) throw new Error("Дождитесь завершения текущей операции. Черновики сохранены.");
+        const alive = () => !signal.aborted && latestActor.current === data.user.id;
+        if (prompt.tags?.some(tag => tag.trim().toLowerCase() === "trend")) {
+          const trend = await api.request<TrendItem>(`/trends/${prompt.id}`, {}, signal);
+          if (!trend || trend.id !== prompt.id || !["image", "video"].includes(trend.kind)) throw new Error("Этот тренд сейчас недоступен.");
+          if (alive()) openTrendRunner(trend); return;
+        }
+        const image = prompt.model ? data.imageModels.find(row => row.key === prompt.model) : data.imageModels.find(row => row.key === imageDraft.model) || data.imageModels[0];
+        const video = prompt.model ? data.videoModels.find(row => row.key === prompt.model) : undefined;
+        if (image || video) {
+          const model = (image || video)!; const target = image ? "image" : model.modes?.includes("motion") ? "motion" : "video";
+          if (alive()) { patchDraft(target, current => ({ ...selectGenerationInputs(switchDraftModel({ ...current, promptId: null }, model)), promptId: prompt.id, prompt: prompt.prompt_text || "Использовать задание из библиотеки", sourceTitle: prompt.title })); setActiveTab(target === "image" ? "photo" : target); }
+          return;
+        }
+        const music = await api.request<ModelInfo[]>("/models/music", {}, signal);
+        if (!Array.isArray(music) || !music.some(row => row.key === prompt.model)) throw new Error("Модель этого задания сейчас недоступна. Выберите другую идею; черновики сохранены.");
+        if (!prompt.prompt_text?.trim()) throw new Error("Закрытый музыкальный шаблон нельзя перенести в свободный редактор. Выберите задание с открытым текстом.");
+        if (alive()) { setMusicModel(prompt.model!); setMusicPrompt(prompt.prompt_text); setActiveTab("music"); }
+      }} />;
       if (activeTab === "help") return <LilacHelp api={api} onNavigate={setActiveTab} />;
       if (activeTab === "billing") return <LilacBilling api={api} user={data.user} onTopup={() => setBalanceOpen(true)} />;
-      if (activeTab === "owner" && data.user.miniapp_ux2_available === true) return <LilacOwner api={api} ownerId={data.user.id} />;
+      if (activeTab === "owner" && data.user.miniapp_ux2_available === true) return <LilacOwner key={data.user.id} api={api} ownerId={data.user.id} />;
+      if (activeTab === "account") return <LilacAccountEditor key={data.user.id} api={api} ownerId={data.user.id} onSaved={() => void refreshCore()} />;
     }
     if (ux2 && activeTab === "create") {
       return <CreateScreen imageModels={data.imageModels} videoModels={data.videoModels} drafts={[imageDraft, videoDraft, motionDraft]} language={data.user.language} onNavigate={setActiveTab} />;
@@ -1215,11 +1252,14 @@ function App() {
     <>
       <AppShell ux2={ux2} lilac={lilac} previewBusy={previewBusy} onNewStudio={() => void openLilac()} onExitStudio={exitLilac} activeTab={showFeed ? "feed" : activeTab} user={data.user} onTabChange={setActiveTab} onBalanceOpen={() => setBalanceOpen(true)}>
         {lilac && activeTab === "profile" && <div className="lilac-profile-links"><Button variant="outline" onClick={() => setActiveTab("billing")}>Баланс и платежи</Button><Button variant="outline" onClick={() => setActiveTab("library")}>Мои промпты</Button><Button variant="outline" onClick={() => setActiveTab("help")}>Помощь</Button>{data.user.miniapp_ux2_available === true && <Button variant="outline" onClick={() => setActiveTab("owner")}>Управление APIX</Button>}</div>}
-        {ux2 && activeTab === "profile" && <div className="ux2-profile-actions"><Button variant="outline" onClick={() => setActiveTab("settings")}>{data.user.language === "en" ? "Settings" : "Настройки"}</Button></div>}
+        {ux2 && activeTab === "profile" && <div className="ux2-profile-actions">{lilac && <Button variant="outline" onClick={() => setActiveTab("account")}>Редактировать профиль</Button>}<Button variant="outline" onClick={() => setActiveTab("settings")}>{data.user.language === "en" ? "Settings" : "Настройки"}</Button></div>}
         {ux2 && draftStorageUnavailable && <div className="ux2-inline-notice" role="status">{data.user.language === "en" ? "Browser storage is unavailable. Keep this tab open to retain your draft." : "Хранилище браузера недоступно. Не закрывайте вкладку, чтобы не потерять черновик."}</div>}
         {screen}
       </AppShell>
-      <TaskDetailSheet confirmPublicActions={lilac} task={selectedTask} open={taskOpen} busy={taskBusy} onOpenChange={setTaskOpen} onRefresh={(task) => void refreshTask(task)} onShare={(task) => void toggleTaskShare(task)} onToggleLibrary={(task) => void toggleTaskLibrary(task)} onAnimate={lilac ? url => {
+      <TaskDetailSheet confirmPublicActions={lilac} task={selectedTask} open={taskOpen} busy={taskBusy} onOpenChange={setTaskOpen} onRefresh={(task) => void refreshTask(task)} onShare={(task) => void toggleTaskShare(task)} onToggleLibrary={(task) => void toggleTaskLibrary(task)}
+      onDownload={lilac && api ? async (task, signal) => { const file = await api.downloadGeneration(task.id, signal); if (!signal.aborted && latestActor.current === data.user.id) saveDownload(file); } : undefined}
+      onCopyLink={lilac && api ? async (task, signal) => { if (!task.is_public_feed) throw new Error("Сначала опубликуйте работу явно."); const result = await api.request<{ link: string }>(`/feed/${task.id}/link`, {}, signal); const link = safeExternalUrl(result.link); if (!link) throw new Error("Сервер не вернул ссылку на работу."); if (!signal.aborted && latestActor.current === data.user.id) await navigator.clipboard.writeText(link); } : undefined}
+      onAnimate={lilac ? url => {
         if (photoQueue.hasPending() || videoUploadingKind || referenceUploadingKind || submitting) { toast.info("Дождитесь завершения текущей операции."); return; }
         if (videoDraft.promptId !== null) { toast.info("Сначала сбросьте шаблон в видеоредакторе. Ваш черновик сохранён."); return; }
         const model = data.videoModels.find(row => row.key === videoDraft.model && row.modes?.includes("image")) || data.videoModels.find(row => row.modes?.includes("image"));
@@ -1233,7 +1273,7 @@ function App() {
         patchDraft(kind, current => ({ ...current, prompt: task.prompt!, promptId: null, sourceTitle: "" }));
         setTaskOpen(false); setActiveTab(kind === "image" ? "photo" : "video"); toast.info("Задание скопировано. Проверьте модель и исходные материалы перед запуском.");
       } : undefined} />
-      <BalanceSheet open={balanceOpen} user={data.user} plans={data.paymentPlans} availableProviders={data.paymentMethods} busy={paymentBusy} onOpenChange={setBalanceOpen} onPay={(provider, plan) => void pay(provider, plan)} />
+      <BalanceSheet open={balanceOpen} user={data.user} plans={data.paymentPlans} availableProviders={data.paymentMethods} lavaPlanKeys={data.lavaPlanKeys} busy={paymentBusy} error={paymentError} onOpenChange={setBalanceOpen} onPay={(provider, plan) => void pay(provider, plan)} />
       <Sheet open={Boolean(videoConfirmation)} title="Стоимость видео" description="Проверены видеореференсы и параметры запуска" onOpenChange={(open) => { if (!open) setVideoConfirmation(null); }} footer={
         <Button className="w-full" disabled={submitting || !videoConfirmation?.quote.can_run} onClick={() => { if (videoConfirmation) void submitGeneration(videoConfirmation.kind, videoConfirmation); }}>
           {submitting ? "Проверяем цену…" : `Запустить за ${(videoConfirmation?.quote.cost_credits || 0) * (videoConfirmation?.count || 1)} 💋`}

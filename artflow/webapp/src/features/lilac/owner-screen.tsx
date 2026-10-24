@@ -7,10 +7,18 @@ import { Sheet } from "@/components/ui/sheet";
 import type { MiniAppApi } from "@/lib/api";
 import { formatCredits } from "@/lib/utils";
 import { tabStorage } from "@/lib/draft-storage";
+import { LilacModeration } from "./moderation-panel";
 
 interface Account { id: number; tg_id: number; full_name?: string; username?: string; credits: number; is_banned: boolean; }
 interface Withdrawal { id: number; amount_rub: number; status: string; payout_details: string; user: Account; }
-interface Detail { user: Account; stats: Record<string, number>; ledger: Array<{ id: number; delta: number; note?: string }>; }
+interface Detail {
+  user: Account;
+  stats: { generations_count?: number; payments_count?: number; paid_rub?: number; referrals?: { l1?: number; l2?: number; l3?: number } };
+  ledger: Array<{ id: number; delta: number; balance_after?: number; entry_type?: string; note?: string; created_at?: string }>;
+  transactions?: Array<{ id: number; provider: string; status: string; amount_rub?: number; credits?: number; created_at?: string }>;
+  generations?: Array<{ id: number; model: string; gen_type: string; status: string; credits_spent?: number; created_at?: string }>;
+  withdrawals?: Array<{ id: number; amount_rub: number; status: string; payout_details?: string; admin_note?: string; created_at?: string }>;
+}
 interface Action { path: string; body: Record<string, unknown>; title: string; }
 interface PendingAdjustment { targetId: number; title: string; }
 
@@ -75,7 +83,8 @@ export function LilacOwner({ api, ownerId }: { api: MiniAppApi; ownerId: number 
     {pending && <div className="lilac-panel" role="alert"><h2>Результат корректировки не подтверждён</h2><p>{pending.title}</p><p>Запрос мог выполниться. Повтор заблокирован, в том числе после перезагрузки. Сверьте баланс и историю изменений; ответственный администратор должен решить, нужна ли новая операция.</p>{pending.targetId > 0 && <Button disabled={busy} onClick={() => void openAccount(pending.targetId)}>Проверить историю корректировки</Button>}{ledgerReviewed && <Button variant="outline" disabled={busy} onClick={acknowledge}>Я сверил историю, разрешить новые операции</Button>}</div>}
     {loading && <p role="status">Загружаем кабинет…</p>}{error && <div role="alert"><p>{error}</p><Button onClick={() => void load()}>Повторить</Button></div>}
     <div className="lilac-task-grid">{metrics.map(([key, label]) => <div className="lilac-create-card" key={key}><strong>{formatCredits(summary[key] || 0)}</strong><span>{label}</span></div>)}</div>
-    <section><h2>Пользователи</h2><form className="flex gap-2" onSubmit={e => { e.preventDefault(); void load(); }}><Input aria-label="Поиск пользователя" value={query} onChange={e => setQuery(e.target.value)} placeholder="Имя, username или ID" /><Button disabled={loading}>Найти</Button></form>
+    <LilacModeration key={ownerId} api={api} />
+    <section><h2>Пользователи</h2><form className="flex gap-2" onSubmit={e => { e.preventDefault(); void load(); }}><Input aria-label="Поиск пользователя" value={query} onChange={e => setQuery(e.target.value)} placeholder="Имя, username или ID" /><Button type="submit" disabled={loading}>Найти</Button></form>
       {users.map(user => <button className="lilac-row" disabled={busy} key={user.id} onClick={() => void openAccount(user.id)}><span><strong>{user.full_name || user.username || `ID ${user.id}`}</strong><small>{formatCredits(user.credits)} кр. · {user.is_banned ? "Заблокирован" : "Активен"}</small></span></button>)}
       {!loading && !error && !users.length && <p className="lilac-note">Пользователи не найдены.</p>}
     </section>
@@ -86,9 +95,14 @@ export function LilacOwner({ api, ownerId }: { api: MiniAppApi; ownerId: number 
     </section>
     <Sheet open={Boolean(detail)} title={detail?.user.full_name || "Аккаунт пользователя"} onOpenChange={open => { if (!open) setDetail(null); }}>
       {detail && <div className="grid gap-3"><p>ID {detail.user.id} · Telegram {detail.user.tg_id}</p><p>Баланс: {formatCredits(detail.user.credits)} кр.</p><label>Корректировка кредитов<Input aria-label="Корректировка кредитов" type="number" step="any" value={amount} onChange={e => setAmount(e.target.value)} /><small>Положительное число — начислить; отрицательное — списать.</small></label><label>Комментарий<Input value={note} maxLength={500} onChange={e => setNote(e.target.value)} /></label>
+        <p>Генераций: {detail.stats?.generations_count || 0} · Платежей: {detail.stats?.payments_count || 0} · Оплачено: {formatCredits(detail.stats?.paid_rub || 0)} ₽</p>
+        <p>Рефералы по уровням: {detail.stats?.referrals?.l1 || 0} / {detail.stats?.referrals?.l2 || 0} / {detail.stats?.referrals?.l3 || 0}</p>
+        <details><summary>Платежи</summary>{detail.transactions?.length ? detail.transactions.map(row => <div className="lilac-panel" key={row.id}><strong>Платёж #{row.id}</strong><p>{row.provider} · {row.status} · {formatCredits(row.amount_rub || 0)} ₽ · {formatCredits(row.credits || 0)} кр.</p><small>{row.created_at}</small></div>) : <p>Платежей пока нет.</p>}</details>
+        <details><summary>Генерации</summary>{detail.generations?.length ? detail.generations.map(row => <div className="lilac-panel" key={row.id}><strong>Задача #{row.id}</strong><p>{row.model} · {row.gen_type} · {row.status} · {formatCredits(row.credits_spent || 0)} кр.</p><small>{row.created_at}</small></div>) : <p>Генераций пока нет.</p>}</details>
+        <details><summary>Вывод средств пользователя</summary>{detail.withdrawals?.length ? detail.withdrawals.map(row => <div className="lilac-panel" key={row.id}><strong>Заявка #{row.id} · {formatCredits(row.amount_rub)} ₽</strong><p>{row.status} · {row.payout_details}</p>{row.admin_note && <p>{row.admin_note}</p>}<small>{row.created_at}</small></div>) : <p>Заявок пока нет.</p>}</details>
         <Button disabled={busy || Boolean(pending) || !Number.isFinite(Number(amount)) || Number(amount) === 0 || !note.trim()} onClick={() => { setAction({ path: `/admin/users/${detail.user.id}/credits`, body: { amount: Number(amount), note: note.trim() }, title: `Изменить баланс пользователя #${detail.user.id} на ${amount} кредитов?` }); setDetail(null); }}>Проверить изменение баланса</Button>
         <Button variant="outline" disabled={busy} onClick={() => { setAction({ path: `/admin/users/${detail.user.id}/ban`, body: { banned: !detail.user.is_banned }, title: `${detail.user.is_banned ? "Разблокировать" : "Заблокировать"} пользователя #${detail.user.id}?` }); setDetail(null); }}>{detail.user.is_banned ? "Разблокировать" : "Заблокировать"}</Button>
-        <h3>Последние изменения баланса</h3>{detail.ledger?.map(row => <p key={row.id}>{row.delta > 0 ? "+" : ""}{formatCredits(row.delta)} · {row.note || "Изменение баланса"}</p>)}
+        <h3>Последние изменения баланса</h3>{detail.ledger?.map(row => <div key={row.id}><p>#{row.id} · {row.delta > 0 ? "+" : ""}{formatCredits(row.delta)} · {row.note || "Изменение баланса"}</p><small>{row.entry_type} · {row.balance_after != null ? `Остаток ${formatCredits(row.balance_after)} кр. · ` : ""}{row.created_at}</small></div>)}
       </div>}
     </Sheet>
     <Sheet open={Boolean(action)} title="Подтверждение действия" onOpenChange={open => { if (!open && !busy) setAction(null); }} footer={<div className="flex gap-2"><Button variant="outline" disabled={busy} onClick={() => setAction(null)}>Отмена</Button><Button disabled={busy || Boolean(pending)} onClick={() => void execute()}>{busy ? "Сохраняем…" : "Подтвердить действие"}</Button></div>}><p>{action?.title}</p></Sheet>

@@ -341,21 +341,27 @@ function ServicesScreen({
   );
 }
 
-function MusicSunoPanel({ onCreated, initialModel, audioToolsApi }: { onCreated?: (task: GenerationTask) => void; initialModel?: string; audioToolsApi?: MiniAppApi } = {}) {
+function MusicSunoPanel({ onCreated, initialModel, initialPrompt, audioToolsApi }: { onCreated?: (task: GenerationTask) => void; initialModel?: string; initialPrompt?: string; audioToolsApi?: MiniAppApi } = {}) {
   const copy = t("ru").services;
   const [models, setModels] = useState<MusicModel[]>([]);
   const [voices, setVoices] = useState<SunoVoice[]>([]);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [modelKey, setModelKey] = useState(initialModel || "");
-  const [prompt, setPrompt] = useState("");
+  const [prompt, setPrompt] = useState(initialPrompt || "");
   const [title, setTitle] = useState("");
   const [style, setStyle] = useState("");
   const [instrumental, setInstrumental] = useState(false);
   const [voiceId, setVoiceId] = useState("");
   const [voiceName, setVoiceName] = useState("");
   const [voiceFile, setVoiceFile] = useState<File | null>(null);
+  const [voiceLanguage, setVoiceLanguage] = useState("ru"), [otherLanguage, setOtherLanguage] = useState("");
+  const [voiceStart, setVoiceStart] = useState("0"), [voiceEnd, setVoiceEnd] = useState("10");
+  const [voiceDescription, setVoiceDescription] = useState(""), [voiceStyle, setVoiceStyle] = useState(""), [voiceSkill, setVoiceSkill] = useState("");
+  const [voiceError, setVoiceError] = useState("");
   const voiceInputRef = useRef<HTMLInputElement>(null);
+  const voiceLanguageCode = voiceLanguage === "other" ? otherLanguage.trim().toLowerCase() : voiceLanguage;
+  const voiceSegmentValid = Boolean(voiceStart.trim() && voiceEnd.trim()) && Number.isFinite(Number(voiceStart)) && Number.isFinite(Number(voiceEnd)) && Number(voiceStart) >= 0 && Number(voiceEnd) - Number(voiceStart) >= 3 && Number(voiceEnd) - Number(voiceStart) <= 60;
 
   const selectedModel = useMemo(() => models.find((model) => model.key === modelKey) || models[0], [modelKey, models]);
   const readyVoices = voices.filter((voice) => String(voice.status).toLowerCase() === "ready");
@@ -407,21 +413,29 @@ function MusicSunoPanel({ onCreated, initialModel, audioToolsApi }: { onCreated?
   };
 
   const createVoice = async () => {
+    if (busy || !voiceSegmentValid || !/^[a-z]{2,8}$/.test(voiceLanguageCode)) return;
     if (!voiceFile) return toast.error("Выбери аудио для голоса");
     if (!voiceName.trim()) return toast.error("Укажи название голоса");
     setBusy(true);
+    setVoiceError("");
     try {
       const form = new FormData();
       form.append("file", voiceFile);
       form.append("name", voiceName.trim());
-      if (style.trim()) form.append("style", style.trim());
-      form.append("language", "ru");
+      const selectedVoiceStyle = audioToolsApi ? voiceStyle : style;
+      if (selectedVoiceStyle.trim()) form.append("style", selectedVoiceStyle.trim());
+      if (voiceDescription.trim()) form.append("description", voiceDescription.trim());
+      if (voiceSkill.trim()) form.append("singer_skill_level", voiceSkill.trim());
+      form.append("language", voiceLanguageCode);
+      form.append("vocal_start_s", voiceStart);
+      form.append("vocal_end_s", voiceEnd);
       await apiJson("/music/voices", { method: "POST", body: form });
       toast.success("Голос отправлен на подготовку");
       setVoiceFile(null);
       setVoiceName("");
       await refresh();
     } catch (error) {
+      setVoiceError(error instanceof Error ? error.message : "Не удалось создать голос");
       toast.error(error instanceof Error ? error.message : "Не удалось создать голос");
     } finally {
       setBusy(false);
@@ -497,6 +511,7 @@ function MusicSunoPanel({ onCreated, initialModel, audioToolsApi }: { onCreated?
           </div>
           <input
             ref={voiceInputRef}
+            aria-label="Исходная запись голоса"
             type="file"
             accept="audio/mpeg,audio/wav,audio/x-wav,audio/mp4,audio/aac,audio/flac,audio/ogg"
             className="hidden"
@@ -510,7 +525,15 @@ function MusicSunoPanel({ onCreated, initialModel, audioToolsApi }: { onCreated?
             <Input value={voiceName} onChange={(event) => setVoiceName(event.target.value)} placeholder={copy.voiceName} />
             <Button variant="outline" onClick={() => voiceInputRef.current?.click()}><Upload className="size-4" /> {voiceFile?.name || copy.chooseAudio}</Button>
           </div>
-          <Button variant="secondary" disabled={busy || !voiceFile || !voiceName.trim()} onClick={() => void createVoice()}>{copy.createVoice}</Button>
+          {audioToolsApi && <div className="lilac-voice-options grid gap-3"><p className="lilac-note">Выберите чистый вокальный фрагмент от 3 до 60 секунд. Используйте свой голос или запись с разрешением исполнителя.</p>
+            <label>Язык голоса<Select aria-label="Язык голоса" value={voiceLanguage} disabled={busy} onChange={e => setVoiceLanguage(e.target.value)}><option value="ru">Русский</option><option value="en">English</option><option value="other">Другой язык</option></Select></label>
+            {voiceLanguage === "other" && <label>Код языка<Input aria-label="Код языка" value={otherLanguage} minLength={2} maxLength={8} pattern="[a-zA-Z]{2,8}" placeholder="Например, es или fr" disabled={busy} onChange={e => setOtherLanguage(e.target.value)} /></label>}
+            <div className="grid grid-cols-2 gap-3"><label>Начало фрагмента, сек<Input aria-label="Начало фрагмента, сек" type="number" min="0" step="0.01" value={voiceStart} disabled={busy} onChange={e => setVoiceStart(e.target.value)} /></label><label>Конец фрагмента, сек<Input aria-label="Конец фрагмента, сек" type="number" min="3" step="0.01" value={voiceEnd} disabled={busy} onChange={e => setVoiceEnd(e.target.value)} /></label></div>
+            {!voiceSegmentValid && <p role="status">Фрагмент должен длиться от 3 до 60 секунд; конец — позже начала.</p>}
+            <details className="apix-help"><summary>Дополнительные параметры голоса</summary><div className="grid gap-3 pb-3"><label>Описание голоса<Textarea value={voiceDescription} maxLength={1000} disabled={busy} onChange={e => setVoiceDescription(e.target.value)} /></label><label>Стиль голоса<Input value={voiceStyle} maxLength={256} disabled={busy} onChange={e => setVoiceStyle(e.target.value)} /></label><label>Уровень исполнителя<Input value={voiceSkill} maxLength={32} placeholder="Необязательно" disabled={busy} onChange={e => setVoiceSkill(e.target.value)} /></label></div></details>
+          </div>}
+          {voiceError && <p role="alert">{voiceError}</p>}
+          <Button variant="secondary" disabled={busy || !voiceFile || !voiceName.trim() || !voiceSegmentValid || !/^[a-z]{2,8}$/.test(voiceLanguageCode)} onClick={() => void createVoice()}>{copy.createVoice}</Button>
           <div className="grid gap-1.5">
             {voices.map((voice) => (
               <div key={voice.id} className="flex min-w-0 items-center justify-between gap-2 rounded-xl border border-border bg-background/45 px-2 py-1.5 text-xs">
