@@ -15,10 +15,13 @@ import {
 } from "@/features/pinterest-service-runner";
 import { t } from "@/lib/i18n";
 import { readTelegramInitData } from "@/lib/telegram";
-import type { AppTab, AssistantMessage, PhotoPromptResult, VideoPromptResult } from "@/lib/types";
+import type { AppTab, AssistantMessage, GenerationTask, PhotoPromptResult, VideoPromptResult } from "@/lib/types";
 import { formatKisses } from "@/lib/utils";
+import type { MiniAppApi } from "@/lib/api";
+import { LilacAudioTools } from "@/features/lilac/audio-tools";
 
 interface ServicesScreenProps {
+  lilac?: boolean;
   messages: AssistantMessage[];
   assistantBusy: boolean;
   photoPromptBusy: boolean;
@@ -74,6 +77,7 @@ async function apiJson<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 function ServicesScreen({
+  lilac = false,
   messages,
   assistantBusy,
   photoPromptBusy,
@@ -129,10 +133,10 @@ function ServicesScreen({
   const services = [
     { title: "Оживить", description: "Image-to-video", icon: Film, tab: "video" as AppTab },
     { title: "Изменить", description: "Edit-модели", icon: ImageIcon, tab: "photo" as AppTab },
-    { title: "Музыка", description: "Suno генерация", icon: Music2, tab: "services" as AppTab },
+    { title: "Музыка", description: "Suno генерация", icon: Music2, tab: (lilac ? "music" : "services") as AppTab },
     { title: "Avatar", description: "Фото и аудио", icon: Headphones, tab: "video" as AppTab },
     { title: "Партнёры", description: "Рефералы", icon: Users, tab: "profile" as AppTab },
-    { title: "Помощь", description: "Task ID и ошибки", icon: LifeBuoy, tab: "profile" as AppTab },
+    { title: "Помощь", description: "Task ID и ошибки", icon: LifeBuoy, tab: (lilac ? "help" : "profile") as AppTab },
     {
       title: "Pinterest",
       description: pinterestService?.description || "Pinterest AI со своей внешностью",
@@ -180,9 +184,9 @@ function ServicesScreen({
         })}
       </div>
 
-      <div className="grid gap-2.5 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.85fr)]">
+      <div className={lilac ? "grid gap-2.5" : "grid gap-2.5 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.85fr)]"}>
         <section className="grid gap-2.5 lg:grid-cols-2">
-          <Card>
+          {!lilac && <Card>
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 text-primary"><Bot className="size-4" /><CardTitle>{copy.assistant}</CardTitle></div>
@@ -225,7 +229,7 @@ function ServicesScreen({
                 <p className="pb-2">Он использует текущий registry моделей и последние сообщения диалога.</p>
               </details>
             </CardContent>
-          </Card>
+          </Card>}
 
           <Card>
             <CardHeader className="pb-2">
@@ -331,19 +335,19 @@ function ServicesScreen({
           </Card>
         </section>
 
-        <MusicSunoPanel />
+        {!lilac && <MusicSunoPanel />}
       </div>
     </div>
   );
 }
 
-function MusicSunoPanel() {
+function MusicSunoPanel({ onCreated, initialModel, audioToolsApi }: { onCreated?: (task: GenerationTask) => void; initialModel?: string; audioToolsApi?: MiniAppApi } = {}) {
   const copy = t("ru").services;
   const [models, setModels] = useState<MusicModel[]>([]);
   const [voices, setVoices] = useState<SunoVoice[]>([]);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [modelKey, setModelKey] = useState("");
+  const [modelKey, setModelKey] = useState(initialModel || "");
   const [prompt, setPrompt] = useState("");
   const [title, setTitle] = useState("");
   const [style, setStyle] = useState("");
@@ -380,7 +384,7 @@ function MusicSunoPanel() {
 
   const createMusic = async () => {
     const text = prompt.trim();
-    if (!text || busy) return toast.error("Нужен промпт для музыки");
+    if (!text || busy || loading || !selectedModel) return;
     setBusy(true);
     try {
       const payload: Record<string, unknown> = {
@@ -391,7 +395,8 @@ function MusicSunoPanel() {
         style: style.trim() || undefined,
         voice_record_id: voiceId ? Number(voiceId) : undefined,
       };
-      await apiJson("/generate/music", { method: "POST", body: JSON.stringify(payload) });
+      const task = await apiJson<GenerationTask>("/generate/music", { method: "POST", body: JSON.stringify(payload) });
+      onCreated?.(task);
       toast.success("Музыкальная задача создана");
       setPrompt("");
     } catch (error) {
@@ -435,6 +440,17 @@ function MusicSunoPanel() {
     }
   };
 
+  const verifyVoice = async (id: number, file: File) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const form = new FormData(); form.append("file", file);
+      await apiJson(`/music/voices/${id}/verify`, { method: "POST", body: form });
+      toast.success("Запись отправлена на подтверждение"); await refresh();
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Не удалось подтвердить голос"); }
+    finally { setBusy(false); }
+  };
+
   return (
     <Card className="min-w-0">
       <CardHeader className="pb-2">
@@ -448,7 +464,7 @@ function MusicSunoPanel() {
           <div className="grid gap-2 min-[520px]:grid-cols-2">
             <label className="grid gap-1 text-xs font-medium">
               Модель
-              <Select value={selectedModel?.key || ""} onChange={(event) => setModelKey(event.target.value)}>
+              <Select aria-label="Модель" value={selectedModel?.key || ""} onChange={(event) => setModelKey(event.target.value)}>
                 {models.map((model) => <option key={model.key} value={model.key}>{model.display_name} · {formatKisses(model.credits)}</option>)}
               </Select>
             </label>
@@ -469,9 +485,11 @@ function MusicSunoPanel() {
             <input type="checkbox" checked={instrumental} onChange={(event) => setInstrumental(event.target.checked)} />
             {copy.instrumental}
           </label>
-          <Button disabled={busy || !prompt.trim()} onClick={() => void createMusic()}><Music2 className="size-4" /> {busy ? "Создаём…" : copy.createMusic}</Button>
+          <Button disabled={busy || loading || !selectedModel || !prompt.trim()} onClick={() => void createMusic()}><Music2 className="size-4" /> {busy ? "Создаём…" : copy.createMusic}</Button>
+          {!loading && !models.length && <p role="status">Музыкальные модели сейчас недоступны. Обновите список позже.</p>}
         </section>
 
+        {audioToolsApi && <LilacAudioTools api={audioToolsApi} model={selectedModel} onCreated={onCreated} />}
         <section className="grid gap-2 rounded-xl border border-border bg-card/45 p-2.5">
           <div className="flex items-center justify-between gap-2">
             <h3 className="text-sm font-semibold">{copy.voices}</h3>
@@ -498,9 +516,10 @@ function MusicSunoPanel() {
               <div key={voice.id} className="flex min-w-0 items-center justify-between gap-2 rounded-xl border border-border bg-background/45 px-2 py-1.5 text-xs">
                 <div className="min-w-0">
                   <p className="truncate font-semibold">{voice.name}</p>
-                  <p className="truncate text-[10px] text-muted-foreground">{voice.status}{voice.validate_phrase ? ` · ${voice.validate_phrase}` : ""}{voice.error ? ` · ${voice.error}` : ""}</p>
+                  <p className="text-xs text-muted-foreground">{({ ready: "Готов к использованию", awaiting_verification: "Нужно подтверждение", processing: "Подготавливаем", failed: "Ошибка" } as Record<string, string>)[voice.status] || voice.status}{voice.error ? ` · ${voice.error}` : ""}</p>
+                  {voice.status === "awaiting_verification" && voice.validate_phrase && <label className="grid gap-2 py-2">Прочитайте фразу своим голосом: «{voice.validate_phrase}»<input aria-label={`Запись подтверждения: ${voice.name}`} type="file" accept="audio/*" disabled={busy} onChange={event => { const file = event.target.files?.[0]; if (file) void verifyVoice(voice.id, file); event.target.value = ""; }} /></label>}
                 </div>
-                <Button variant="ghost" size="sm" disabled={busy} onClick={() => void refreshVoice(voice.id)}>Refresh</Button>
+                <Button variant="ghost" size="sm" disabled={busy} onClick={() => void refreshVoice(voice.id)}>Обновить</Button>
               </div>
             ))}
             {!voices.length ? <p className="text-xs text-muted-foreground">Голоса пока не созданы.</p> : null}
@@ -511,4 +530,4 @@ function MusicSunoPanel() {
   );
 }
 
-export { ServicesScreen };
+export { ServicesScreen, MusicSunoPanel };

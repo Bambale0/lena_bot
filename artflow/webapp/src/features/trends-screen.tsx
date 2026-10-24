@@ -551,7 +551,7 @@ function TrendsScreen({
   const [categoryFilter, setCategoryFilter] = useState("all");
 
   useEffect(() => {
-    client.request<{ is_admin?: boolean }>("/me")
+    client.request<{ is_admin?: boolean }>("/me/permissions")
       .then((user) => setIsAdmin(Boolean(user.is_admin)))
       .catch(() => setIsAdmin(false));
   }, [client]);

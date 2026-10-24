@@ -1,6 +1,15 @@
 export type AppMode = "booting" | "live" | "locked" | "error";
 
 export type AppTab =
+  | "home"
+  | "ideas"
+  | "models"
+  | "library"
+  | "music"
+  | "assistant"
+  | "help"
+  | "billing"
+  | "owner"
   | "create"
   | "works"
   | "studio"

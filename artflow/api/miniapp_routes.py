@@ -2353,6 +2353,23 @@ async def get_me(user: User = Depends(get_miniapp_user)) -> UserProfile:
     return _user_profile(user)
 
 
+@router.get("/studio/preview")
+async def admit_lilac_studio(
+    response: Response,
+    user: User = Depends(get_miniapp_user),
+) -> dict:
+    """Admit an authenticated administrator to the opt-in Studio UI.
+
+    Shared generation/payment endpoints retain their existing authorization.
+    The query string and browser storage are never authorization inputs.
+    """
+    _admin_guard(user)
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["Vary"] = "X-Telegram-Init-Data, X-Web-Auth-Token"
+    logger.info("lilac_studio_admitted actor=%s ui_version=3", user.id)
+    return {"allowed": True, "ui_version": 3}
+
+
 @router.get("/me/feed")
 async def get_my_feed(
     limit: int = Query(500, ge=1, le=1000),

@@ -79,6 +79,14 @@ def build_main_menu_keyboard(*, has_active_image_session: bool, is_admin: bool, 
         )
     )
 
+    if is_admin:
+        builder.row(
+            InlineKeyboardButton(
+                text="✨ " + ("Новая студия APIX" if lang == "ru" else "New APIX Studio"),
+                web_app=WebAppInfo(url=f"{settings.WEB_PUBLIC_URL.rstrip('/')}/app?ux=3"),
+            )
+        )
+
     if has_active_image_session:
         builder.row(
             InlineKeyboardButton(text="🔥 " + ("Продолжить" if lang == "ru" else "Continue"), callback_data="img_session:continue"),

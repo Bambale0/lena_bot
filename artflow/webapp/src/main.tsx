@@ -12,6 +12,7 @@ import "@/styles/color-schemes.css";
 import "@/styles/responsive.css";
 import "@/styles/performance.css";
 import "@/styles/ux2.css";
+import "@/styles/lilac.css";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Mini App root element is missing");
