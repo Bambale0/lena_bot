@@ -145,6 +145,17 @@ function feedItemFromPublicPayload(payload: unknown): FeedItem | null {
 export class MiniAppApi {
   constructor(private readonly initData: string) {}
 
+  async requestWeb<T>(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<T> {
+    const response = await fetch(`/api/web${path}`, {
+      ...init, signal: signal ?? init.signal, credentials: "same-origin",
+      headers: { ...(init.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
+        "X-Telegram-Init-Data": this.initData, ...(init.headers || {}) },
+    });
+    if (!response.ok) throw await readApiError(response);
+    const payload = asRecord(await response.json());
+    return ("data" in payload ? payload.data : payload) as T;
+  }
+
   async request<T>(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<T> {
     const isForm = init.body instanceof FormData;
     const response = await fetch(`${API_BASE}${path}`, {
@@ -261,6 +272,10 @@ export class MiniAppApi {
 
   getGeneration(id: number, signal?: AbortSignal): Promise<GenerationTask> {
     return this.request<GenerationTask>(`/generations/${id}`, {}, signal);
+  }
+
+  async getRecentHistory(signal?: AbortSignal): Promise<GenerationTask[]> {
+    return asArray<GenerationTask>(await this.request<unknown>(`/history?limit=${HISTORY_PAGE_SIZE}&offset=0`, {}, signal));
   }
 
   createImage(body: Record<string, unknown>): Promise<GenerationTask> {
@@ -435,7 +450,7 @@ export class MiniAppApi {
   sendAssistant(message: string, history: AssistantMessage[]): Promise<string> {
     return this.request<unknown>("/assistant", {
       method: "POST",
-      body: JSON.stringify({ message, history: history.slice(-10) }),
+      body: JSON.stringify({ message, history: history.slice(-10).map(({ role, text }) => ({ role, content: text })) }),
     }).then((payload) => {
       const record = asRecord(payload);
       return String(record.reply || record.message || record.text || "Готово. Чем ещё помочь?");

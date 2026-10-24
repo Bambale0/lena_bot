@@ -1,5 +1,6 @@
 import { Copy, ExternalLink, Library, RefreshCw, Share2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,7 @@ import {
 import { openExternalUrl } from "@/lib/telegram";
 
 interface TaskDetailSheetProps {
+  confirmPublicActions?: boolean;
   task: GenerationTask | null;
   open: boolean;
   busy?: boolean;
@@ -23,6 +25,8 @@ interface TaskDetailSheetProps {
   onRefresh: (task: GenerationTask) => void;
   onShare: (task: GenerationTask) => void;
   onToggleLibrary: (task: GenerationTask) => void;
+  onReuse?: (task: GenerationTask) => void;
+  onAnimate?: (url: string) => void;
 }
 
 function statusVariant(task: GenerationTask): "success" | "warning" | "destructive" | "secondary" {
@@ -33,6 +37,7 @@ function statusVariant(task: GenerationTask): "success" | "warning" | "destructi
 }
 
 function TaskDetailSheet({
+  confirmPublicActions = false,
   task,
   open,
   busy,
@@ -40,7 +45,11 @@ function TaskDetailSheet({
   onRefresh,
   onShare,
   onToggleLibrary,
+  onReuse,
+  onAnimate,
 }: TaskDetailSheetProps) {
+  const [publicAction, setPublicAction] = useState<"feed" | "library" | null>(null);
+  useEffect(() => setPublicAction(null), [task?.id, open]);
   if (!task) return null;
   // Thumbnails are suitable for the library, not for playback/open-original actions.
   const original = safeExternalUrl(task.result_url) || (task.result_urls || []).map(safeExternalUrl).find(Boolean) || "";
@@ -50,6 +59,7 @@ function TaskDetailSheet({
   const isAudio = !isVideo && (["music", "audio"].includes(task.gen_type) || /\.(mp3|m4a|ogg|wav|aac|flac)(\?|$)/i.test(media));
   const promptVisible = Boolean(task.prompt && !task.prompt_hidden && task.prompt_actions_allowed !== false);
   const canPublish = Boolean(media) && !isPendingTask(task) && task.status !== "failed";
+  const outputs = Array.from(new Set([task.result_url, ...(task.result_urls || [])].map(safeExternalUrl).filter(Boolean)));
 
   const copy = async (value: string, label: string) => {
     try {
@@ -67,7 +77,7 @@ function TaskDetailSheet({
       title={`Задача #${task.id}`}
       description={`${task.model} · ${formatRelativeDate(task.created_at)}`}
       footer={
-        <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-3">
+        publicAction ? <div className="grid gap-2"><p role="status">{publicAction === "library" ? "Задание станет доступно другим пользователям." : "Результат появится в общей ленте и будет виден другим пользователям."}</p><div className="flex flex-wrap gap-2"><Button variant="outline" disabled={busy} onClick={() => setPublicAction(null)}>Отмена</Button><Button disabled={busy} onClick={() => { if (publicAction === "library") onToggleLibrary(task); else onShare(task); setPublicAction(null); }}>Подтвердить публикацию</Button></div></div> : <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-3">
           {media ? (
             <Button className="w-full justify-center" size="sm" onClick={() => openExternalUrl(media)}>
               <ExternalLink /> Открыть
@@ -78,7 +88,7 @@ function TaskDetailSheet({
             size="sm"
             variant="outline"
             disabled={busy || !canPublish}
-            onClick={() => onShare(task)}
+            onClick={() => confirmPublicActions && !task.is_public_feed ? setPublicAction("feed") : onShare(task)}
           >
             <Share2 /> {task.is_public_feed ? "Убрать из ленты" : "Опубликовать"}
           </Button>
@@ -87,15 +97,16 @@ function TaskDetailSheet({
             size="sm"
             variant="outline"
             disabled={busy || !promptVisible}
-            onClick={() => onToggleLibrary(task)}
+            onClick={() => confirmPublicActions && !task.is_prompt_library ? setPublicAction("library") : onToggleLibrary(task)}
           >
             {task.is_prompt_library ? <Trash2 /> : <Library />}
-            {task.is_prompt_library ? "Убрать промпт" : "Сохранить промпт"}
+            {task.is_prompt_library ? "Убрать промпт" : confirmPublicActions ? "Опубликовать промпт" : "Сохранить промпт"}
           </Button>
         </div>
       }
     >
       <div className="grid gap-2.5">
+        {confirmPublicActions && outputs.length > 1 && <div className="lilac-output-list"><p>Результатов: {outputs.length}. Открывайте оригиналы отдельно.</p>{outputs.map((url, index) => <Button key={url} variant="outline" onClick={() => openExternalUrl(url)}>Оригинал {index + 1}</Button>)}</div>}
         {media ? (
           <div className="overflow-hidden rounded-xl border border-border bg-muted">
             {isAudio ? (
@@ -126,6 +137,8 @@ function TaskDetailSheet({
         </div>
 
         {task.error ? <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-2.5 text-xs text-destructive">{task.error}</div> : null}
+        {onReuse && promptVisible && ["image", "video"].includes(task.gen_type) && <Button variant="outline" disabled={busy} onClick={() => onReuse(task)}>Использовать задание в редакторе</Button>}
+        {onAnimate && original && task.gen_type === "image" && !isPendingTask(task) && <Button variant="outline" disabled={busy} onClick={() => onAnimate(original)}>Создать видео из результата</Button>}
 
         <details className="apix-help rounded-lg border border-border px-2.5">
           <summary>Технические данные</summary>

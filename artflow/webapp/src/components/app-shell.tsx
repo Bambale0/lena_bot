@@ -11,6 +11,9 @@ import {
   Orbit,
   Settings,
   UserRound,
+  Home,
+  Lightbulb,
+  Sparkles,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -19,6 +22,7 @@ import type { AppTab, UserProfile } from "@/lib/types";
 import { cn, formatKisses } from "@/lib/utils";
 import { haptic } from "@/lib/telegram";
 import { editorParent, primaryTab } from "@/lib/ux2";
+import { lilacParent, lilacPrimaryTab } from "@/lib/lilac";
 
 // Regression marker for backend QA gate: label: "Лента" must remain feed-first.
 const tabs: Array<{ id: AppTab; labelKey: keyof ReturnType<typeof t>["nav"]; icon: typeof GalleryVerticalEnd }> = [
@@ -33,6 +37,10 @@ const tabs: Array<{ id: AppTab; labelKey: keyof ReturnType<typeof t>["nav"]; ico
 ];
 
 interface AppShellProps {
+  lilac?: boolean;
+  previewBusy?: boolean;
+  onNewStudio?: () => void;
+  onExitStudio?: () => void;
   ux2?: boolean;
   activeTab: AppTab;
   user: UserProfile;
@@ -115,14 +123,20 @@ function useViewportMode() {
   return viewport;
 }
 
-function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen, ux2 = false }: AppShellProps) {
+function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen, ux2 = false, lilac = false, previewBusy, onNewStudio, onExitStudio }: AppShellProps) {
   const copy = t(user.language);
   const name = user.full_name || user.first_name || user.username || "Пользователь";
   const initial = name.trim().slice(0, 1).toUpperCase() || "A";
   const viewport = useViewportMode();
   const en = user.language === "en";
-  const parent = ux2 ? editorParent(activeTab) : null;
-  const navigation: Array<{ id: AppTab; label: string; icon: typeof GalleryVerticalEnd }> = ux2 ? [
+  const parent = lilac ? lilacParent(activeTab) : ux2 ? editorParent(activeTab) : null;
+  const navigation: Array<{ id: AppTab; label: string; icon: typeof GalleryVerticalEnd }> = lilac ? [
+    { id: "home", label: en ? "Home" : "Главная", icon: Home },
+    { id: "create", label: en ? "Create" : "Создать", icon: Plus },
+    { id: "ideas", label: en ? "Ideas" : "Идеи", icon: Lightbulb },
+    { id: "works", label: en ? "Projects" : "Проекты", icon: Images },
+    { id: "profile", label: copy.nav.profile, icon: UserRound },
+  ] : ux2 ? [
     { id: "feed", label: copy.nav.feed, icon: GalleryVerticalEnd },
     { id: "trends", label: copy.nav.trends, icon: Flame },
     { id: "create", label: en ? "Create" : "Создать", icon: Plus },
@@ -149,15 +163,15 @@ function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen, ux2 =
   return (
     <div
       className="apix-shell"
-      data-ui-version={ux2 ? "2" : "1"}
+      data-ui-version={lilac ? "3" : ux2 ? "2" : "1"}
       data-viewport={viewport.mode}
       data-short={viewport.short ? "true" : "false"}
       data-width={viewport.width}
       data-height={viewport.height}
     >
       <header className="apix-app-header grid min-h-11 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-xl border border-border/70 bg-background/95 px-2 py-1.5 shadow-sm">
-        {ux2 ? <button type="button" className="ux2-wordmark apix-focus-ring" onClick={() => navigate("feed")} aria-label={en ? "APIX feed" : "APIX — лента"}>
-          <strong>APIX</strong><span>{en ? "Preview" : "Предпросмотр"}</span>
+        {ux2 ? <button type="button" className="ux2-wordmark apix-focus-ring" onClick={() => navigate(lilac ? "home" : "feed")} aria-label={lilac ? "APIX — главная" : en ? "APIX feed" : "APIX — лента"}>
+          <strong>APIX</strong><span>{lilac ? "Studio" : en ? "Preview" : "Предпросмотр"}</span>
         </button> : (
         <button
           type="button"
@@ -177,11 +191,15 @@ function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen, ux2 =
         <Button variant="soft" size="sm" className="apix-balance-button min-w-fit shrink-0 justify-self-end px-2.5" onClick={onBalanceOpen} aria-label="Открыть баланс">
           <span>{formatKisses(user.credits, { compact: true })}</span>
         </Button>
+        {!lilac && user.miniapp_ux2_available === true && onNewStudio && <button type="button" className="lilac-launch apix-focus-ring" aria-label="Открыть новую студию APIX" disabled={previewBusy} onClick={onNewStudio}>
+          <Sparkles size={20} /><span><strong>{previewBusy ? "Проверяем доступ…" : "Новая студия APIX"}</strong><small>Для администратора · полный функционал</small></span><Plus size={18} />
+        </button>}
+        {lilac && onExitStudio && <div className="lilac-preview-caption"><span>Доступ администратора</span><button type="button" onClick={onExitStudio}>Обычный интерфейс</button></div>}
       </header>
 
       <main>
         {parent && <button type="button" className="ux2-editor-back apix-focus-ring" data-apix-editor-back onClick={() => navigate(parent)}>
-          <ArrowLeft size={18} aria-hidden="true" />{parent === "profile" ? (en ? "Profile" : "Профиль") : (en ? "Create" : "Создать")}
+          <ArrowLeft size={18} aria-hidden="true" />{lilac ? ({ profile: "Профиль", create: "Создать", ideas: "Идеи", home: "Главная" } as Record<string, string>)[parent] || "Назад" : parent === "profile" ? (en ? "Profile" : "Профиль") : (en ? "Create" : "Создать")}
         </button>}
         {children}
       </main>
@@ -189,7 +207,7 @@ function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen, ux2 =
       <nav className="apix-bottom-nav apix-glass rounded-2xl p-1" aria-label="Основная навигация">
         <div className="apix-nav-scroll flex min-w-0 gap-1 overflow-x-auto overscroll-x-contain" role="tablist" aria-label="Разделы Mini App">
           {navigation.map(({ id, label, icon: Icon }) => {
-            const active = id === (ux2 ? primaryTab(optimisticTab) : optimisticTab);
+            const active = id === (lilac ? lilacPrimaryTab(optimisticTab) : ux2 ? primaryTab(optimisticTab) : optimisticTab);
             return (
               <button
                 key={id}

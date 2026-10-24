@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Sheet } from "@/components/ui/sheet";
 import { hasDraftInput, readUserDrafts, saveUserDrafts, tabStorage } from "@/lib/draft-storage";
 import { previewEnabled, previewKey } from "@/lib/ux2";
-import { inspectDraftMedia } from "@/lib/draft-media";
+import { inspectDraftMedia, switchDraftModel } from "@/lib/draft-media";
 import { parseReferenceAvailability, referenceAvailabilityMessage, REFERENCE_CHECK_TIMEOUT_MS } from "@/lib/reference-availability";
 import { usePhotoUploads } from "@/lib/use-photo-uploads";
 import { photoUploading } from "@/lib/photo-upload";
@@ -22,6 +22,15 @@ import { appendReferenceUrls, applyDraftPatch, modelSnapshotKey, selectGeneratio
 import { GenerationScreen } from "@/features/generation-screen";
 import { ProfileScreen } from "@/features/profile-screen";
 import { ServicesScreen } from "@/features/services-screen";
+import { MusicSunoPanel } from "@/features/services-screen";
+import { LilacHome, LilacCreate, LilacIdeas } from "@/features/lilac/home-screen";
+import { LilacModels } from "@/features/lilac/models-screen";
+import { LilacLibrary, type LibraryPrompt } from "@/features/lilac/library-screen";
+import { LilacAssistant } from "@/features/lilac/assistant-screen";
+import { LilacHelp, LilacBilling } from "@/features/lilac/account-screens";
+import { LilacOwner } from "@/features/lilac/owner-screen";
+import { LilacImageSeries } from "@/features/lilac/image-series";
+import { lilacRequested } from "@/lib/lilac";
 import { SettingsScreen } from "@/features/settings-screen";
 import { TrendsScreen } from "@/features/trends-screen";
 import { ApiError, FEED_PAGE_SIZE, MAX_HISTORY_ITEMS, MiniAppApi } from "@/lib/api";
@@ -53,7 +62,7 @@ import type {
 } from "@/lib/types";
 import { firstMedia, isPendingTask } from "@/lib/utils";
 
-window.__APIX_MINIAPP_BUILD_ID__ = "20260803-settings-cabinets-v1";
+window.__APIX_MINIAPP_BUILD_ID__ = "20261024-lilac-admin-studio-v3";
 
 type FeedSource = "recent" | "top_day" | "top";
 type VideoQuote = Awaited<ReturnType<MiniAppApi["quoteVideo"]>>;
@@ -186,6 +195,13 @@ function App() {
   const [data, setData] = useState<BootstrapData | null>(null);
   const [activeTab, setActiveTab] = useState<AppTab>("feed");
   const [ux2, setUx2] = useState(false);
+  const [lilac, setLilac] = useState(false);
+  const [previewBusy, setPreviewBusy] = useState(false);
+  useEffect(() => {
+    if (lilac) document.documentElement.dataset.apixStudio = "lilac";
+    else delete document.documentElement.dataset.apixStudio;
+    return () => { delete document.documentElement.dataset.apixStudio; };
+  }, [lilac]);
   const [worksRefreshing, setWorksRefreshing] = useState(false);
   const [draftStorageUnavailable, setDraftStorageUnavailable] = useState(false);
   const draftOwner = useRef<number | null>(null);
@@ -221,9 +237,12 @@ function App() {
   const [videoPromptResult, setVideoPromptResult] = useState<VideoPromptResult | null>(null);
   const [referenceUploadingKind, setReferenceUploadingKind] = useState<GenerationDraft["kind"] | null>(null);
   const [videoUploadingKind, setVideoUploadingKind] = useState<GenerationDraft["kind"] | null>(null);
+  const [musicModel, setMusicModel] = useState("");
   const [imageDraft, setImageDraft] = useState<GenerationDraft>(() => emptyDraft("image"));
   const [videoDraft, setVideoDraft] = useState<GenerationDraft>(() => emptyDraft("video"));
   const [motionDraft, setMotionDraft] = useState<GenerationDraft>(() => emptyDraft("motion"));
+  const latestOperations = useRef(false);
+  latestOperations.current = submitting || Boolean(referenceUploadingKind || videoUploadingKind);
   const processedStartParam = useRef("");
   const refreshAbortRef = useRef<AbortController | null>(null);
 
@@ -253,7 +272,7 @@ function App() {
   }, [mode, ux2, data?.user.id, imageDraft, videoDraft, motionDraft]);
 
   useEffect(() => {
-    if (ux2 && data?.user.miniapp_ux2_available !== true) { setUx2(false); setActiveTab("feed"); }
+    if (ux2 && data?.user.miniapp_ux2_available !== true) { setUx2(false); setLilac(false); setActiveTab("feed"); }
   }, [data?.user.miniapp_ux2_available, ux2]);
 
   const changePreview = (enabled: boolean) => {
@@ -271,6 +290,7 @@ function App() {
     url.searchParams.set("ux", enabled ? "2" : "1");
     window.history.replaceState(window.history.state, "", url);
     setUx2(enabled);
+    setLilac(false);
     setActiveTab("feed");
   };
 
@@ -473,8 +493,15 @@ function App() {
       setFeedHasMore(bootstrap.feed.length >= FEED_PAGE_SIZE);
       let savedPreview: string | null = null;
       try { savedPreview = tabStorage()?.getItem(previewKey(bootstrap.user.id)) || null; } catch { /* Storage is optional. */ }
-      const preview = previewEnabled(bootstrap.user, window.location.search, savedPreview);
+      let admitted = false;
+      if (lilacRequested(bootstrap.user, window.location.search)) {
+        try { const admission = await client.request<{ allowed: boolean; ui_version: number }>("/studio/preview", { cache: "no-store" }); admitted = admission.allowed === true && admission.ui_version === 3; }
+        catch { toast.error("Новая студия пока недоступна для этого аккаунта"); }
+      }
+      const preview = admitted || previewEnabled(bootstrap.user, window.location.search, savedPreview);
+      setLilac(admitted);
       setUx2(preview);
+      if (admitted) setActiveTab("home");
       hydrateDraftDefaults(bootstrap, preview);
       setMode("live");
       await processStartParam(client, bootstrap);
@@ -486,6 +513,31 @@ function App() {
       setRetrying(false);
     }
   }, [hydrateDraftDefaults, processStartParam]);
+
+  const openLilac = async () => {
+    if (!api || !data || data.user.miniapp_ux2_available !== true || previewBusy) return;
+    if (photoQueue.hasPending()) { toast.info("Дождитесь завершения загрузки фото."); return; }
+    const owner = data.user.id;
+    setPreviewBusy(true);
+    try {
+      const admission = await api.request<{ allowed: boolean; ui_version: number }>("/studio/preview", { cache: "no-store" });
+      if (latestActor.current !== owner || !admission.allowed || admission.ui_version !== 3) return;
+      if (photoQueue.hasPending() || latestOperations.current) { toast.info("Дождитесь завершения текущей операции и откройте студию снова."); return; }
+      const url = new URL(window.location.href); url.searchParams.set("ux", "3"); window.history.replaceState(window.history.state, "", url);
+      const stored = readUserDrafts(tabStorage(), owner);
+      setImageDraft(current => current.promptId === null && !hasDraftInput(current) && stored.image ? stored.image : current);
+      setVideoDraft(current => current.promptId === null && !hasDraftInput(current) && stored.video ? stored.video : current);
+      setMotionDraft(current => current.promptId === null && !hasDraftInput(current) && stored.motion ? stored.motion : current);
+      setUx2(true); setLilac(true); setActiveTab("home");
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Не удалось открыть студию"); }
+    finally { setPreviewBusy(false); }
+  };
+
+  const exitLilac = () => {
+    if (photoQueue.hasPending()) { toast.info("Дождитесь завершения загрузки фото."); return; }
+    const url = new URL(window.location.href); url.searchParams.set("ux", "1"); window.history.replaceState(window.history.state, "", url);
+    setLilac(false); setUx2(false); setActiveTab("feed");
+  };
 
   useEffect(() => {
     void initialize();
@@ -499,7 +551,15 @@ function App() {
     const controller = new AbortController();
     refreshAbortRef.current = controller;
     try {
-      const core = await api.refreshCore(controller.signal);
+      // Identity must take effect even if task history is temporarily unavailable.
+      const user = await api.request<BootstrapData["user"]>("/me", { cache: "no-store" }, controller.signal);
+      if (controller.signal.aborted) return;
+      const ownerChanged = latestActor.current !== user.id;
+      setData(current => current ? { ...current, user, ...(ownerChanged ? { recentTasks: [] } : {}) } : current);
+      if (ownerChanged) { setTaskOpen(false); setSelectedTask(null); setBalanceOpen(false); }
+      if (ownerChanged && lilac) { setLilac(false); setUx2(false); setMode("locked"); return; }
+      if (user.miniapp_ux2_available !== true) { setLilac(false); setUx2(false); setActiveTab("feed"); }
+      const core = { user, recentTasks: await api.getRecentHistory(controller.signal) };
       setData((current) => {
         if (!current) return current;
         const freshTaskIds = new Set(core.recentTasks.map((task) => task.id));
@@ -524,11 +584,16 @@ function App() {
         return core.recentTasks.find((task) => task.id === current.id) || current;
       });
     } catch (error) {
+      if (error instanceof ApiError && [401, 403].includes(error.status)) {
+        setLilac(false); setUx2(false); setTaskOpen(false); setBalanceOpen(false);
+        setErrorMessage("Сессия недоступна. Откройте приложение заново из бота."); setMode("locked");
+        return;
+      }
       if (!(error instanceof DOMException && error.name === "AbortError")) {
         console.warn("Mini App core refresh failed", error);
       }
     }
-  }, [api]);
+  }, [api, lilac]);
 
   const refreshReferrals = useCallback(async () => {
     if (!api || referralsLoading) return;
@@ -1049,12 +1114,47 @@ function App() {
     return <LockedScreen message={errorMessage} botUsername={botUsername} retrying={retrying} onRetry={() => void initialize()} />;
   }
 
+  const navigateStudio = (tab: AppTab) => {
+    // The quick action promises photo-to-video, not a generic text-only form.
+    if (tab === "video" && videoDraft.promptId === null && !hasDraftInput(videoDraft) && !photoQueue.hasPending()) {
+      const model = data.videoModels.find(row => row.key === videoDraft.model && row.modes?.includes("image")) || data.videoModels.find(row => row.modes?.includes("image"));
+      if (model) setVideoDraft(current => ({ ...switchDraftModel(current, model), mode: "image" }));
+    }
+    setActiveTab(tab);
+  };
   const screen = (() => {
+    if (lilac && api) {
+      if (activeTab === "home") return <LilacHome data={data} drafts={[imageDraft, videoDraft, motionDraft]} onNavigate={navigateStudio} onTask={openTask} />;
+      if (activeTab === "create") return <LilacCreate onNavigate={navigateStudio} />;
+      if (activeTab === "ideas") return <LilacIdeas onNavigate={setActiveTab} />;
+      if (activeTab === "assistant") return <LilacAssistant messages={assistantMessages} busy={assistantBusy} onSend={message => void sendAssistant(message)} />;
+      if (activeTab === "music") return <div className="lilac-page"><header className="lilac-title"><p>Музыка и собственные голоса</p><h1>Создать музыку</h1><span>Выберите модель, опишите звучание и проверьте стоимость.</span></header><MusicSunoPanel audioToolsApi={api} initialModel={musicModel} onCreated={task => { setData(current => current ? { ...current, recentTasks: [task, ...current.recentTasks.filter(row => row.id !== task.id)] } : current); openTask(task); void refreshCore(); }} /></div>;
+      if (activeTab === "models") return <LilacModels api={api} imageModels={data.imageModels} videoModels={data.videoModels} onSelect={(model, kind) => {
+        if (photoQueue.hasPending() || referenceUploadingKind || videoUploadingKind || submitting) { toast.info("Дождитесь завершения текущей операции."); return; }
+        if (kind === "music") { setMusicModel(model.key); setActiveTab("music"); return; }
+        const target = kind === "image" ? "image" : model.modes?.includes("motion") ? "motion" : "video";
+        const draft = target === "image" ? imageDraft : target === "video" ? videoDraft : motionDraft;
+        if (draft.promptId !== null) toast.info("Параметры шаблона закреплены. Сначала сбросьте шаблон в редакторе, чтобы сменить модель.");
+        else patchDraft(target, current => switchDraftModel(current, model));
+        setActiveTab(target === "image" ? "photo" : target);
+      }} />;
+      if (activeTab === "library") return <LilacLibrary api={api} onUse={(prompt: LibraryPrompt) => { setImageDraft(current => ({ ...selectGenerationInputs(current), promptId: prompt.id, prompt: prompt.prompt_text || "Использовать задание из библиотеки", sourceTitle: prompt.title, model: data.imageModels.some(model => model.key === prompt.model) ? prompt.model! : current.model })); setActiveTab("photo"); }} />;
+      if (activeTab === "help") return <LilacHelp api={api} onNavigate={setActiveTab} />;
+      if (activeTab === "billing") return <LilacBilling api={api} user={data.user} onTopup={() => setBalanceOpen(true)} />;
+      if (activeTab === "owner" && data.user.miniapp_ux2_available === true) return <LilacOwner api={api} ownerId={data.user.id} />;
+    }
     if (ux2 && activeTab === "create") {
       return <CreateScreen imageModels={data.imageModels} videoModels={data.videoModels} drafts={[imageDraft, videoDraft, motionDraft]} language={data.user.language} onNavigate={setActiveTab} />;
     }
     if (ux2 && activeTab === "works") {
-      return <WorksScreen tasks={data.recentTasks} models={[...data.imageModels, ...data.videoModels]} language={data.user.language} unavailable={data.historyUnavailable} refreshing={worksRefreshing} onOpenTask={openTask} onCreate={() => setActiveTab("create")} onRefresh={() => void refreshWorks()} />;
+      return <>{lilac && api && <LilacImageSeries api={api} onContinue={series => {
+        if (photoQueue.hasPending()) { toast.info("Дождитесь завершения загрузки фото."); return; }
+        const model = data.imageModels.find(row => row.key === series.model);
+        if (!model) { toast.error("Модель серии недоступна. Исходный черновик сохранён."); return; }
+        const draft = { ...emptyDraft("image"), model: model.key, mode: series.mode, aspectRatio: series.aspect_ratio || imageDraft.aspectRatio, quality: series.quality, count: series.count, prompt: series.prompt_hidden || series.prompt_actions_allowed === false ? (imageDraft.promptId === null ? imageDraft.prompt : "") : series.last_prompt || series.base_prompt || "" };
+        setImageDraft(appendReferenceUrls(draft, Array.from(new Set([series.reference_url, ...(series.reference_urls || [])].filter((url): url is string => Boolean(url))))));
+        setActiveTab("photo");
+      }} />}<WorksScreen tasks={data.recentTasks} models={[...data.imageModels, ...data.videoModels]} language={data.user.language} unavailable={data.historyUnavailable} refreshing={worksRefreshing} onOpenTask={openTask} onCreate={() => setActiveTab("create")} onRefresh={() => void refreshWorks()} /></>;
     }
     if (showFeed) {
       return (
@@ -1090,7 +1190,7 @@ function App() {
       return <TrendsScreen items={data.trends} filter={trendsFilter} loading={trendsLoading} preparingId={preparingTrendId} onFilterChange={setTrendsFilter} onRefresh={() => void loadTrends()} onPrepare={(trend) => void prepareTrend(trend)} />;
     }
     if (activeTab === "services") {
-      return <ServicesScreen messages={assistantMessages} assistantBusy={assistantBusy} photoPromptBusy={photoPromptBusy} photoPromptResult={photoPromptResult} videoPromptBusy={videoPromptBusy} videoPromptResult={videoPromptResult} onAssistantSend={(message) => void sendAssistant(message)} onPhotoPrompt={(file) => void createPhotoPrompt(file)} onVideoPrompt={(file) => void createVideoPrompt(file)} onUsePrompt={(prompt) => { setImageDraft((current) => ({ ...current, prompt, promptId: null, sourceTitle: "" })); setActiveTab("photo"); }} onUseVideoPrompt={(prompt) => { setVideoDraft((current) => ({ ...current, prompt, promptId: null, sourceTitle: "" })); setActiveTab("video"); }} onNavigate={setActiveTab} />;
+      return <ServicesScreen lilac={lilac} messages={assistantMessages} assistantBusy={assistantBusy} photoPromptBusy={photoPromptBusy} photoPromptResult={photoPromptResult} videoPromptBusy={videoPromptBusy} videoPromptResult={videoPromptResult} onAssistantSend={(message) => void sendAssistant(message)} onPhotoPrompt={(file) => void createPhotoPrompt(file)} onVideoPrompt={(file) => void createVideoPrompt(file)} onUsePrompt={(prompt) => { setImageDraft((current) => ({ ...current, prompt, promptId: null, sourceTitle: "" })); setActiveTab("photo"); }} onUseVideoPrompt={(prompt) => { setVideoDraft((current) => ({ ...current, prompt, promptId: null, sourceTitle: "" })); setActiveTab("video"); }} onNavigate={setActiveTab} />;
     }
     if (activeTab === "settings") {
       return <SettingsScreen previewEnabled={ux2} onPreviewChange={changePreview} user={data.user} busy={languageBusy} onLanguageChange={(language) => void changeLanguage(language)} onResetApp={() => void initialize()} />;
@@ -1113,12 +1213,26 @@ function App() {
 
   return (
     <>
-      <AppShell ux2={ux2} activeTab={showFeed ? "feed" : activeTab} user={data.user} onTabChange={setActiveTab} onBalanceOpen={() => setBalanceOpen(true)}>
+      <AppShell ux2={ux2} lilac={lilac} previewBusy={previewBusy} onNewStudio={() => void openLilac()} onExitStudio={exitLilac} activeTab={showFeed ? "feed" : activeTab} user={data.user} onTabChange={setActiveTab} onBalanceOpen={() => setBalanceOpen(true)}>
+        {lilac && activeTab === "profile" && <div className="lilac-profile-links"><Button variant="outline" onClick={() => setActiveTab("billing")}>Баланс и платежи</Button><Button variant="outline" onClick={() => setActiveTab("library")}>Мои промпты</Button><Button variant="outline" onClick={() => setActiveTab("help")}>Помощь</Button>{data.user.miniapp_ux2_available === true && <Button variant="outline" onClick={() => setActiveTab("owner")}>Управление APIX</Button>}</div>}
         {ux2 && activeTab === "profile" && <div className="ux2-profile-actions"><Button variant="outline" onClick={() => setActiveTab("settings")}>{data.user.language === "en" ? "Settings" : "Настройки"}</Button></div>}
         {ux2 && draftStorageUnavailable && <div className="ux2-inline-notice" role="status">{data.user.language === "en" ? "Browser storage is unavailable. Keep this tab open to retain your draft." : "Хранилище браузера недоступно. Не закрывайте вкладку, чтобы не потерять черновик."}</div>}
         {screen}
       </AppShell>
-      <TaskDetailSheet task={selectedTask} open={taskOpen} busy={taskBusy} onOpenChange={setTaskOpen} onRefresh={(task) => void refreshTask(task)} onShare={(task) => void toggleTaskShare(task)} onToggleLibrary={(task) => void toggleTaskLibrary(task)} />
+      <TaskDetailSheet confirmPublicActions={lilac} task={selectedTask} open={taskOpen} busy={taskBusy} onOpenChange={setTaskOpen} onRefresh={(task) => void refreshTask(task)} onShare={(task) => void toggleTaskShare(task)} onToggleLibrary={(task) => void toggleTaskLibrary(task)} onAnimate={lilac ? url => {
+        if (photoQueue.hasPending() || videoUploadingKind || referenceUploadingKind || submitting) { toast.info("Дождитесь завершения текущей операции."); return; }
+        if (videoDraft.promptId !== null) { toast.info("Сначала сбросьте шаблон в видеоредакторе. Ваш черновик сохранён."); return; }
+        const model = data.videoModels.find(row => row.key === videoDraft.model && row.modes?.includes("image")) || data.videoModels.find(row => row.modes?.includes("image"));
+        if (!model) { toast.info("Сейчас нет доступной модели видео по фото."); return; }
+        setVideoDraft(current => appendReferenceUrls({ ...switchDraftModel(current, model), mode: "image" }, [url]));
+        setTaskOpen(false); setActiveTab("video"); toast.info("Фото добавлено. Опишите движение и проверьте материалы перед запуском.");
+      } : undefined} onReuse={lilac ? task => {
+        if (photoQueue.hasPending()) { toast.info("Дождитесь завершения загрузки фото."); return; }
+        if (!task.prompt || task.prompt_hidden || task.prompt_actions_allowed === false) return;
+        const kind = task.gen_type === "video" ? "video" : "image";
+        patchDraft(kind, current => ({ ...current, prompt: task.prompt!, promptId: null, sourceTitle: "" }));
+        setTaskOpen(false); setActiveTab(kind === "image" ? "photo" : "video"); toast.info("Задание скопировано. Проверьте модель и исходные материалы перед запуском.");
+      } : undefined} />
       <BalanceSheet open={balanceOpen} user={data.user} plans={data.paymentPlans} availableProviders={data.paymentMethods} busy={paymentBusy} onOpenChange={setBalanceOpen} onPay={(provider, plan) => void pay(provider, plan)} />
       <Sheet open={Boolean(videoConfirmation)} title="Стоимость видео" description="Проверены видеореференсы и параметры запуска" onOpenChange={(open) => { if (!open) setVideoConfirmation(null); }} footer={
         <Button className="w-full" disabled={submitting || !videoConfirmation?.quote.can_run} onClick={() => { if (videoConfirmation) void submitGeneration(videoConfirmation.kind, videoConfirmation); }}>
