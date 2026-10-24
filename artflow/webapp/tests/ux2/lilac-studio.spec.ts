@@ -209,6 +209,7 @@ test("owner balance adjustment requires review and confirmation", async ({ page 
 test("visual smoke uses real rendered studio at mobile size", async ({ page }, info) => {
   await prepare(page); await page.setViewportSize({ width: 390, height: 844 }); await page.goto("/?ux=3");
   await expect(page.getByRole("heading", { name: "Что создадим сегодня?" })).toBeVisible();
+  expect(await page.evaluate(() => getComputedStyle(document.body).fontFamily)).not.toContain("Times New Roman");
   await page.screenshot({ path: info.outputPath("lilac-home-mobile.png"), fullPage: true });
 });
 
@@ -236,7 +237,11 @@ test("failed generation leaves the user's idea editable without a fake result", 
 test("protected series restore keeps prompt hidden and requires replacement consent", async ({ page }) => {
   await prepare(page);
   await page.route("**/api/web/image-sessions/active", route => route.fulfill({ json: { ok: true, data: { id: 4, model: "fixture-image", mode: "image", quality: "basic", count: 1, prompt_hidden: true, prompt_actions_allowed: false, reference_urls: ["https://media.example.test/series.png"] } } }));
-  await page.goto("/?ux=3"); await page.getByRole("tab", { name: "Проекты", exact: true }).click();
+  await page.goto("/?ux=3");
+  await page.getByRole("button", { name: "Библиотека промптов", exact: true }).click();
+  await page.getByRole("button", { name: /Мой портрет/ }).click();
+  await page.getByRole("button", { name: "Использовать задание", exact: true }).click();
+  await page.getByRole("tab", { name: "Проекты", exact: true }).click();
   await page.getByRole("button", { name: "Продолжить серию", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "Восстановить серию?" })).toBeVisible();
   await page.getByRole("button", { name: "Заменить черновик фото", exact: true }).click();

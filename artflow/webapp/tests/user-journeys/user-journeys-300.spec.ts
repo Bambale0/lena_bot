@@ -209,6 +209,9 @@ async function mockMiniApp(page: Page, options: MockOptions = {}) {
   const uploadUrl = options.uploadUrl || "https://example.test/uploaded-ref.png";
   const failures = options.failures || {};
 
+  // Keep the deterministic Telegram fixture authoritative. DNS overrides alone
+  // do not block the live SDK behind every host proxy; it can replace start_param.
+  await page.route("https://telegram.org/js/telegram-web-app.js", route => route.fulfill({ contentType: "application/javascript", body: "" }));
   await page.addInitScript(
     ({ colorScheme, startParam }) => {
       window.Telegram = {
