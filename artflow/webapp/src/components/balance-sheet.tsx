@@ -7,6 +7,7 @@ import { Sheet } from "@/components/ui/sheet";
 import { t } from "@/lib/i18n";
 import type { PaymentPlan, UserProfile } from "@/lib/types";
 import { formatCredits, formatKisses } from "@/lib/utils";
+import { supportsPlan, checkoutPrice } from "@/lib/billing-methods";
 
 type PaymentProvider = "tbank" | "crypto" | "tribute" | "lava";
 
@@ -30,16 +31,15 @@ interface BalanceSheetProps {
   user: UserProfile;
   plans: PaymentPlan[];
   availableProviders: string[];
+  lavaPlanKeys?: string[];
   busy?: boolean;
+  error?: string;
   onOpenChange: (open: boolean) => void;
   onPay: (provider: PaymentProvider, plan: PaymentPlan) => void;
 }
 
 function planPrice(plan: PaymentPlan, method: PaymentProvider): string {
-  if (method === "crypto" && plan.price_usdt) return `${plan.price_usdt} USDT`;
-  if (method === "tribute" && plan.price_tribute_usd) return `$${plan.price_tribute_usd}`;
-  if (plan.price_rub) return `${plan.price_rub} ₽`;
-  return "";
+  return checkoutPrice(method, plan);
 }
 
 function compactPrice(value: number): string {
@@ -54,31 +54,20 @@ function planListPrice(plan: PaymentPlan): string {
   return [rub, usd].filter(Boolean).join(" | ");
 }
 
-function methodAvailable(method: PaymentProvider, plans: PaymentPlan[]): boolean {
-  if (!plans.length) return true;
-  if (method === "crypto") return plans.some((plan) => Number(plan.price_usdt || 0) > 0);
-  if (method === "tribute") return plans.some((plan) => Number(plan.price_tribute_usd || 0) > 0);
-  return plans.some((plan) => Number(plan.price_rub || 0) > 0);
-}
-
-function BalanceSheet({ open, user, plans, availableProviders, busy, onOpenChange, onPay }: BalanceSheetProps) {
+function BalanceSheet({ open, user, plans, availableProviders, lavaPlanKeys = [], busy, error, onOpenChange, onPay }: BalanceSheetProps) {
   const copy = t(user.language);
   const [selectedPlanKey, setSelectedPlanKey] = useState("");
   const [method, setMethod] = useState<PaymentProvider>("tbank");
-
-  const availableMethods = useMemo(
-    () => methods.filter((item) => availableProviders.includes(item.id) && methodAvailable(item.id, plans)),
-    [availableProviders, plans],
-  );
-
-  useEffect(() => {
-    if (!availableMethods.some((item) => item.id === method)) setMethod(availableMethods[0]?.id || "tbank");
-  }, [availableMethods, method]);
 
   const selectedPlan = useMemo(() => {
     if (!plans.length) return null;
     return plans.find((plan) => plan.key === selectedPlanKey) || plans[0];
   }, [plans, selectedPlanKey]);
+
+  const availableMethods = useMemo(() => selectedPlan ? methods.filter(item => availableProviders.includes(item.id) && supportsPlan(item.id, selectedPlan, lavaPlanKeys)) : [], [availableProviders, selectedPlan, lavaPlanKeys]);
+  useEffect(() => {
+    if (!availableMethods.some(item => item.id === method)) setMethod(availableMethods[0]?.id || "tbank");
+  }, [availableMethods, method]);
 
   const selectedMethod = availableMethods.find((item) => item.id === method) || availableMethods[0];
   const MethodIcon = selectedMethod?.icon || CreditCard;
@@ -180,6 +169,7 @@ function BalanceSheet({ open, user, plans, availableProviders, busy, onOpenChang
             <MethodIcon className="size-4" />
             {busy ? copy.balance.creating : selectedMethod ? `${copy.balance.payVia} ${selectedMethod.title}` : copy.balance.unavailableMethod}
           </Button>
+          {error && <p className="mt-2 text-sm" role="alert">{error}</p>}
           <div className="mt-2 grid gap-1.5 text-[10px] text-muted-foreground">
             <p className="flex items-start gap-1.5"><ShieldCheck className="mt-0.5 size-3.5 shrink-0" />{copy.balance.safety}</p>
             <p className="flex items-start gap-1.5"><Info className="mt-0.5 size-3.5 shrink-0" />{copy.balance.webhook}</p>

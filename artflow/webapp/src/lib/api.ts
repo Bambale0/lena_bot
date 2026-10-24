@@ -17,6 +17,7 @@ import type {
 } from "@/lib/types";
 import { parseStartTarget, readStartParam } from "@/lib/telegram";
 import { asArray, asRecord } from "@/lib/utils";
+import { attachmentName } from "@/lib/download";
 
 const API_BASE = "/api/v1";
 export const HISTORY_PAGE_SIZE = 100;
@@ -145,6 +146,16 @@ function feedItemFromPublicPayload(payload: unknown): FeedItem | null {
 export class MiniAppApi {
   constructor(private readonly initData: string) {}
 
+  async downloadGeneration(id: number, signal?: AbortSignal): Promise<{ blob: Blob; filename: string }> {
+    const response = await fetch(`/api/web/generations/${id}/download`, { signal, credentials: "same-origin", headers: { "X-Telegram-Init-Data": this.initData } });
+    if (!response.ok) throw await readApiError(response);
+    const contentType = response.headers.get("Content-Type") || "";
+    if (/text\/html|application\/json/i.test(contentType)) throw new Error("Сервер не вернул файл. Обновите результат и попробуйте снова.");
+    const blob = await response.blob();
+    if (!blob.size) throw new Error("Получен пустой файл. Повторите скачивание позже.");
+    return { blob, filename: attachmentName(response.headers.get("Content-Disposition"), id) };
+  }
+
   async requestWeb<T>(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<T> {
     const response = await fetch(`/api/web${path}`, {
       ...init, signal: signal ?? init.signal, credentials: "same-origin",
@@ -215,7 +226,7 @@ export class MiniAppApi {
   }
 
   async bootstrap(signal?: AbortSignal): Promise<BootstrapData> {
-    const [userResult, imageResult, videoResult, historyResult, feedResult, trendsResult, plansResult, paymentMethodsResult] =
+    const [userResult, imageResult, videoResult, historyResult, feedResult, trendsResult, plansResult, paymentMethodsResult, paymentOptionsResult] =
       await Promise.allSettled([
         this.request<UserProfile>("/me", {}, signal),
         this.request<unknown>("/models/image", {}, signal),
@@ -225,6 +236,7 @@ export class MiniAppApi {
         this.request<unknown>("/trends?limit=32", {}, signal),
         this.request<unknown>("/plans", {}, signal),
         this.request<unknown>("/payment-methods", {}, signal),
+        this.request<unknown>("/payment-options", {}, signal),
       ]);
 
     if (userResult.status === "rejected") throw userResult.reason;
@@ -259,6 +271,7 @@ export class MiniAppApi {
       trends: asArray<TrendItem>(settledValue(trendsResult, [])),
       paymentPlans: asArray<PaymentPlan>(settledValue(plansResult, [])),
       paymentMethods: stringArray(settledValue(paymentMethodsResult, [])),
+      lavaPlanKeys: stringArray(asRecord(settledValue(paymentOptionsResult, {})).lava_plan_keys),
     };
   }
 

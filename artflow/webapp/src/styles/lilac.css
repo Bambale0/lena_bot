@@ -39,6 +39,10 @@ html[data-apix-studio="lilac"] {
 .apix-shell[data-ui-version="3"] .apix-nav-item[aria-selected="true"] { background:#a98bff20; color:#d8ccff; box-shadow:none; }
 .apix-shell[data-ui-version="3"] .apix-nav-label { white-space:normal; overflow:visible; max-width:none; text-overflow:clip; line-height:1.1; }
 .apix-shell[data-ui-version="3"] .apix-nav-item svg { width:21px; height:21px; }
+.apix-shell[data-ui-version="3"] .apix-nav-item[data-destination="create"] { color:#eee2ff; background:transparent; padding-top:0; gap:5px; }
+.lilac-create-action { display:grid; place-items:center; width:48px; height:48px; margin-top:-9px; border:1px solid #e6d8ff; border-radius:17px; background:#b994ff; color:#211233; }
+.apix-shell[data-ui-version="3"] .lilac-create-action svg { width:27px; height:27px; }
+.apix-shell[data-ui-version="3"] [data-destination="create"][aria-selected="true"] .lilac-create-action { background:#d8ccff; border-color:#f7f3ff; }
 .apix-shell[data-ui-version="3"] button:focus-visible,html[data-apix-studio="lilac"] input:focus-visible,html[data-apix-studio="lilac"] textarea:focus-visible { outline:2px solid #d8ccff; outline-offset:3px; }
 .apix-shell[data-ui-version="3"] .ux2-editor-back { display:inline-flex; align-items:center; min-height:44px; padding:0 8px 0 0; margin-bottom:12px; font-size:14px; color:#d8ccff; }
 .apix-shell[data-ui-version="3"] .apix-generation-card { border-radius:20px; }
@@ -86,3 +90,6 @@ html[data-apix-studio="lilac"] {
 html[data-apix-studio="lilac"] .lilac-audio-tools, html[data-apix-studio="lilac"] .lilac-withdrawal { display:grid; gap:12px; border:1px solid var(--border); border-radius:20px; padding:16px; margin-block:10px; min-width:0; }
 html[data-apix-studio="lilac"] .lilac-output-list { display:flex; flex-wrap:wrap; gap:8px; }
 html[data-apix-studio="lilac"] input[type="file"] { max-width:100%; font-size:14px; }
+html[data-apix-studio="lilac"] .lilac-panel label { display:grid; gap:7px; color:#f7f3ff; font-size:14px; }
+html[data-apix-studio="lilac"] .lilac-avatar-edit { display:grid; gap:12px; align-items:center; }
+html[data-apix-studio="lilac"] .lilac-avatar-edit > img { width:80px; height:80px; object-fit:cover; border-radius:24px; }

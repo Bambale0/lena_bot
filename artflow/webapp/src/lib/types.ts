@@ -10,6 +10,7 @@ export type AppTab =
   | "help"
   | "billing"
   | "owner"
+  | "account"
   | "create"
   | "works"
   | "studio"
@@ -247,6 +248,7 @@ export interface BootstrapData {
   trends: TrendItem[];
   paymentPlans: PaymentPlan[];
   paymentMethods: string[];
+  lavaPlanKeys?: string[];
 }
 
 export type PhotoUploadError = "network" | "timeout" | "empty_file" | "too_large" | "invalid_file"

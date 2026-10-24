@@ -1,6 +1,6 @@
 import { Copy, ExternalLink, Library, RefreshCw, Share2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,6 +27,8 @@ interface TaskDetailSheetProps {
   onToggleLibrary: (task: GenerationTask) => void;
   onReuse?: (task: GenerationTask) => void;
   onAnimate?: (url: string) => void;
+  onDownload?: (task: GenerationTask, signal: AbortSignal) => Promise<void>;
+  onCopyLink?: (task: GenerationTask, signal: AbortSignal) => Promise<void>;
 }
 
 function statusVariant(task: GenerationTask): "success" | "warning" | "destructive" | "secondary" {
@@ -47,9 +49,21 @@ function TaskDetailSheet({
   onToggleLibrary,
   onReuse,
   onAnimate,
+  onDownload,
+  onCopyLink,
 }: TaskDetailSheetProps) {
   const [publicAction, setPublicAction] = useState<"feed" | "library" | null>(null);
+  const [resultBusy, setResultBusy] = useState(false), [resultError, setResultError] = useState("");
+  const resultAction = useRef<AbortController | null>(null);
   useEffect(() => setPublicAction(null), [task?.id, open]);
+  useEffect(() => { setResultError(""); setResultBusy(false); return () => { resultAction.current?.abort(); resultAction.current = null; }; }, [task?.id, open]);
+  const runResultAction = async (callback: (task: GenerationTask, signal: AbortSignal) => Promise<void>, label: string) => {
+    if (!task || resultAction.current) return;
+    const controller = new AbortController(); resultAction.current = controller; setResultBusy(true); setResultError("");
+    try { await callback(task, controller.signal); if (!controller.signal.aborted) toast.success(label); }
+    catch (e) { if (!controller.signal.aborted) setResultError(e instanceof Error ? e.message : "Не удалось выполнить действие. Повторите попытку."); }
+    finally { if (resultAction.current === controller) { resultAction.current = null; setResultBusy(false); } }
+  };
   if (!task) return null;
   // Thumbnails are suitable for the library, not for playback/open-original actions.
   const original = safeExternalUrl(task.result_url) || (task.result_urls || []).map(safeExternalUrl).find(Boolean) || "";
@@ -106,6 +120,7 @@ function TaskDetailSheet({
       }
     >
       <div className="grid gap-2.5">
+        {(onDownload || onCopyLink) && <div className="grid gap-2"><div className="flex flex-wrap gap-2">{onDownload && canPublish && <Button variant="outline" disabled={busy || resultBusy} onClick={() => void runResultAction(onDownload, "Файл подготовлен к скачиванию")}>{resultBusy ? "Подготавливаем…" : "Скачать файл"}</Button>}{onCopyLink && task.is_public_feed && <Button variant="outline" disabled={busy || resultBusy} onClick={() => void runResultAction(onCopyLink, "Ссылка скопирована")}>Скопировать ссылку на работу</Button>}</div>{resultError && <p role="alert" className="text-sm text-destructive">{resultError}</p>}</div>}
         {confirmPublicActions && outputs.length > 1 && <div className="lilac-output-list"><p>Результатов: {outputs.length}. Открывайте оригиналы отдельно.</p>{outputs.map((url, index) => <Button key={url} variant="outline" onClick={() => openExternalUrl(url)}>Оригинал {index + 1}</Button>)}</div>}
         {media ? (
           <div className="overflow-hidden rounded-xl border border-border bg-muted">

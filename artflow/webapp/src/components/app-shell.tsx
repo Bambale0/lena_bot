@@ -132,8 +132,8 @@ function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen, ux2 =
   const parent = lilac ? lilacParent(activeTab) : ux2 ? editorParent(activeTab) : null;
   const navigation: Array<{ id: AppTab; label: string; icon: typeof GalleryVerticalEnd }> = lilac ? [
     { id: "home", label: en ? "Home" : "Главная", icon: Home },
-    { id: "create", label: en ? "Create" : "Создать", icon: Plus },
     { id: "ideas", label: en ? "Ideas" : "Идеи", icon: Lightbulb },
+    { id: "create", label: en ? "Create" : "Создать", icon: Plus },
     { id: "works", label: en ? "Projects" : "Проекты", icon: Images },
     { id: "profile", label: copy.nav.profile, icon: UserRound },
   ] : ux2 ? [
@@ -225,7 +225,7 @@ function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen, ux2 =
                 )}
                 onClick={() => navigate(id)}
               >
-                <Icon className="size-[18px]" />
+                {lilac && id === "create" ? <span className="lilac-create-action"><Icon aria-hidden="true" /></span> : <Icon className="size-[18px]" />}
                 <span className="apix-nav-label leading-none">{label}</span>
               </button>
             );

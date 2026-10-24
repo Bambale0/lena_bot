@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import test from "node:test";
 import ts from "typescript";
 import * as utils from "../../src/lib/utils.ts";
+import * as download from "../../src/lib/download.ts";
 
 const require = createRequire(import.meta.url);
 function loadProduction(path: string, dependencies: Record<string, unknown>, expose = "") {
@@ -13,6 +14,7 @@ function loadProduction(path: string, dependencies: Record<string, unknown>, exp
   const module = { exports: {} as Record<string, any> };
   new Function("exports", "require", compiled + expose)(module.exports, (name: string) => {
     if (name in dependencies) return dependencies[name];
+    if (name === "@/lib/download") return download;
     if (name === "lucide-react") return new Proxy({}, { get: (_, name) => String(name) });
     if (name === "react" || name === "react/jsx-runtime" || name === "react-dom") return require(name);
     throw new Error(`Unexpected component dependency: ${name}`);

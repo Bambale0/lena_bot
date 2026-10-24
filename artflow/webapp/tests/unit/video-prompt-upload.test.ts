@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import ts from "typescript";
 import { asArray, asRecord } from "../../src/lib/utils.ts";
+import * as download from "../../src/lib/download.ts";
 
 // Exercise the production API class while isolating unrelated browser portals.
 // Transpile its constructor parameter property, which Node's strip-only loader
@@ -14,6 +15,7 @@ const compiled = ts.transpileModule(
 const apiModule = { exports: {} };
 new Function("exports", "require", compiled)(apiModule.exports, (name: string) => {
   if (name === "@/lib/utils") return { asArray, asRecord };
+  if (name === "@/lib/download") return download;
   if (name === "@/lib/telegram" || name === "@/features/feed-remix-runner") return {};
   throw new Error(`Unexpected API dependency: ${name}`);
 });
