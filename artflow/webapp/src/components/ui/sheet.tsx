@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 interface SheetProps {
+  role?: "dialog" | "alertdialog";
   open: boolean;
   title: string;
   description?: string;
@@ -23,7 +24,7 @@ const FOCUSABLE = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(",");
 
-function Sheet({ open, title, description, children, footer, className, onOpenChange }: SheetProps) {
+function Sheet({ open, title, description, children, footer, className, onOpenChange, role = "dialog" }: SheetProps) {
   const dialogRef = useRef<HTMLElement | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const onOpenChangeRef = useRef(onOpenChange);
@@ -93,7 +94,7 @@ function Sheet({ open, title, description, children, footer, className, onOpenCh
       />
       <section
         ref={dialogRef}
-        role="dialog"
+        role={role}
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={description ? descriptionId : undefined}

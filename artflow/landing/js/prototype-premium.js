@@ -5182,22 +5182,30 @@ async function handleAdminUserBan(button) {
 
 async function handleAdminGenerationFail(button) {
   const generationId = button.dataset.adminGenerationFail;
-  if (!generationId) return;
-  const confirmed = window.confirm("Пометить генерацию failed и вернуть списанные поцелуи пользователю?");
+  if (!generationId || button.disabled) return;
+  const confirmed = window.confirm("Отметить задачу ошибочной и вернуть списанные кредиты? Это не отменяет запрос у поставщика.");
   if (!confirmed) return;
   button.disabled = true;
   try {
-    await request(`/admin/generations/${encodeURIComponent(generationId)}/fail`, {
+    const result = await request(`/admin/generations/${encodeURIComponent(generationId)}/fail`, {
       method: "POST",
-      body: JSON.stringify({ error: "Stopped from web admin", refund: true }),
+      body: JSON.stringify({ error: "Marked failed from web admin", refund: true }),
     });
     state.admin.generations = null;
+    state.admin.users = null;
     state.admin.overview = null;
     state.admin.ledger = null;
     await loadAdminSection("generations", { force: true });
-    toast("Генерация остановлена, баланс возвращён.", "success");
+    if (result?.changed !== true || result?.status !== "failed" || String(result?.id) !== String(generationId)
+        || typeof result.refunded !== "boolean" || !Number.isFinite(result.refunded_credits)
+        || result.refunded_credits < 0 || result.refunded !== (result.refunded_credits > 0)) {
+      throw new Error("Сервер не подтвердил результат. Сверьте задачу и журнал баланса перед новым действием.");
+    }
+    toast(result.refunded
+      ? `Задача отмечена ошибочной. Возвращено: ${formatNumber(result.refunded_credits)} кр.`
+      : "Задача отмечена ошибочной. Возврат не выполнялся.", "success");
   } catch (error) {
-    toast(`Не удалось остановить генерацию: ${error.message}`, "danger");
+    toast(`Результат изменения не подтверждён: ${error.message}`, "danger");
   } finally {
     button.disabled = false;
   }

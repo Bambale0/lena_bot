@@ -4,8 +4,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { Sheet } from "@/components/ui/sheet";
 import type { MiniAppApi } from "@/lib/api";
 import type { LibraryPrompt } from "./library-screen";
+import { useAdminSession } from "./admin/primitives";
 
 export function LilacModeration({ api }: { api: MiniAppApi }) {
+  const session = useAdminSession();
   const [open, setOpen] = useState(false), [items, setItems] = useState<LibraryPrompt[]>([]);
   const [loading, setLoading] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState("");
   const [action, setAction] = useState<{ item: LibraryPrompt; kind: "approve" | "reject" } | null>(null), [reason, setReason] = useState("");
@@ -13,14 +15,14 @@ export function LilacModeration({ api }: { api: MiniAppApi }) {
   useEffect(() => { const controller = new AbortController(); lifetime.current = controller; return () => controller.abort(); }, [api]);
   const load = async () => {
     const signal = lifetime.current.signal; setLoading(true); setError("");
-    try { const row = await api.requestWeb<{ items: LibraryPrompt[] }>("/admin/prompts?status=pending", { cache: "no-store" }, signal); if (!signal.aborted) setItems(Array.isArray(row.items) ? row.items : []); }
+    try { const row = await session.requestWeb<{ items: LibraryPrompt[] }>("/admin/prompts?status=pending", { cache: "no-store" }, signal); if (!signal.aborted) setItems(Array.isArray(row.items) ? row.items : []); }
     catch (e) { if (!signal.aborted) setError(e instanceof Error ? e.message : "Не удалось загрузить очередь"); }
     finally { if (!signal.aborted) setLoading(false); }
   };
   const execute = async () => {
-    if (!action || mutation.current || action.kind === "reject" && reason.trim().length < 3) return;
+    if (!session.active() || !action || mutation.current || action.kind === "reject" && reason.trim().length < 3) return;
     const signal = lifetime.current.signal; mutation.current = true; setBusy(true); setError("");
-    try { await api.requestWeb(`/admin/prompts/${action.item.id}/${action.kind}`, { method: "POST", body: JSON.stringify(action.kind === "reject" ? { reason: reason.trim() } : {}) }, signal);
+    try { await session.requestWeb(`/admin/prompts/${action.item.id}/${action.kind}`, { method: "POST", body: JSON.stringify(action.kind === "reject" ? { reason: reason.trim() } : {}) }, signal);
       if (!signal.aborted) { setAction(null); await load(); }
     } catch (e) { if (!signal.aborted) setError(e instanceof Error ? e.message : "Ответ не подтверждён. Обновите очередь перед повтором."); }
     finally { mutation.current = false; if (!signal.aborted) setBusy(false); }

@@ -1,0 +1,13 @@
+.lilac-admin-workspace button {
+  min-height: 44px;
+  min-width: 44px;
+}
+.lilac-admin-workspace input:not([type="checkbox"]),
+.lilac-admin-workspace select {
+  min-height: 44px;
+}
+.lilac-admin-workspace label,
+.lilac-admin-workspace article {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

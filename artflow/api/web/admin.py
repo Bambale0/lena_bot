@@ -967,20 +967,23 @@ async def admin_fail_generation(
         return error_response(404, "Generation not found")
     if enum_value(gen.status) not in {"pending", "processing"}:
         return error_response(409, "Generation is already final")
-    updated = await repo.fail_generation(session, generation_id, body.error)
-    if updated and body.refund and float(gen.credits_spent or 0) > 0:
-        await repo.add_credits(
-            session,
-            gen.user_id,
-            float(gen.credits_spent or 0),
+    refunded_credits = 0.0
+    if body.refund:
+        updated, refunded_credits = await repo.fail_generation_and_refund(
+            session, generation_id, body.error,
             entry_type="admin_generation_refund",
-            source_type="generation",
-            source_id=str(generation_id),
-            note=f"Refund by web admin {getattr(user, 'tg_id', '')}: {body.error}",
+            refund_note=f"Refund by web admin {getattr(user, 'tg_id', '')}: {body.error}",
         )
+    else:
+        updated = await repo.fail_generation(session, generation_id, body.error)
+    if not updated:
+        await session.rollback()
+        return error_response(409, "Generation is already final")
     refreshed = await repo.get_generation_by_id(session, generation_id)
     owner = await repo.get_user_by_id(session, refreshed.user_id) if refreshed else None
-    return ok(_generation_card(refreshed, owner) if refreshed else {"id": generation_id})
+    data = _generation_card(refreshed, owner) if refreshed else {"id": generation_id}
+    data.update(changed=True, refunded=refunded_credits > 0, refunded_credits=refunded_credits)
+    return ok(data)
 
 
 @router.get("/admin/pricing")
