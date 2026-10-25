@@ -588,7 +588,8 @@ class QwenRoutingAudit(Base):
     previous_backup_provider: Mapped[str | None] = mapped_column(String(16), nullable=True)
     new_primary_provider: Mapped[str] = mapped_column(String(16), nullable=False)
     new_backup_provider: Mapped[str | None] = mapped_column(String(16), nullable=True)
-    changed_by_admin_tg_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    changed_by_admin_tg_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    changed_by_operator: Mapped[str | None] = mapped_column(String(128), nullable=True)
     source: Mapped[str] = mapped_column(String(16), nullable=False)
     changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
