@@ -95,6 +95,51 @@ async def test_default_routes_and_initial_override_are_audited() -> None:
 
 
 @pytest.mark.asyncio
+async def test_qwen_route_accepts_trusted_ops_actor_without_telegram_impersonation() -> None:
+    record = SimpleNamespace(
+        primary_provider="neironych",
+        backup_provider="kie",
+        updated_by_admin_tg_id=123,
+    )
+    session = _Session(record)
+
+    saved = await set_qwen_route(
+        session,
+        "image",
+        "kie",
+        "neironych",
+        source="ops",
+        operator_identity="codex-for-Bambale0-20261025",
+    )
+
+    assert (saved.primary_provider, saved.backup_provider) == ("kie", "neironych")
+    assert record.updated_by_admin_tg_id is None
+    assert len(session.added) == 1
+    audit = session.added[0]
+    assert audit.changed_by_admin_tg_id is None
+    assert audit.changed_by_operator == "codex-for-Bambale0-20261025"
+    assert audit.source == "ops"
+
+
+@pytest.mark.asyncio
+async def test_qwen_route_rejects_invalid_ops_actor_before_database_access() -> None:
+    session = SimpleNamespace(execute=AsyncMock(side_effect=AssertionError("database touched")))
+
+    with pytest.raises(ValueError, match="ops identity"):
+        await set_qwen_route(
+            session,
+            "image",
+            "kie",
+            "neironych",
+            admin_tg_id=123,
+            source="ops",
+            operator_identity="root@release-container",
+        )
+
+    session.execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_web_admin_rejects_unauthenticated_route_change(monkeypatch) -> None:
     setter = AsyncMock(side_effect=AssertionError("unauthorized write"))
     monkeypatch.setattr(web_admin, "set_qwen_route", setter)

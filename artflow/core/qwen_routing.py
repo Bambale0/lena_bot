@@ -1,6 +1,7 @@
 """Authenticated, audited provider order for the three Qwen-facing workflows."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Literal
 
@@ -91,10 +92,20 @@ async def get_qwen_route(mode: QwenMode, session: AsyncSession | None = None) ->
 
 async def set_qwen_route(
     session: AsyncSession, mode: QwenMode, primary: QwenProvider,
-    backup: QwenProvider | None, *, admin_tg_id: int, source: Literal["web", "telegram"],
+    backup: QwenProvider | None, *, admin_tg_id: int | None = None,
+    source: Literal["web", "telegram", "ops"], operator_identity: str | None = None,
 ) -> QwenRoute:
     validate_route(mode, primary, backup)
-    if not int(admin_tg_id) or source not in {"web", "telegram"}:
+    if source in {"web", "telegram"}:
+        if not admin_tg_id or operator_identity is not None:
+            raise ValueError("An authenticated admin and valid source are required")
+        admin_tg_id = int(admin_tg_id)
+    elif source == "ops":
+        identity = str(operator_identity or "").strip()
+        if admin_tg_id is not None or not re.fullmatch(r"[A-Za-z0-9_.:@-]{3,128}", identity):
+            raise ValueError("Trusted ops identity is required")
+        operator_identity = identity
+    else:
         raise ValueError("An authenticated admin and valid source are required")
     default_primary, default_backup = DEFAULT_ROUTES[mode]
     await session.execute(
@@ -107,14 +118,16 @@ async def set_qwen_route(
     )).scalar_one()
     old_primary = record.primary_provider
     old_backup = record.backup_provider
-    if (record.updated_by_admin_tg_id is None or (old_primary, old_backup) != (primary, backup)):
+    route_changed = (old_primary, old_backup) != (primary, backup)
+    if route_changed or (source != "ops" and record.updated_by_admin_tg_id is None):
         record.primary_provider = primary
         record.backup_provider = backup
-        record.updated_by_admin_tg_id = int(admin_tg_id)
+        record.updated_by_admin_tg_id = admin_tg_id
         session.add(QwenRoutingAudit(
             mode=mode, previous_primary_provider=old_primary,
             previous_backup_provider=old_backup, new_primary_provider=primary,
-            new_backup_provider=backup, changed_by_admin_tg_id=int(admin_tg_id), source=source,
+            new_backup_provider=backup, changed_by_admin_tg_id=admin_tg_id,
+            changed_by_operator=operator_identity, source=source,
         ))
     await session.commit()
     return QwenRoute(mode, record.primary_provider, record.backup_provider, "database", record.updated_by_admin_tg_id)

@@ -2012,3 +2012,32 @@ code-review; Anthropic webapp-testing. Steps: [x] current source/production
 preflight; [x] acceptance/parity/security plan; [ ] RED/green focused tests and
 full relevant gates; [ ] independent review; [ ] PR/exact-head CI/native
 auto-merge/deploy; [ ] production policy change and live verification.
+
+## 2026-10-25 — photo-to-prompt Qwen incident route repair
+
+Baseline `216e2fd74241738fa4edbc9f2a0152be0fec5bb7`; branch
+`fix/photo-prompt-qwen-route-20261025`. Four production photo-to-prompt calls
+failed through Neironych Qwen 3.8: three exact 90-second read timeouts and one
+HTTP 503. These are ambiguous after admission, so retrying or falling back to a
+second paid provider would risk duplicate supplier cost. The no-replay guard is
+working as designed and remains unchanged.
+
+Production preflight: the `image` route was still the default
+`neironych -> kie`; both provider credentials are configured and the verified
+KIE image model is `gpt-5-2`. Acceptance: add a trusted-shell Qwen route control
+with explicit immutable ops attribution, preserve authenticated web/Telegram
+attribution, then move only `image` to `kie -> neironych` after protected
+deploy. Text/video routing, prices, customer balances and provider request
+semantics remain unchanged. Rollback uses the same audited command after
+Neironych recovery is independently confirmed.
+
+TDD: new tests first failed because the command/migration did not exist. The
+implementation adds migration 051, ops actor validation, the route command,
+audit-shape checks and updated runbook. Focused routing/script/migration tests
+now pass. No paid live smoke is authorized or required; production verification
+will cover exact SHA, migration head, route/audit state, service health and
+absence of new photo-prompt Neironych submissions after the cutover.
+
+Steps: [x] root-cause and production preflight; [x] RED/green operator control;
+[ ] full relevant gates and review; [ ] PR/exact-head CI/auto-merge/deploy;
+[ ] audited production switch and live verification.
