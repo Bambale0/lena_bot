@@ -153,6 +153,7 @@ test("home thumbnails remove failed network and non-image media while preserving
   await page.route("https://media.example.test/**", route => { requests++; return route.request().url().includes("broken") ? route.abort() : route.fulfill({ contentType: "text/html", body: "not an image" }); });
   await page.goto("/?ux=3");
   await expect(page.getByRole("button", { name: "Создать фото", exact: true })).toBeVisible();
+  await page.locator(".lilac-preview-rail > button").first().scrollIntoViewIfNeeded();
   await expect(page.locator(".lilac-home :is(img, video)")).toHaveCount(0);
   expect(requests).toBeGreaterThan(0); expect(requests).toBeLessThanOrEqual(4);
   await expect(page.getByRole("button", { name: "Создать фото", exact: true }).locator("svg")).not.toHaveCount(0);
@@ -178,6 +179,7 @@ test("home renders live MP4 previews without starting generation", async ({ page
   const trendCard = page.locator(".lilac-preview-rail > button").filter({ hasText: "Живой сценарий" });
   const railVideo = trendCard.locator("video");
   for (const video of [tileVideo, railVideo]) {
+    await video.scrollIntoViewIfNeeded();
     await expect(video).toBeVisible();
     await expect.poll(() => video.evaluate((element: HTMLVideoElement) => element.readyState)).toBeGreaterThanOrEqual(1);
     expect(await video.evaluate((element: HTMLVideoElement) => ({
@@ -200,6 +202,75 @@ test("home renders live MP4 previews without starting generation", async ({ page
   await trendCard.click();
   await expect(page.getByRole("dialog", { name: "Живой сценарий" })).toBeVisible();
   expect(state.writes.filter(row => /generate|\/run$/.test(row.path))).toHaveLength(0);
+});
+
+test("home video previews honor reduced motion and react to preference changes", async ({ page }) => {
+  await prepare(page);
+  await page.addInitScript(() => {
+    const originalPlay = HTMLMediaElement.prototype.play;
+    let playCalls = 0;
+    Object.defineProperty(window, "__homePreviewPlayCalls", { get: () => playCalls });
+    HTMLMediaElement.prototype.play = function play() {
+      playCalls++;
+      return originalPlay.call(this);
+    };
+  });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.route("**/api/v1/trends?**", route => route.fulfill({ json: [{
+    id: 203, kind: "video", title: "Спокойный сценарий", preview_url: "https://media.example.test/reduced.mp4",
+  }] }));
+  await page.route("https://media.example.test/reduced.mp4", route => route.fulfill({ contentType: "video/mp4", body: mp4 }));
+  await page.goto("/?ux=3");
+
+  const videos = page.locator(".lilac-home video");
+  await expect(videos).toHaveCount(2);
+  await expect.poll(() => videos.evaluateAll(nodes => nodes.every(node => (node as HTMLVideoElement).paused))).toBe(true);
+  expect(await videos.evaluateAll(nodes => nodes.every(node => !(node as HTMLVideoElement).autoplay))).toBe(true);
+  expect(await page.evaluate(() => (window as unknown as { __homePreviewPlayCalls: number }).__homePreviewPlayCalls)).toBe(0);
+  expect(await videos.evaluateAll(nodes => nodes.every(node => !((node as HTMLVideoElement).dataset.apixPreviewActive)))).toBe(true);
+
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await expect.poll(() => videos.evaluateAll(nodes => nodes.some(node => !(node as HTMLVideoElement).paused))).toBe(true);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __homePreviewPlayCalls: number }).__homePreviewPlayCalls)).toBeGreaterThan(0);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect.poll(() => videos.evaluateAll(nodes => nodes.every(node => (node as HTMLVideoElement).paused))).toBe(true);
+});
+
+test("home loads and plays only viewport-visible video previews", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await prepare(page);
+  const trends = Array.from({ length: 8 }, (_, index) => ({
+    id: 300 + index,
+    kind: "video",
+    title: `Живой сценарий ${index + 1}`,
+    preview_url: `https://media.example.test/live-${index + 1}.mp4`,
+  }));
+  const requested: string[] = [];
+  await page.route("**/api/v1/trends?**", route => route.fulfill({ json: trends }));
+  await page.route("https://media.example.test/live-*.mp4", route => {
+    requested.push(route.request().url());
+    return route.fulfill({ contentType: "video/mp4", body: mp4 });
+  });
+  await page.goto("/?ux=3");
+
+  const railCards = page.locator(".lilac-preview-rail > button");
+  await expect(railCards).toHaveCount(8);
+  const first = railCards.first().locator("[data-apix-home-preview-frame]");
+  const last = railCards.last().locator("[data-apix-home-preview-frame]");
+  await first.scrollIntoViewIfNeeded();
+  await expect.poll(() => first.locator("video").evaluate((video: HTMLVideoElement) => video.currentSrc)).toContain("live-1.mp4");
+  await expect(railCards.last().locator("video")).toHaveCount(0);
+  expect(requested.some(url => url.endsWith("/live-8.mp4"))).toBe(false);
+
+  await last.scrollIntoViewIfNeeded();
+  await expect.poll(() => last.locator("video").evaluate((video: HTMLVideoElement) => video.currentSrc)).toContain("live-8.mp4");
+  await expect.poll(() => last.locator("video").evaluate((video: HTMLVideoElement) => !video.paused)).toBe(true);
+  await expect(railCards.first().locator("video")).toHaveCount(0);
+
+  await first.scrollIntoViewIfNeeded();
+  await expect.poll(() => first.locator("video").evaluate((video: HTMLVideoElement) => video.currentSrc)).toContain("live-1.mp4");
+  await expect.poll(() => first.locator("video").evaluate((video: HTMLVideoElement) => !video.paused)).toBe(true);
+  await expect(railCards.last().locator("video")).toHaveCount(0);
 });
 
 test("publication rejects an invalid manual cover address instead of resolving it as a local path", async ({ page }) => {
