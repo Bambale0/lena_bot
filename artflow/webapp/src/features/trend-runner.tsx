@@ -572,6 +572,11 @@ function TrendRunnerPortal() {
   const [taskBusy, setTaskBusy] = useState(false);
   const [pinterestBusy, setPinterestBusy] = useState(false);
   const [checkout, setCheckout] = useState<TrendCheckoutQuote | null>(null);
+  // Retain only safe capabilities for correction, never a payable price or balance.
+  const [durationOffer, setDurationOffer] = useState<Pick<TrendCheckoutQuote,
+    "duration_options" | "default_duration" | "effective_duration" | "duration_lock_reason"
+  > | null>(null);
+  const [checkoutError, setCheckoutError] = useState("");
   const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [duration, setDuration] = useState<number | null>(null);
   const checkoutSequence = useRef(0);
@@ -615,6 +620,8 @@ function TrendRunnerPortal() {
     setError("");
     setPinterestBusy(false);
     setCheckout(null);
+    setDurationOffer(null);
+    setCheckoutError("");
     setCheckoutBusy(false);
     setPaymentBusy(false);
     setPaymentWaiting(false);
@@ -673,6 +680,8 @@ function TrendRunnerPortal() {
 
   const refreshCheckout = useCallback(async (trendId: number, quiet = false, signal?: AbortSignal) => {
     const sequence = ++checkoutSequence.current;
+    setCheckout(null);
+    setCheckoutError("");
     if (!quiet) setCheckoutBusy(true);
     try {
       const query = duration == null ? "" : `?duration=${duration}`;
@@ -687,6 +696,8 @@ function TrendRunnerPortal() {
       }
       if (sequence !== checkoutSequence.current) return null;
       setCheckout(quote);
+      setDurationOffer({ duration_options: quote.duration_options, default_duration: quote.default_duration,
+        effective_duration: quote.effective_duration, duration_lock_reason: quote.duration_lock_reason });
       return quote;
     } catch (checkoutError) {
       if (sequence !== checkoutSequence.current) return null;
@@ -697,6 +708,7 @@ function TrendRunnerPortal() {
         return null;
       }
       setCheckout(null);
+      setCheckoutError(checkoutError instanceof Error ? checkoutError.message : "Не удалось получить стоимость");
       if (!quiet) {
         toast.error(checkoutError instanceof Error ? checkoutError.message : "Не удалось получить стоимость");
       }
@@ -1058,23 +1070,34 @@ function TrendRunnerPortal() {
                 <p>{hint}</p>
               </div>
 
-              {trend.kind === "video" && checkout?.effective_duration != null ? (
-                <label className="grid gap-2 text-sm">
-                  Длительность видео
-                  <select aria-label="Длительность видео" className="min-h-11 rounded-lg border border-border bg-background px-3"
-                    value={duration ?? checkout.effective_duration}
-                    disabled={genericBusy || Boolean(checkout.duration_lock_reason) || (checkout.duration_options?.length ?? 0) <= 1}
-                    onChange={event => {
+              {trend.kind === "video" && durationOffer?.effective_duration != null ? (
+                <div className="grid gap-2 text-sm">
+                  <label className="grid gap-2">
+                    Длительность видео
+                    <select aria-label="Длительность видео" className="min-h-11 rounded-lg border border-border bg-background px-3"
+                      value={duration ?? checkout?.effective_duration ?? durationOffer.default_duration ?? durationOffer.effective_duration}
+                      disabled={genericBusy || paymentBusy || Boolean(balance?.open) || Boolean(durationOffer.duration_lock_reason) || (durationOffer.duration_options?.length ?? 0) <= 1}
+                      onChange={event => {
+                        checkoutSequence.current++;
+                        setCheckout(null);
+                        setDuration(Number(event.target.value));
+                        runKeyRef.current = null;
+                        setError("");
+                      }}>
+                      {(durationOffer.duration_options?.length ? durationOffer.duration_options : [durationOffer.effective_duration]).map(seconds => <option key={seconds} value={seconds}>{seconds} сек</option>)}
+                    </select>
+                  </label>
+                  {durationOffer.duration_lock_reason ? <span className="text-xs text-muted-foreground">{durationOffer.duration_lock_reason}</span> : null}
+                  {duration != null ? <Button type="button" variant="outline" className="min-h-11 whitespace-normal"
+                    disabled={genericBusy || paymentBusy || checkoutBusy || Boolean(balance?.open)}
+                    onClick={() => {
                       checkoutSequence.current++;
                       setCheckout(null);
-                      setDuration(Number(event.target.value));
+                      setDuration(null);
                       runKeyRef.current = null;
                       setError("");
-                    }}>
-                    {(checkout.duration_options?.length ? checkout.duration_options : [checkout.effective_duration]).map(seconds => <option key={seconds} value={seconds}>{seconds} сек</option>)}
-                  </select>
-                  {checkout.duration_lock_reason ? <span className="text-xs text-muted-foreground">{checkout.duration_lock_reason}</span> : null}
-                </label>
+                    }}>Вернуть длительность автора</Button> : null}
+                </div>
               ) : null}
               <div className="rounded-xl border border-primary/20 bg-primary/5 p-3">
                 <div className="flex items-center justify-between gap-3">
@@ -1091,6 +1114,12 @@ function TrendRunnerPortal() {
                     </div>
                   ) : null}
                 </div>
+                {checkoutError && !checkout && !checkoutBusy ? <div className="mt-3 grid gap-2">
+                  <p role="alert" className="text-sm text-destructive">{checkoutError}. Стоимость не подтверждена.</p>
+                  <Button type="button" variant="outline" className="min-h-11"
+                    disabled={genericBusy || paymentBusy || Boolean(balance?.open)}
+                    onClick={() => void refreshCheckout(trend.id)}>Повторить расчёт</Button>
+                </div> : null}
                 {paymentWaiting ? <div className="mt-3 grid gap-2">
                   <p className="text-xs">Статус оплаты ещё не подтверждён. Фото и настройки сохранены.</p>
                   <Button variant="outline" disabled={paymentBusy || paymentChecking} onClick={() => void checkPayment()}>Проверить оплату</Button>
