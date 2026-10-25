@@ -1,4 +1,4 @@
-const FEED_VIDEO_SELECTOR = 'video[preload="metadata"]:not([controls])';
+const FEED_VIDEO_SELECTOR = 'video[preload="metadata"]:not([controls]):not([autoplay]):not([data-apix-home-preview])';
 const PRIME_TIME_SECONDS = 0.08;
 
 const registered = new WeakSet<HTMLVideoElement>();

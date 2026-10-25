@@ -1,6 +1,34 @@
 import { expect, test, type Page } from "@playwright/test";
 
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jH1sAAAAASUVORK5CYII=", "base64");
+const mp4 = Buffer.from([
+  "AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAAIZnJlZQAABGhtZGF0AAACrgYF//+q3EXpvebZSLeWLNgg2SPu73gyNjQgLSBjb3JlIDE2NCBy",
+  "MzEwOCAzMWUxOWY5IC0gSC4yNjQvTVBFRy00IEFWQyBjb2RlYyAtIENvcHlsZWZ0IDIwMDMtMjAyMyAtIGh0dHA6Ly93d3cudmlkZW9sYW4ub3JnL3gyNjQu",
+  "aHRtbCAtIG9wdGlvbnM6IGNhYmFjPTEgcmVmPTMgZGVibG9jaz0xOjA6MCBhbmFseXNlPTB4MzoweDExMyBtZT1oZXggc3VibWU9NyBwc3k9MSBwc3lfcmQ9",
+  "MS4wMDowLjAwIG1peGVkX3JlZj0xIG1lX3JhbmdlPTE2IGNocm9tYV9tZT0xIHRyZWxsaXM9MSA4eDhkY3Q9MSBjcW09MCBkZWFkem9uZT0yMSwxMSBmYXN0",
+  "X3Bza2lwPTEgY2hyb21hX3FwX29mZnNldD0tMiB0aHJlYWRzPTYgbG9va2FoZWFkX3RocmVhZHM9MSBzbGljZWRfdGhyZWFkcz0wIG5yPTAgZGVjaW1hdGU9",
+  "MSBpbnRlcmxhY2VkPTAgYmx1cmF5X2NvbXBhdD0wIGNvbnN0cmFpbmVkX2ludHJhPTAgYmZyYW1lcz0zIGJfcHlyYW1pZD0yIGJfYWRhcHQ9MSBiX2JpYXM9",
+  "MCBkaXJlY3Q9MSB3ZWlnaHRiPTEgb3Blbl9nb3A9MCB3ZWlnaHRwPTIga2V5aW50PTI1MCBrZXlpbnRfbWluPTI1IHNjZW5lY3V0PTQwIGludHJhX3JlZnJl",
+  "c2g9MCByY19sb29rYWhlYWQ9NDAgcmM9Y3JmIG1idHJlZT0xIGNyZj0yMy4wIHFjb21wPTAuNjAgcXBtaW49MCBxcG1heD02OSBxcHN0ZXA9NCBpcF9yYXRp",
+  "bz0xLjQwIGFxPTE6MS4wMACAAAAAOWWIhAA7//7jq/gU2W9cdBenIlU7RjT88Ul2zyEzccsFUPz6rlbvBltktL8gDIAAXkH+1zT0gGlqgQAAAAxBmiRsQ7/+",
+  "qZYAFNAAAAAJQZ5CeIX/ABixAAAACQGeYXRCvwAg4AAAAAkBnmNqQr8AIOEAAAASQZpoSahBaJlMCHf//qmWABTRAAAAC0GehkURLC//ABixAAAACQGepXRC",
+  "vwAg4QAAAAkBnqdqQr8AIOAAAAASQZqsSahBbJlMCHf//qmWABTQAAAAC0GeykUVLC//ABixAAAACQGe6XRCvwAg4AAAAAkBnutqQr8AIOAAAAASQZrwSahB",
+  "bJlMCG///qeEACkhAAAAC0GfDkUVLC//ABixAAAACQGfLXRCvwAg4QAAAAkBny9qQr8AIOAAAAASQZs0SahBbJlMCGf//p4QAKCAAAAAC0GfUkUVLC//ABix",
+  "AAAACQGfcXRCvwAg4AAAAAkBn3NqQr8AIOAAAAARQZt4SahBbJlMCFf//jhAAm8AAAALQZ+WRRUsL/8AGLAAAAAJAZ+1dEK/ACDhAAAACQGft2pCvwAg4QAA",
+  "BGZtb292AAAAbG12aGQAAAAAAAAAAAAAAAAAAAPoAAAD6AABAAABAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAEAAAAAAAAAA",
+  "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAADkHRyYWsAAABcdGtoZAAAAAMAAAAAAAAAAAAAAAEAAAAAAAAD6AAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAA",
+  "AAAAAAAAAAEAAAAAAAAAAAAAAAAAAEAAAAAAoAAAAPAAAAAAACRlZHRzAAAAHGVsc3QAAAAAAAAAAQAAA+gAAAQAAAEAAAAAAwhtZGlhAAAAIG1kaGQAAAAA",
+  "AAAAAAAAAAAAADIAAAAyAFXEAAAAAAAtaGRscgAAAAAAAAAAdmlkZQAAAAAAAAAAAAAAAFZpZGVvSGFuZGxlcgAAAAKzbWluZgAAABR2bWhkAAAAAQAAAAAA",
+  "AAAAAAAAJGRpbmYAAAAcZHJlZgAAAAAAAAABAAAADHVybCAAAAABAAACc3N0YmwAAAC/c3RzZAAAAAAAAAABAAAAr2F2YzEAAAAAAAAAAQAAAAAAAAAAAAAA",
+  "AAAAAAAAoADwAEgAAABIAAAAAAAAAAEVTGF2YzYwLjMxLjEwMiBsaWJ4MjY0AAAAAAAAAAAAAAAY//8AAAA1YXZjQwFkAAz/4QAYZ2QADKzZQofsBEAAAAMA",
+  "QAAADIPFCmWAAQAGaOvjyyLA/fj4AAAAABBwYXNwAAAAAQAAAAEAAAAUYnRydAAAAAAAACMAAAAjAAAAABhzdHRzAAAAAAAAAAEAAAAZAAACAAAAABRzdHNz",
+  "AAAAAAAAAAEAAAABAAAA2GN0dHMAAAAAAAAAGQAAAAEAAAQAAAAAAQAACgAAAAABAAAEAAAAAAEAAAAAAAAAAQAAAgAAAAABAAAKAAAAAAEAAAQAAAAAAQAA",
+  "AAAAAAABAAACAAAAAAEAAAoAAAAAAQAABAAAAAABAAAAAAAAAAEAAAIAAAAAAQAACgAAAAABAAAEAAAAAAEAAAAAAAAAAQAAAgAAAAABAAAKAAAAAAEAAAQA",
+  "AAAAAQAAAAAAAAABAAACAAAAAAEAAAoAAAAAAQAABAAAAAABAAAAAAAAAAEAAAIAAAAAHHN0c2MAAAAAAAAAAQAAAAEAAAAZAAAAAQAAAHhzdHN6AAAAAAAA",
+  "AAAAAAAZAAAC7wAAABAAAAANAAAADQAAAA0AAAAWAAAADwAAAA0AAAANAAAAFgAAAA8AAAANAAAADQAAABYAAAAPAAAADQAAAA0AAAAWAAAADwAAAA0AAAAN",
+  "AAAAFQAAAA8AAAANAAAADQAAABRzdGNvAAAAAAAAAAEAAAAwAAAAYnVkdGEAAABabWV0YQAAAAAAAAAhaGRscgAAAAAAAAAAbWRpcmFwcGwAAAAAAAAAAAAA",
+  "AAAtaWxzdAAAACWpdG9vAAAAHWRhdGEAAAABAAAAAExhdmY2MC4xNi4xMDA=",
+].join(""), "base64");
 const photo = { key: "fixture-photo", display_name: "Фото из каталога", credits: 5, modes: ["text", "image"], max_refs: 2, aspect_ratios: ["1:1", "9:16"], counts: [1, 2], quality_options: [{ value: "basic", label: "Обычное" }, { value: "high", label: "Высокое" }] };
 const active = { id: 21, model: "fixture-photo", mode: "image", quality: "basic", count: 1, prompt_hidden: true, base_prompt: "DO_NOT_COPY", reference_urls: ["https://media.example.test/private.png"] };
 
@@ -125,11 +153,172 @@ test("home thumbnails remove failed network and non-image media while preserving
   await page.route("https://media.example.test/**", route => { requests++; return route.request().url().includes("broken") ? route.abort() : route.fulfill({ contentType: "text/html", body: "not an image" }); });
   await page.goto("/?ux=3");
   await expect(page.getByRole("button", { name: "Создать фото", exact: true })).toBeVisible();
-  await expect(page.locator(".lilac-home img")).toHaveCount(0);
-  expect(requests).toBeGreaterThan(0); expect(requests).toBeLessThanOrEqual(3);
+  await page.locator(".lilac-preview-rail > button").first().scrollIntoViewIfNeeded();
+  await expect(page.locator(".lilac-home :is(img, video)")).toHaveCount(0);
+  expect(requests).toBeGreaterThan(0); expect(requests).toBeLessThanOrEqual(4);
   await expect(page.getByRole("button", { name: "Создать фото", exact: true }).locator("svg")).not.toHaveCount(0);
   await page.getByRole("button", { name: "Создать фото", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Фото", exact: true })).toBeVisible();
+});
+
+test("home renders live MP4 previews without starting generation", async ({ page }) => {
+  const state = await prepare(page);
+  await page.route("**/api/v1/trends?**", route => route.fulfill({ json: [{
+    id: 202,
+    kind: "video",
+    title: "Живой сценарий",
+    description: "Видео-пример",
+    preview_url: "https://media.example.test/live.mp4",
+    model: "fixture-video",
+    settings: {},
+  }] }));
+  await page.route("https://media.example.test/live.mp4", route => route.fulfill({ contentType: "video/mp4", body: mp4 }));
+  await page.goto("/?ux=3");
+
+  const tileFrame = page.getByRole("button", { name: "Оживить фото", exact: true }).locator("[data-apix-home-preview-frame]");
+  const trendCard = page.locator(".lilac-preview-rail > button").filter({ hasText: "Живой сценарий" });
+  const railFrame = trendCard.locator("[data-apix-home-preview-frame]");
+  for (const frame of [tileFrame, railFrame]) {
+    await frame.scrollIntoViewIfNeeded();
+    const video = frame.locator("video");
+    await expect(video).toBeVisible();
+    await expect.poll(() => video.evaluate((element: HTMLVideoElement) => element.readyState)).toBeGreaterThanOrEqual(1);
+    expect(await video.evaluate((element: HTMLVideoElement) => ({
+      autoPlay: element.autoplay,
+      controls: element.controls,
+      loop: element.loop,
+      muted: element.muted,
+      playsInline: element.playsInline,
+      preload: element.getAttribute("preload"),
+      videoWidth: element.videoWidth,
+    }))).toEqual({ autoPlay: true, controls: false, loop: true, muted: true, playsInline: true, preload: "metadata", videoWidth: 160 });
+    await expect.poll(() => video.evaluate((element: HTMLVideoElement) => ({
+      currentTime: element.currentTime,
+      ended: element.ended,
+      paused: element.paused,
+      stabilizerActive: element.dataset.apixPreviewActive || null,
+    }))).toMatchObject({ ended: false, paused: false, stabilizerActive: null });
+  }
+
+  await trendCard.click();
+  await expect(page.getByRole("dialog", { name: "Живой сценарий" })).toBeVisible();
+  expect(state.writes.filter(row => /generate|\/run$/.test(row.path))).toHaveLength(0);
+});
+
+test("home video previews honor reduced motion and react to preference changes", async ({ page }) => {
+  await prepare(page);
+  await page.addInitScript(() => {
+    const originalPlay = HTMLMediaElement.prototype.play;
+    let playCalls = 0;
+    Object.defineProperty(window, "__homePreviewPlayCalls", { get: () => playCalls });
+    HTMLMediaElement.prototype.play = function play() {
+      playCalls++;
+      return originalPlay.call(this);
+    };
+  });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.route("**/api/v1/trends?**", route => route.fulfill({ json: [{
+    id: 203, kind: "video", title: "Спокойный сценарий", preview_url: "https://media.example.test/reduced.mp4",
+  }] }));
+  await page.route("https://media.example.test/reduced.mp4", route => route.fulfill({ contentType: "video/mp4", body: mp4 }));
+  await page.goto("/?ux=3");
+
+  const tileFrame = page.getByRole("button", { name: "Оживить фото", exact: true }).locator("[data-apix-home-preview-frame]");
+  const railFrame = page.locator(".lilac-preview-rail [data-apix-home-preview-frame]").first();
+  await tileFrame.scrollIntoViewIfNeeded();
+  await expect(tileFrame.locator("video")).toHaveCount(1);
+  expect(await tileFrame.locator("video").evaluate((video: HTMLVideoElement) => ({ paused: video.paused, autoPlay: video.autoplay }))).toEqual({ paused: true, autoPlay: false });
+  await railFrame.scrollIntoViewIfNeeded();
+  await expect(railFrame.locator("video")).toHaveCount(1);
+  expect(await railFrame.locator("video").evaluate((video: HTMLVideoElement) => ({ paused: video.paused, autoPlay: video.autoplay }))).toEqual({ paused: true, autoPlay: false });
+  expect(await page.evaluate(() => (window as unknown as { __homePreviewPlayCalls: number }).__homePreviewPlayCalls)).toBe(0);
+  expect(await railFrame.locator("video").evaluate((video: HTMLVideoElement) => !video.dataset.apixPreviewActive)).toBe(true);
+
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await expect.poll(() => railFrame.locator("video").evaluate((video: HTMLVideoElement) => !video.paused)).toBe(true);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __homePreviewPlayCalls: number }).__homePreviewPlayCalls)).toBeGreaterThan(0);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect.poll(() => railFrame.locator("video").evaluate((video: HTMLVideoElement) => video.paused)).toBe(true);
+});
+
+test("home keeps the entire video rail dormant while it is vertically outside the viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 260 });
+  await prepare(page);
+  await page.addInitScript(() => {
+    const originalPlay = HTMLMediaElement.prototype.play;
+    let railPlayCalls = 0;
+    Object.defineProperty(window, "__homeRailPlayCalls", { get: () => railPlayCalls });
+    HTMLMediaElement.prototype.play = function play() {
+      if (this.closest(".lilac-preview-rail")) railPlayCalls++;
+      return originalPlay.call(this);
+    };
+  });
+  const trends = Array.from({ length: 4 }, (_, index) => ({
+    id: 250 + index,
+    kind: "video",
+    title: `Вертикальный сценарий ${index + 1}`,
+    preview_url: `https://media.example.test/vertical-${index + 1}.mp4`,
+  }));
+  const requested: string[] = [];
+  await page.route("**/api/v1/trends?**", route => route.fulfill({ json: trends }));
+  await page.route("https://media.example.test/vertical-*.mp4", route => {
+    requested.push(route.request().url());
+    return route.fulfill({ contentType: "video/mp4", body: mp4 });
+  });
+  await page.goto("/?ux=3");
+
+  const rail = page.locator(".lilac-preview-rail");
+  const firstFrame = rail.locator("[data-apix-home-preview-frame]").first();
+  expect(await firstFrame.evaluate(element => new Promise<boolean>(resolve => {
+    const observer = new IntersectionObserver(([entry]) => { observer.disconnect(); resolve(Boolean(entry?.isIntersecting)); });
+    observer.observe(element);
+  }))).toBe(false);
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  await expect(rail.locator("video")).toHaveCount(0);
+  expect(requested.some(url => url.endsWith("/vertical-2.mp4"))).toBe(false);
+  expect(await page.evaluate(() => (window as unknown as { __homeRailPlayCalls: number }).__homeRailPlayCalls)).toBe(0);
+
+  await firstFrame.scrollIntoViewIfNeeded();
+  await expect.poll(() => firstFrame.locator("video").evaluate((video: HTMLVideoElement) => video.currentSrc)).toContain("vertical-1.mp4");
+  await expect.poll(() => firstFrame.locator("video").evaluate((video: HTMLVideoElement) => !video.paused)).toBe(true);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __homeRailPlayCalls: number }).__homeRailPlayCalls)).toBeGreaterThan(0);
+});
+
+test("home loads and plays only viewport-visible video previews", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await prepare(page);
+  const trends = Array.from({ length: 8 }, (_, index) => ({
+    id: 300 + index,
+    kind: "video",
+    title: `Живой сценарий ${index + 1}`,
+    preview_url: `https://media.example.test/live-${index + 1}.mp4`,
+  }));
+  const requested: string[] = [];
+  await page.route("**/api/v1/trends?**", route => route.fulfill({ json: trends }));
+  await page.route("https://media.example.test/live-*.mp4", route => {
+    requested.push(route.request().url());
+    return route.fulfill({ contentType: "video/mp4", body: mp4 });
+  });
+  await page.goto("/?ux=3");
+
+  const railCards = page.locator(".lilac-preview-rail > button");
+  await expect(railCards).toHaveCount(8);
+  const first = railCards.first().locator("[data-apix-home-preview-frame]");
+  const last = railCards.last().locator("[data-apix-home-preview-frame]");
+  await first.scrollIntoViewIfNeeded();
+  await expect.poll(() => first.locator("video").evaluate((video: HTMLVideoElement) => video.currentSrc)).toContain("live-1.mp4");
+  await expect(railCards.last().locator("video")).toHaveCount(0);
+  expect(requested.some(url => url.endsWith("/live-8.mp4"))).toBe(false);
+
+  await last.scrollIntoViewIfNeeded();
+  await expect.poll(() => last.locator("video").evaluate((video: HTMLVideoElement) => video.currentSrc)).toContain("live-8.mp4");
+  await expect.poll(() => last.locator("video").evaluate((video: HTMLVideoElement) => !video.paused)).toBe(true);
+  await expect(railCards.first().locator("video")).toHaveCount(0);
+
+  await first.scrollIntoViewIfNeeded();
+  await expect.poll(() => first.locator("video").evaluate((video: HTMLVideoElement) => video.currentSrc)).toContain("live-1.mp4");
+  await expect.poll(() => first.locator("video").evaluate((video: HTMLVideoElement) => !video.paused)).toBe(true);
+  await expect(railCards.last().locator("video")).toHaveCount(0);
 });
 
 test("publication rejects an invalid manual cover address instead of resolving it as a local path", async ({ page }) => {

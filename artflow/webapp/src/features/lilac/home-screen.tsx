@@ -1,5 +1,5 @@
 import { ArrowRight, Bot, Film, ImageIcon, Library, LifeBuoy, Music2, Orbit, Shapes, Sparkles, WandSparkles } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { openTrendRunner } from "@/features/trend-runner";
 import { hasDraftInput } from "@/lib/draft-storage";
 import { readStudioBalance } from "@/lib/studio-balance";
@@ -20,23 +20,94 @@ const tasks = [
   { tab: "assistant", title: "AI-помощник", text: "Идеи, тексты и помощь с заданием", Icon: Bot },
 ] as const;
 
-function HomeThumbnail({ url, fallback = null }: { url?: string | null; fallback?: ReactNode }) {
+function useReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(() => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  useEffect(() => {
+    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const sync = () => setReduced(query.matches);
+    sync();
+    if (typeof query.addEventListener === "function") query.addEventListener("change", sync);
+    else query.addListener(sync);
+    return () => {
+      if (typeof query.removeEventListener === "function") query.removeEventListener("change", sync);
+      else query.removeListener(sync);
+    };
+  }, []);
+  return reduced;
+}
+
+function useViewportVisibility(enabled: boolean) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const element = ref.current;
+    if (!enabled || !element) { setVisible(false); return; }
+    if (typeof IntersectionObserver === "function") {
+      const observer = new IntersectionObserver(([entry]) => setVisible(Boolean(entry?.isIntersecting && entry.intersectionRatio > 0)), { root: null, threshold: 0.01 });
+      observer.observe(element);
+      return () => observer.disconnect();
+    }
+    const update = () => {
+      const rect = element.getBoundingClientRect();
+      setVisible(rect.bottom > 0 && rect.right > 0 && rect.top < window.innerHeight && rect.left < window.innerWidth);
+    };
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, { capture: true, passive: true });
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [enabled]);
+  return { ref, visible };
+}
+
+function HomeThumbnail({ url, kind, reducedMotion, fallback = null }: { url?: string | null; kind: "image" | "video"; reducedMotion: boolean; fallback?: ReactNode }) {
   const src = safeExternalUrl(url);
   const [failed, setFailed] = useState("");
-  return src && failed !== src ? <img src={src} alt="" loading="lazy" onError={() => setFailed(src)} /> : <>{fallback}</>;
+  const active = kind === "video" && Boolean(src) && failed !== src;
+  const { ref: frameRef, visible } = useViewportVisibility(active);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const shouldPlay = active && visible && !reducedMotion;
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (!shouldPlay) { video.pause(); return; }
+    let current = true;
+    const play = () => {
+      if (!current || !video.isConnected) return;
+      void video.play().catch(() => undefined);
+    };
+    video.addEventListener("canplay", play);
+    if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) play();
+    return () => {
+      current = false;
+      video.removeEventListener("canplay", play);
+      video.pause();
+    };
+  }, [shouldPlay, visible]);
+  if (!src || failed === src) return <>{fallback}</>;
+  return kind === "video"
+    ? <span ref={frameRef} className="lilac-video-frame" aria-hidden="true" data-apix-home-preview-frame="">
+        {visible && <video ref={videoRef} src={src} muted loop playsInline autoPlay={shouldPlay}
+          preload="metadata" data-apix-home-preview=""
+          onError={event => { if (event.currentTarget.isConnected && event.currentTarget.error) setFailed(src); }} />}
+      </span>
+    : <img src={src} alt="" loading="lazy" onError={() => setFailed(src)} />;
 }
 
 export function LilacHome({ data, drafts, onNavigate, onTask }: HomeProps) {
   const photoPreview = safeExternalUrl(data.feed.find(item => item.gen_type === "image")?.preview_url);
   const trendPreview = safeExternalUrl(data.trends.find(item => item.kind === "video")?.preview_url);
   const saved = drafts.filter(hasDraftInput);
+  const reducedMotion = useReducedMotion();
   return <div className="lilac-page lilac-home">
     <header className="lilac-title"><p>Ваша творческая студия</p><h1>Что создадим сегодня?</h1><span>Выберите задачу — с настройками поможем.</span></header>
     {data.user.credits === 0 && <div className="lilac-row"><span><strong>Баланс пока 0</strong><small>Можно выбрать пример и добавить фото. Перед платным запуском пополните баланс.</small></span><button className="lilac-primary" onClick={() => readStudioBalance()?.onOpen()}>Пополнить</button></div>}
     <div className="lilac-task-grid">
       {tasks.map(({ tab, title, text, Icon }, index) => <button type="button" key={tab} aria-label={title}
         className={`lilac-task lilac-task-${index}`} onClick={() => onNavigate(tab)}>
-        {index < 2 && <HomeThumbnail url={index === 0 ? photoPreview : trendPreview} />}
+        {index < 2 && <HomeThumbnail url={index === 0 ? photoPreview : trendPreview} kind={index === 0 ? "image" : "video"} reducedMotion={reducedMotion} />}
         <span className="lilac-task-icon"><Icon size={25} aria-hidden="true" /></span>
         <span className="lilac-task-copy"><strong>{title}</strong><span>{text}</span></span><ArrowRight className="lilac-task-arrow" size={19} />
       </button>)}
@@ -52,13 +123,13 @@ export function LilacHome({ data, drafts, onNavigate, onTask }: HomeProps) {
       </button>)}<p className="lilac-note">Черновики сохраняются в этой вкладке браузера.</p></section>}
     <section><div className="lilac-section-title"><h2>Повторить готовый пример</h2><button onClick={() => onNavigate("trends")}>Все шаблоны <ArrowRight size={15} /></button></div><p className="lilac-note">Выберите пример, добавьте свои материалы и подтвердите стоимость.</p>
       {data.trends.length ? <div className="lilac-preview-rail">{data.trends.slice(0, 8).map(trend => <button key={trend.id} onClick={() => openTrendRunner(trend)}>
-        <HomeThumbnail url={trend.preview_url} fallback={<Sparkles size={32} />} />
+        <HomeThumbnail url={trend.preview_url} kind={trend.kind} reducedMotion={reducedMotion} fallback={<Sparkles size={32} />} />
         <strong>{trend.title}</strong><small>{trend.kind === "video" ? "Видео" : "Фото"}</small>
       </button>)}</div> : <div className="lilac-empty"><Sparkles /><p>Готовых сценариев пока нет. Можно начать со своей идеи.</p><button className="lilac-primary" onClick={() => onNavigate("photo")}>Создать первое фото</button></div>}
     </section>
     <section><div className="lilac-section-title"><h2>Последние работы</h2><button onClick={() => onNavigate("works")}>Все проекты <ArrowRight size={15} /></button></div>
       {data.recentTasks.length ? data.recentTasks.slice(0, 3).map(task => <button key={task.id} className="lilac-row" onClick={() => onTask(task)}>
-        <span className="lilac-mini-preview"><HomeThumbnail url={task.gen_type === "image" ? firstMedia(task) : undefined} fallback={task.gen_type === "image" ? <ImageIcon /> : <Film />} /></span>
+        <span className="lilac-mini-preview"><HomeThumbnail url={task.gen_type === "image" ? firstMedia(task) : undefined} kind={task.gen_type === "image" ? "image" : "video"} reducedMotion={reducedMotion} fallback={task.gen_type === "image" ? <ImageIcon /> : <Film />} /></span>
         <span><strong>{task.prompt_hidden || task.prompt_actions_allowed === false ? "Работа по шаблону" : task.prompt || task.model}</strong><small>{generationStatusLabel(task.status)} · {formatRelativeDate(task.created_at)}</small></span><ArrowRight size={18} />
       </button>) : <p className="lilac-note">Здесь появятся ваши фото, видео и песни после первого запуска.</p>}
     </section>
