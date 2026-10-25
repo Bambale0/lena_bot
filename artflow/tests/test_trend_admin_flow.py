@@ -57,6 +57,19 @@ def test_available_models_never_returns_inactive_rows() -> None:
     assert trend_admin_flow._available_models(costs, "image") == []
 
 
+def test_available_models_never_offers_pricing_variants_as_runtime_models() -> None:
+    model_key = "bytedance/seedance-2-5"
+    assert model_key in trend_admin_flow.VIDEO_CAPS
+    costs = [
+        _cost(model_key, "video"),
+        _cost(f"{model_key}__resolution=720p", "video"),
+    ]
+
+    assert [item.model_key for item in trend_admin_flow._available_models(costs, "video")] == [
+        model_key
+    ]
+
+
 def test_category_callback_parser_accepts_existing_keyboard_payload() -> None:
     kind, category = trend_admin_flow._parse_category_callback("trends:category:featured")
 

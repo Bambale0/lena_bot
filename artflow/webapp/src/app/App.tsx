@@ -566,7 +566,11 @@ function App() {
       setData(current => current ? { ...current, user, ...(ownerChanged ? { recentTasks: [] } : {}) } : current);
       if (ownerChanged) { setTaskOpen(false); setSelectedTask(null); setBalanceOpen(false); }
       if (ownerChanged && lilac) { setLilac(false); setUx2(false); setMode("locked"); return; }
-      if (user.miniapp_ux2_available !== true) { setLilac(false); setUx2(false); setActiveTab("feed"); }
+      if (user.miniapp_ux2_available !== true) {
+        setLilac(false);
+        setUx2(false);
+        if (lilac || ux2) setActiveTab("feed");
+      }
       const core = { user, recentTasks: await api.getRecentHistory(controller.signal) };
       setData((current) => {
         if (!current) return current;
@@ -601,7 +605,7 @@ function App() {
         console.warn("Mini App core refresh failed", error);
       }
     }
-  }, [api, lilac]);
+  }, [api, lilac, ux2]);
 
   const refreshReferrals = useCallback(async () => {
     if (!api || referralsLoading) return;

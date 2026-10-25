@@ -24,10 +24,11 @@ from api.miniapp_routes import (
 )
 from api.public_files import save_public_file
 from api.trend_assets import image_kind_from_upload, sign_uploaded_asset, verify_uploaded_asset
-from bot.keyboards.models import VIDEO_CAPS
+from bot.keyboards.models import IMAGE_CAPS, VIDEO_CAPS
 from bot.utils.deep_links import build_start_payload
 from core.config import settings
 from core.gemini_omni import GEMINI_OMNI_DURATIONS, GEMINI_OMNI_VIDEO_MODEL
+from core.model_pricing import split_pricing_variant_key
 from core.trend_user_fields import (
     TrendUserFieldsError,
     normalize_configured_trend_user_fields,
@@ -134,7 +135,11 @@ def _looks_like_video(data: bytes, content_type: str) -> bool:
 
 
 async def _validated_model(session: AsyncSession, model_key: str, kind: str):
-    model = await repo.get_model_cost(session, model_key)
+    runtime_model, _options = split_pricing_variant_key(model_key)
+    caps = VIDEO_CAPS if kind == "video" else IMAGE_CAPS
+    if runtime_model not in caps:
+        raise HTTPException(status_code=422, detail="Selected model is not available")
+    model = await repo.get_model_cost(session, runtime_model)
     if not model or not getattr(model, "is_active", True):
         raise HTTPException(status_code=422, detail="Selected model is not available")
     expected = GenerationType.video if kind == "video" else GenerationType.image
@@ -143,6 +148,28 @@ async def _validated_model(session: AsyncSession, model_key: str, kind: str):
             status_code=422, detail=f"Model {model_key} does not support {kind} trends"
         )
     return model
+
+
+def _runtime_model_and_settings(trend: UserPrompt) -> tuple[str, dict[str, Any]]:
+    runtime_model, pricing_options = split_pricing_variant_key(str(trend.model or ""))
+    resolved = trend_settings(trend)
+    _merge_pricing_options(resolved, pricing_options)
+    return runtime_model, resolved
+
+
+def _merge_pricing_options(
+    settings_payload: dict[str, Any], pricing_options: dict[str, str]
+) -> None:
+    for name, raw_value in pricing_options.items():
+        if settings_payload.get(name) not in (None, ""):
+            continue
+        if name == "duration":
+            try:
+                settings_payload[name] = int(raw_value)
+            except (TypeError, ValueError):
+                settings_payload[name] = raw_value
+        else:
+            settings_payload[name] = raw_value
 
 
 async def _get_public_trend(session: AsyncSession, trend_id: int) -> UserPrompt:
@@ -156,21 +183,21 @@ async def _trend_cost_credits(session: AsyncSession, trend: UserPrompt) -> float
     if not trend.model:
         raise HTTPException(status_code=409, detail="Trend has no configured model")
     kind = trend_kind(trend)
-    settings_payload = trend_settings(trend)
+    runtime_model, settings_payload = _runtime_model_and_settings(trend)
     if kind == "video":
-        duration = _trend_video_duration(trend.model, settings_payload)
+        duration = _trend_video_duration(runtime_model, settings_payload)
         from api.wan30_contract import WAN30_MODELS, Wan30Request
         from api.wan30_launch import get_wan30_quote
 
-        if trend.model in WAN30_MODELS:
-            defaults = VIDEO_CAPS.get(trend.model, {})
+        if runtime_model in WAN30_MODELS:
+            defaults = VIDEO_CAPS.get(runtime_model, {})
             default_resolution = next(iter(defaults.get("resolutions") or []), "720p")
             default_ratio = next(iter(defaults.get("aspect_ratios") or []), "adaptive")
             try:
                 quote = await get_wan30_quote(
                     session,
                     Wan30Request(
-                        model=trend.model,
+                        model=runtime_model,
                         prompt="Trend price quote",
                         duration=duration,
                         resolution=str(settings_payload.get("resolution") or default_resolution),
@@ -183,26 +210,26 @@ async def _trend_cost_credits(session: AsyncSession, trend: UserPrompt) -> float
             return quote.credits
         model_cost = await repo.resolve_video_model_cost(
             session,
-            trend.model,
+            runtime_model,
             duration=duration,
             resolution=settings_payload.get("resolution"),
         )
         if not model_cost:
             raise HTTPException(status_code=422, detail="Model not available")
         credits = float(model_cost.credits)
-        if VIDEO_CAPS.get(trend.model, {}).get("billing_mode") == "per_second":
+        if VIDEO_CAPS.get(runtime_model, {}).get("billing_mode") == "per_second":
             credits *= duration
         return round(credits, 6)
 
     _ratio, quality = _normalize_image_request(
-        model_key=trend.model,
+        model_key=runtime_model,
         reference_urls=["trend-reference"],
         aspect_ratio=settings_payload.get("ratio"),
         quality=str(settings_payload.get("quality") or "basic"),
     )
-    model_cost = await repo.resolve_image_model_cost(session, trend.model, quality=quality)
+    model_cost = await repo.resolve_image_model_cost(session, runtime_model, quality=quality)
     if not model_cost:
-        model_cost = await repo.get_model_cost(session, trend.model)
+        model_cost = await repo.get_model_cost(session, runtime_model)
     if not model_cost or not getattr(model_cost, "is_active", True):
         raise HTTPException(status_code=422, detail="Model not available")
     return round(float(model_cost.credits), 6)
@@ -396,13 +423,14 @@ async def run_trend(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_miniapp_user),
 ) -> dict[str, Any]:
+    user_id = int(user.id)
     request_hash = _trend_request_hash(trend_id, body)
-    claim = await get_claim(session, user.id, body.idempotency_key)
+    claim = await get_claim(session, user_id, body.idempotency_key)
     if claim is not None:
         return await _existing_trend_run_response(session, user, claim, trend_id, request_hash)
     existing = await _find_idempotent_trend_run(
         session,
-        user_id=user.id,
+        user_id=user_id,
         idempotency_key=body.idempotency_key,
     )
     if existing is not None:
@@ -429,28 +457,28 @@ async def run_trend(
     kind = trend_kind(trend)
     if not trend.model:
         raise HTTPException(status_code=409, detail="Trend has no configured model")
-    await _validated_model(session, trend.model, kind)
-    asset = verify_uploaded_asset(body.asset_id, user_id=user.id, expected_kind="image")
+    runtime_model, settings_payload = _runtime_model_and_settings(trend)
+    await _validated_model(session, runtime_model, kind)
+    asset = verify_uploaded_asset(body.asset_id, user_id=user_id, expected_kind="image")
     asset["asset_id"] = body.asset_id
-    settings_payload = trend_settings(trend)
     asset_url = str(asset["url"])
 
     if kind == "video":
         request = VideoGenRequest(
-            model=trend.model,
+            model=runtime_model,
             prompt="Использовать скрытый трендовый промпт",
             prompt_id=trend.id,
             mode="image",
             image_url=asset_url,
             reference_urls=[],
-            duration=_trend_video_duration(trend.model, settings_payload),
+            duration=_trend_video_duration(runtime_model, settings_payload),
             aspect_ratio=settings_payload.get("ratio"),
             resolution=settings_payload.get("resolution"),
             trend_user_values=body.user_values,
         )
         from api.wan30_contract import WAN30_MODELS
 
-        if trend.model in WAN30_MODELS:
+        if runtime_model in WAN30_MODELS:
             quote = await quote_video_generation(request, session, user)
             if body.quoted_credits is None or round(body.quoted_credits, 6) != round(
                 float(quote["cost_credits"]), 6
@@ -465,7 +493,7 @@ async def run_trend(
             request.quoted_credits = float(quote["cost_credits"])
     else:
         request = ImageGenRequest(
-            model=trend.model,
+            model=runtime_model,
             prompt="Использовать скрытый трендовый промпт",
             prompt_id=trend.id,
             aspect_ratio=settings_payload.get("ratio"),
@@ -478,7 +506,7 @@ async def run_trend(
 
     claim, created = await reserve_claim(
         session,
-        user_id=user.id,
+        user_id=user_id,
         request_key=body.idempotency_key,
         request_hash=request_hash,
         trend_id=trend_id,
@@ -498,19 +526,40 @@ async def run_trend(
     except PreSubmitRejection:
         await session.rollback()
         await release_pre_submit_claim(
-            session, user_id=user.id, request_key=body.idempotency_key,
+            session, user_id=user_id, request_key=body.idempotency_key,
             request_hash=request_hash,
         )
-        logger.info("Trend run rejected before submit trend=%s user=%s", trend_id, user.id)
+        logger.info("Trend run rejected before submit trend=%s user=%s", trend_id, user_id)
+        raise
+    except HTTPException as exc:
+        await session.rollback()
+        if 400 <= exc.status_code < 500:
+            await release_pre_submit_claim(
+                session,
+                user_id=user_id,
+                request_key=body.idempotency_key,
+                request_hash=request_hash,
+            )
+        else:
+            claim = await get_claim(session, user_id, body.idempotency_key)
+            if claim is not None:
+                claim.status = "uncertain"
+                await session.commit()
+        logger.warning(
+            "Trend run stopped trend=%s user=%s failure=HTTPException status=%s",
+            trend_id,
+            user_id,
+            exc.status_code,
+        )
         raise
     except Exception as exc:
         await session.rollback()
-        claim = await get_claim(session, user.id, body.idempotency_key)
+        claim = await get_claim(session, user_id, body.idempotency_key)
         if claim is not None:
             claim.status = "uncertain"
             await session.commit()
         logger.warning(
-            "Trend run stopped trend=%s user=%s failure=%s", trend_id, user.id, type(exc).__name__
+            "Trend run stopped trend=%s user=%s failure=%s", trend_id, user_id, type(exc).__name__
         )
         raise
 
@@ -526,7 +575,7 @@ async def run_trend(
     claim.generation_id = task.id
     claim.status = "complete"
     await session.commit()
-    logger.info("Trend run completed trend=%s generation=%s user=%s", trend_id, task.id, user.id)
+    logger.info("Trend run completed trend=%s generation=%s user=%s", trend_id, task.id, user_id)
     await session.refresh(user)
     return {"ok": True, "task": _task_payload(task), "credits": _credits_out(user.credits)}
 
@@ -650,7 +699,8 @@ async def admin_create_trend(
     user: User = Depends(get_miniapp_user),
 ) -> dict[str, Any]:
     _require_admin(user)
-    await _validated_model(session, body.model, body.kind)
+    runtime_model, pricing_options = split_pricing_variant_key(body.model)
+    await _validated_model(session, runtime_model, body.kind)
     preview_url = _validate_preview_url(body.preview_url)
     raw_user_fields = (
         body.user_fields if body.user_fields is not None else body.settings.get("user_fields", [])
@@ -661,12 +711,13 @@ async def admin_create_trend(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     tag_settings = dict(body.settings)
     tag_settings.pop("user_fields", None)
+    _merge_pricing_options(tag_settings, pricing_options)
     try:
         trend_tags = build_trend_tags(body.kind, tag_settings)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if body.kind == "video":
-        _validate_trend_video_settings(body.model, tag_settings)
+        _validate_trend_video_settings(runtime_model, tag_settings)
     prompt = await create_prompt(
         session,
         author_id=user.id,
@@ -675,7 +726,7 @@ async def admin_create_trend(
         category=PromptCategory.photo if body.kind == "image" else PromptCategory.other,
         prompt_text=body.prompt_template.strip(),
         preview_url=preview_url,
-        model=body.model,
+        model=runtime_model,
         tags=trend_tags,
         is_public=True,
     )
@@ -700,8 +751,12 @@ async def admin_update_trend(
         raise HTTPException(status_code=404, detail="Trend not found")
     kind = trend_kind(prompt)
     if body.model is not None:
-        await _validated_model(session, body.model, kind)
-        prompt.model = body.model
+        runtime_model, pricing_options = split_pricing_variant_key(body.model)
+        await _validated_model(session, runtime_model, kind)
+        prompt.model = runtime_model
+    else:
+        runtime_model, pricing_options = split_pricing_variant_key(str(prompt.model or ""))
+        prompt.model = runtime_model
     if body.title is not None:
         prompt.title = body.title.strip()
     if body.description is not None:
@@ -723,18 +778,19 @@ async def admin_update_trend(
         except TrendUserFieldsError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    if body.settings is not None:
+    if body.settings is not None or pricing_options:
         merged_settings = trend_settings(prompt)
-        incoming_settings = dict(body.settings)
+        incoming_settings = dict(body.settings or {})
         incoming_settings.pop("user_fields", None)
         merged_settings.update(incoming_settings)
+        _merge_pricing_options(merged_settings, pricing_options)
         merged_settings.pop("user_fields", None)
         try:
             prompt.tags = build_trend_tags(kind, merged_settings)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
     if kind == "video" and (body.model is not None or body.settings is not None):
-        _validate_trend_video_settings(prompt.model, trend_settings(prompt))
+        _validate_trend_video_settings(runtime_model, trend_settings(prompt))
     await session.commit()
     await session.refresh(prompt)
     return trend_admin_payload(prompt)

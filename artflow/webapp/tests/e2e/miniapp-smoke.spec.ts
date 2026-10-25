@@ -141,6 +141,24 @@ test("renders feed-first shell without horizontal overflow", async ({ page }) =>
   expect(overflow).toBeLessThanOrEqual(2);
 });
 
+test("background account refresh preserves the ordinary user's selected tab", async ({ page }) => {
+  let historyResponses = 0;
+  page.on("response", (response) => {
+    if (new URL(response.url()).pathname === "/api/v1/history") historyResponses++;
+  });
+  await page.goto("/?tgWebAppData=test");
+  await expect.poll(() => historyResponses).toBeGreaterThan(0);
+  const photoTab = page.getByRole("tab", { name: "Фото" });
+  await photoTab.click();
+  await expect(photoTab).toHaveAttribute("aria-selected", "true");
+
+  const beforeRefresh = historyResponses;
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await expect.poll(() => historyResponses).toBeGreaterThan(beforeRefresh);
+
+  await expect(photoTab).toHaveAttribute("aria-selected", "true");
+});
+
 test("payment cabinet uses kisses wording", async ({ page }) => {
   await page.goto("/?tgWebAppData=test");
   await expect(page.getByRole("tab", { name: "Лента" })).toBeVisible();
@@ -245,6 +263,27 @@ test("retrying a trend after a lost response keeps the same request key", async 
   await dialog.getByRole("button", { name: /Создать/ }).click();
   await expect.poll(() => keys.length).toBe(2);
   expect(keys[1]).toBe(keys[0]);
+});
+
+test("trend runner shows a useful message for an empty server error", async ({ page }) => {
+  await page.route("**/api/v1/trends/upload", (route) => route.fulfill({ json: {
+    asset_id: "apixasset.server.signature", url: "https://example.test/user.jpg", kind: "image",
+  } }));
+  await page.route("**/api/v1/trends/101/run", (route) => route.fulfill({
+    status: 500, body: "", contentType: "text/plain",
+  }));
+
+  await page.goto("/?tgWebAppData=test");
+  await page.getByRole("tab", { name: "Тренды" }).click();
+  await page.getByRole("button", { name: "✨ Портреты", exact: true }).click();
+  await page.getByRole("button", { name: /Повторить/ }).first().click();
+  const dialog = page.locator("#apix-trend-runner-root").getByRole("dialog", { name: /Кинопортрет/ });
+  await dialog.locator("input[type=file]").setInputFiles({
+    name: "face.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
+  });
+
+  await expect(dialog.getByText("Не удалось запустить тренд. Попробуйте ещё раз.")).toBeVisible();
+  await expect(dialog).not.toContainText("Ошибка API 500");
 });
 
 test("stale trend price refreshes checkout and reuses the uploaded photo", async ({ page }) => {

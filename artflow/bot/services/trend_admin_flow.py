@@ -37,12 +37,12 @@ def _available_models(costs: list[Any], kind: str) -> list[Any]:
 
     kind = "video" if str(kind).lower() == "video" else "image"
     active = [item for item in costs if _active(item)]
-    exact = [item for item in active if _generation_type_value(item) == kind]
-    if exact:
-        return exact
-
     caps = VIDEO_CAPS if kind == "video" else IMAGE_CAPS
-    return [item for item in active if _model_key(item) in caps]
+    return [
+        item
+        for item in active
+        if _generation_type_value(item) in {"", kind} and _model_key(item) in caps
+    ]
 
 
 def _parse_category_callback(value: str | None) -> tuple[str | None, str | None]:
