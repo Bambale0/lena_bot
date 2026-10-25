@@ -15,6 +15,13 @@ export interface ModelCost { id: number; model_key: string; gen_type: string; di
 export interface PricePlan { id: number; key: string; label: string; credits: number; price_rub: number; price_stars: number | null; sort_order: number; is_active: boolean; }
 export interface Pricing { models: ModelCost[]; price_plans: PricePlan[]; }
 export interface AdminPrompt { id: number; title: string; prompt_text?: string; description?: string; model?: string; status: string; is_mine?: boolean; }
+export interface WanRoute { model_key: string; policy: "neironych_kie" | "neironych_only" | "kie_only"; neironych_model_id: string; revision: number; source: string; updated_by_admin_tg_id: number | null; credential_configured?: boolean; }
+export interface QwenRoute { mode: string; primary_provider: "neironych" | "kie"; backup_provider: "neironych" | "kie" | null; source: string; updated_by_admin_tg_id: number | null; }
+export interface NanoRoute { model_key: string; primary_provider: "neironych" | "nexus"; source: string; updated_by_admin_tg_id: number | null; }
+export interface RecoveryPolicy { provider: string; auto_refund_seconds: number; source: string; updated_by_admin_tg_id: number | null; }
+export interface SupplierReview { generation_id: number; user_id: number; model: string; provider?: string; state: string; original_task_id: string | null; provider_task_id: string | null; refunded_at: string | null; last_provider_status: string | null; next_check_at?: string | null; checks?: number | null; }
+export interface SupplierSettlement { generation_id: number; review_state: string; customer_balance_unchanged: boolean; }
+export interface TributeProduct { product_id: number; plan_key: string; payment_url: string; currency: "usd"; amount_minor: number; credits: number; amount_rub: number; enabled: boolean; revision: number; }
 
 export class AdminSession {
   readonly ownerId: number;

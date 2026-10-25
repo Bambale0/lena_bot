@@ -29,6 +29,7 @@ import { LilacLibrary, type LibraryPrompt } from "@/features/lilac/library-scree
 import { LilacAssistant } from "@/features/lilac/assistant-screen";
 import { LilacHelp, LilacBilling } from "@/features/lilac/account-screens";
 import { LilacOwner } from "@/features/lilac/owner-screen";
+import { LilacAdminSystemPanel } from "@/features/lilac/admin/system-panel";
 import { LilacAccountEditor } from "@/features/lilac/account-editor";
 import { LilacImageSeries } from "@/features/lilac/image-series";
 import { lilacRequested } from "@/lib/lilac";
@@ -66,7 +67,7 @@ import type {
 import { firstMedia, isPendingTask, safeExternalUrl } from "@/lib/utils";
 import { saveDownload } from "@/lib/download";
 
-window.__APIX_MINIAPP_BUILD_ID__ = "20261024-studio-central-create-capabilities";
+window.__APIX_MINIAPP_BUILD_ID__ = "20261025-studio-system-settings-r1";
 
 type FeedSource = "recent" | "top_day" | "top";
 type VideoQuote = Awaited<ReturnType<MiniAppApi["quoteVideo"]>>;
@@ -1182,7 +1183,7 @@ function App() {
       }} />;
       if (activeTab === "help") return <LilacHelp api={api} onNavigate={setActiveTab} />;
       if (activeTab === "billing") return <LilacBilling api={api} user={data.user} onTopup={() => setBalanceOpen(true)} />;
-      if (activeTab === "owner" && data.user.miniapp_ux2_available === true) return <LilacOwner key={data.user.id} api={api} ownerId={data.user.id} />;
+      if (activeTab === "owner" && data.user.miniapp_ux2_available === true) return <LilacOwner key={data.user.id} api={api} ownerId={data.user.id} systemPanel={<LilacAdminSystemPanel api={api} ownerId={data.user.id} />} />;
       if (activeTab === "account") return <LilacAccountEditor key={data.user.id} api={api} ownerId={data.user.id} onSaved={() => void refreshCore()} />;
     }
     if (ux2 && activeTab === "create") {
