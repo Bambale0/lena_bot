@@ -114,6 +114,13 @@ test("curated sufficient balance never confirms an unrelated pending invoice", a
 
 test("global held preflight adopts the inline invoice created while its cabinet was closed", async ({ page }) => {
   const state = await prepare(page, 0);
+  let releaseInvoice!: () => void;
+  const invoiceResponse = new Promise<void>(resolve => { releaseInvoice = resolve; });
+  await page.route("**/api/v1/topup/tbank", async route => {
+    state.payments++;
+    await invoiceResponse;
+    await route.fulfill({ json: { transaction_id: 55, pay_url: "https://example.test/pay" } });
+  });
   await page.goto("/?ux=3&startapp=trend_101");
   const runner = page.locator("#apix-trend-runner-root").getByRole("dialog");
   await expect(runner.getByRole("button", { name: /Пополнить здесь/ })).toBeEnabled();
@@ -132,6 +139,10 @@ test("global held preflight adopts the inline invoice created while its cabinet 
   await cabinet.getByRole("button", { name: "Закрыть", exact: true }).click();
   await runner.getByRole("button", { name: /Пополнить здесь/ }).click();
   await expect.poll(() => state.payments).toBe(1);
+  // Receipt of the POST is not completion of its response-derived identity.
+  expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem("apix:pending-topup:v1:7")!).transactionId)).toBeNull();
+  releaseInvoice();
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("apix:pending-topup:v1:7")!).transactionId)).toBe(55);
   const marker = await page.evaluate(() => sessionStorage.getItem("apix:pending-topup:v1:7"));
   expect(JSON.parse(marker!)).toMatchObject({ transactionId: 55 });
   release();
@@ -141,6 +152,7 @@ test("global held preflight adopts the inline invoice created while its cabinet 
   await expect(cabinet.getByRole("button", { name: /Оплатить через/ })).toBeDisabled();
   expect(state.payments).toBe(1);
   expect(await page.evaluate(() => sessionStorage.getItem("apix:pending-topup:v1:7"))).toBe(marker);
+  expect(state.runs).toHaveLength(0);
 });
 
 for (const entry of ["global", "curated", "feed"] as const) {
