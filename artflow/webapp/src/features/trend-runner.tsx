@@ -7,7 +7,7 @@ import { TaskDetailSheet } from "@/components/task-detail-sheet";
 import { Button } from "@/components/ui/button";
 import { Sheet } from "@/components/ui/sheet";
 import { readStudioBalance, subscribeStudioBalance } from "@/lib/studio-balance";
-import { clearPendingTopup, readPendingTopup, savePendingTopup, sameTopupAttempt } from "@/lib/topup-recovery";
+import { clearPendingTopup, readPendingTopup, savePendingTopup, sameTopupAttempt, revokePaymentAccess, subscribePaymentAccessRevoked } from "@/lib/topup-recovery";
 import { canReopenPayment, paymentFromResponse, paymentResolution, type RepeatPayment, type PaymentProvider } from "@/features/feed-repeat-payment";
 import { isPinterestServiceTrend } from "@/features/pinterest-service";
 import type { GenerationTask, TrendItem, TrendUserField } from "@/lib/types";
@@ -635,6 +635,11 @@ function TrendRunnerPortal() {
     setTrend(null);
   }, [busy, paymentWaiting, paymentBusy, resetRunner]);
 
+  useLayoutEffect(() => subscribePaymentAccessRevoked(actorId => {
+    if (paymentOwner.current !== actorId && previousBalance.current?.actorId !== actorId) return;
+    resetRunner(); setTrend(null); setTaskOpen(false); setSelectedTask(null);
+  }), [resetRunner]);
+
   const showTrend = useCallback((next: TrendPublic) => {
     if (heldTrend.current && (paymentRef.current || heldTrend.current.id === next.id)) {
       setTrend(heldTrend.current);
@@ -685,6 +690,12 @@ function TrendRunnerPortal() {
       return quote;
     } catch (checkoutError) {
       if (sequence !== checkoutSequence.current) return null;
+      if (checkoutError instanceof TrendApiError && [401, 403].includes(checkoutError.status)) {
+        const owner = paymentOwner.current ?? readStudioBalance()?.actorId;
+        if (owner) revokePaymentAccess(owner);
+        else { resetRunner(); setTrend(null); }
+        return null;
+      }
       setCheckout(null);
       if (!quiet) {
         toast.error(checkoutError instanceof Error ? checkoutError.message : "Не удалось получить стоимость");
@@ -693,7 +704,7 @@ function TrendRunnerPortal() {
     } finally {
       if (!quiet && sequence === checkoutSequence.current) setCheckoutBusy(false);
     }
-  }, [duration]);
+  }, [duration, resetRunner]);
 
   useLayoutEffect(() => {
     const previous = previousBalance.current;
@@ -733,10 +744,24 @@ function TrendRunnerPortal() {
 
   useEffect(() => {
     if (!trend?.id) return;
-    void apiJson<string[]>("/payment-methods")
-      .then((methods) => setPaymentMethods(Array.isArray(methods) ? methods : []))
-      .catch(() => setPaymentMethods([]));
-  }, [trend?.id]);
+    const sequence = operationSequence.current;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 15_000);
+    void apiJson<string[]>("/payment-methods", { signal: controller.signal })
+      .then((methods) => {
+        if (sequence === operationSequence.current && !controller.signal.aborted) setPaymentMethods(Array.isArray(methods) ? methods : []);
+      }).catch(error => {
+        if (sequence !== operationSequence.current || controller.signal.aborted) return;
+        if (error instanceof TrendApiError && [401, 403].includes(error.status)) {
+          const owner = paymentOwner.current ?? readStudioBalance()?.actorId;
+          if (owner) revokePaymentAccess(owner);
+          else { resetRunner(); setTrend(null); }
+          return;
+        }
+        setPaymentMethods([]);
+      }).finally(() => window.clearTimeout(timeout));
+    return () => { controller.abort(); window.clearTimeout(timeout); };
+  }, [trend?.id, resetRunner]);
 
   const checkPayment = useCallback(async (quiet = false) => {
     const payment = paymentRef.current;
@@ -764,7 +789,10 @@ function TrendRunnerPortal() {
         setPaymentChecked(payment);
         setError("Платёж пока не подтверждён. Проверь его позже или обратись в поддержку. Достаточный баланс не подтверждает оплату этого счёта.");
       }
-    } catch {
+    } catch (error) {
+      if (sequence === operationSequence.current && error instanceof TrendApiError && [401, 403].includes(error.status)) {
+        revokePaymentAccess(owner); return;
+      }
       if (sequence === operationSequence.current && !quiet) setError("Не удалось проверить оплату. Повтори проверку позже; новая оплата не создаётся.");
     } finally {
       window.clearTimeout(timeout);
@@ -823,6 +851,9 @@ function TrendRunnerPortal() {
       toast.info("Оплата открыта. После возвращения проверь её статус.");
     } catch (paymentError) {
       if (sequence !== operationSequence.current) return;
+      if (paymentError instanceof TrendApiError && [401, 403].includes(paymentError.status)) {
+        revokePaymentAccess(owner); return;
+      }
       if (paymentError instanceof TrendApiError && paymentError.status >= 400 && paymentError.status < 500 && paymentError.status !== 408) {
         if (clearPendingTopup(paymentStorage(), owner, pending)) { paymentRef.current = null; setPaymentWaiting(false); }
       }

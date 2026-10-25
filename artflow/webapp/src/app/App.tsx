@@ -34,7 +34,7 @@ import { LilacAccountEditor } from "@/features/lilac/account-editor";
 import { LilacImageSeries } from "@/features/lilac/image-series";
 import { lilacRequested } from "@/lib/lilac";
 import { publishStudioBalance } from "@/lib/studio-balance";
-import { clearPendingTopup, readPendingTopup, savePendingTopup, sameTopupAttempt } from "@/lib/topup-recovery";
+import { clearPendingTopup, readPendingTopup, savePendingTopup, sameTopupAttempt, revokePaymentAccess, subscribePaymentAccessRevoked } from "@/lib/topup-recovery";
 import { isInsufficientCreditError } from "@/lib/credit-recovery";
 import { creditErrorToast } from "@/lib/credit-error-toast";
 import { canReopenPayment, paymentFromResponse, paymentResolution, type RepeatPayment } from "@/features/feed-repeat-payment";
@@ -220,7 +220,7 @@ function App() {
   const draftOwner = useRef<number | null>(null);
   const submissionLock = useRef(false);
   const latestActor = useRef<number | null>(null);
-  latestActor.current = data?.user.id ?? null;
+  latestActor.current = mode === "live" ? data?.user.id ?? null : null;
 
   const [selectedTask, setSelectedTask] = useState<GenerationTask | null>(null);
   const [taskOpen, setTaskOpen] = useState(false);
@@ -300,6 +300,16 @@ function App() {
   latestOperations.current = submitting || Boolean(referenceUploadingKind || videoUploadingKind);
   const processedStartParam = useRef("");
   const refreshAbortRef = useRef<AbortController | null>(null);
+  useLayoutEffect(() => subscribePaymentAccessRevoked(actorId => {
+    if (latestActor.current !== actorId) return;
+    latestActor.current = null;
+    topupAbort.current?.abort(); topupCheckAbort.current?.abort(); refreshAbortRef.current?.abort();
+    pendingTopupRef.current = null; setPendingTopup(null); setTopupChecked(null);
+    setLilac(false); setUx2(false); setTaskOpen(false); setSelectedTask(null); setBalanceOpen(false);
+    setData(null); setApi(null);
+    publishStudioBalance(null);
+    setErrorMessage("Сессия недоступна. Откройте приложение заново из бота."); setMode("locked");
+  }), []);
 
   const hydrateDraftDefaults = useCallback((bootstrap: BootstrapData, preview: boolean) => {
     if (draftOwner.current === bootstrap.user.id) return;
@@ -1094,7 +1104,7 @@ function App() {
   }, [api, videoPromptBusy]);
 
   const pay = useCallback(async (provider: "tbank" | "crypto" | "tribute" | "lava", plan: PaymentPlan) => {
-    if (!api || !data || paymentRequest.current) return;
+    if (!api || !data || latestActor.current !== data.user.id || paymentRequest.current) return;
     const owner = data.user.id;
     if (pendingTopupRef.current || readPendingTopup(topupStorage(), owner)) return;
     paymentRequest.current = true; setPaymentBusy(true); setPaymentError("");
@@ -1109,12 +1119,20 @@ function App() {
       setData(current => current?.user.id === owner ? { ...current, paymentPlans: plans, paymentMethods: providers, lavaPlanKeys: keys } : current);
       if (!fresh || !providers.includes(provider) || !supportsPlan(provider, fresh, keys)) throw new Error("Этот способ оплаты больше не доступен для пакета. Выберите другой.");
       if (fresh.credits !== plan.credits || checkoutPrice(provider, fresh) !== checkoutPrice(provider, plan)) throw new Error("Условия пакета изменились. Проверьте новую цену и количество кредитов перед оплатой.");
+      // Another entry can create an invoice while this cabinet awaits preflight.
+      // Adopt it; checking and claiming below must have no asynchronous gap.
+      const existing = readPendingTopup(topupStorage(), owner);
+      if (existing) {
+        pendingTopupRef.current = existing; setPendingTopup(existing); setTopupChecked(null);
+        return;
+      }
       const pending: RepeatPayment = { startedAt: Date.now(), provider, planKey: plan.key, transactionId: null, checkoutUrl: null };
       if (!savePendingTopup(topupStorage(), owner, pending)) throw new Error("Не удалось сохранить защиту оплаты. Разрешите хранилище браузера и повторите попытку.");
       pendingTopupRef.current = pending; setPendingTopup(pending); setTopupChecked(null);
       let result: Record<string, unknown>;
       try { result = await api.createPayment(provider, plan.key, controller.signal); }
       catch (error) {
+        if (error instanceof ApiError && [401, 403].includes(error.status)) throw error;
         if (error instanceof ApiError && error.status >= 400 && error.status < 500 && error.status !== 408) {
           if (clearPendingTopup(topupStorage(), owner, pending) && latestActor.current === owner) { pendingTopupRef.current = null; setPendingTopup(null); }
         }
@@ -1128,6 +1146,9 @@ function App() {
       if (!url) throw new Error("Платёжная ссылка не получена");
       openExternalUrl(url);
     } catch (error) {
+      if (latestActor.current === owner && error instanceof ApiError && [401, 403].includes(error.status)) {
+        revokePaymentAccess(owner); return;
+      }
       if (latestActor.current === owner) setPaymentError(controller.signal.aborted ? "Время ожидания истекло. Если счёт уже отправлен, проверьте оплату перед новой попыткой." : error instanceof Error ? error.message : "Не удалось создать платёж. Проверьте историю платежей перед повтором.");
     } finally {
       window.clearTimeout(timeout);
@@ -1158,6 +1179,9 @@ function App() {
         void refreshCore();
       }
     } catch (error) {
+      if (latestActor.current === owner && error instanceof ApiError && [401, 403].includes(error.status)) {
+        revokePaymentAccess(owner); return;
+      }
       if (latestActor.current === owner && pendingTopupRef.current === pending) setPaymentError(error instanceof Error ? error.message : "Не удалось проверить оплату");
     } finally { window.clearTimeout(timeout); if (topupCheckAbort.current === controller) topupCheckAbort.current = null; if (latestActor.current === owner) setTopupChecking(false); }
   };

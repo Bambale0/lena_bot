@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Sheet } from "@/components/ui/sheet";
 import { readStudioBalance, subscribeStudioBalance } from "@/lib/studio-balance";
-import { clearPendingTopup, readPendingTopup, savePendingTopup, sameTopupAttempt } from "@/lib/topup-recovery";
+import { clearPendingTopup, readPendingTopup, savePendingTopup, sameTopupAttempt, revokePaymentAccess, subscribePaymentAccessRevoked } from "@/lib/topup-recovery";
 import type { FeedItem, GenerationTask, ModelInfo } from "@/lib/types";
 import { notifyHaptic, openExternalUrl } from "@/lib/telegram";
 import { cn, firstMedia, safeExternalUrl } from "@/lib/utils";
@@ -231,6 +231,8 @@ function FeedRemixRunnerPortal() {
   const [historyChecked, setHistoryChecked] = useState(false);
   const [historySummary, setHistorySummary] = useState("");
   const paymentInFlight = useRef(false);
+  const paymentAbort = useRef<AbortController | null>(null);
+  const paymentCheckAbort = useRef<AbortController | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const allModels = useMemo(() => [...imageModels, ...videoModels], [imageModels, videoModels]);
@@ -384,6 +386,18 @@ function FeedRemixRunnerPortal() {
     pendingRemix = null;
   }, []);
 
+  useLayoutEffect(() => {
+    const unsubscribe = subscribePaymentAccessRevoked(actorId => {
+      if (activeScope.current?.actorId !== actorId) return;
+      paymentAbort.current?.abort(); paymentCheckAbort.current?.abort();
+      quoteRequestSequence.current++; openSequence.current++;
+      activeScope.current = null;
+      cancelPending("Сессия недоступна. Откройте повтор заново.");
+      resetForm(null);
+    });
+    return () => { unsubscribe(); paymentAbort.current?.abort(); paymentCheckAbort.current?.abort(); };
+  }, [cancelPending, resetForm]);
+
   const loadModels = useCallback(async () => {
     if (modelsLoading || (imageModels.length && videoModels.length)) return;
     setModelsLoading(true);
@@ -509,6 +523,9 @@ function FeedRemixRunnerPortal() {
       return latest;
     } catch (quoteError) {
       if (requestSequence === quoteRequestSequence.current) {
+        if (quoteError instanceof FeedApiError && [401, 403].includes(quoteError.status) && activeScope.current) {
+          revokePaymentAccess(activeScope.current.actorId); return null;
+        }
         setQuote(null);
         setQuotedBody("");
         if (!quiet) setError(quoteError instanceof Error ? quoteError.message : "Не удалось получить стоимость");
@@ -524,6 +541,7 @@ function FeedRemixRunnerPortal() {
     previousBalance.current = balance;
     if (!item) return;
     if (previous && (!balance || previous.actorId !== balance.actorId)) {
+      paymentAbort.current?.abort(); paymentCheckAbort.current?.abort();
       quoteRequestSequence.current++;
       openSequence.current++;
       activeScope.current = null;
@@ -570,6 +588,7 @@ function FeedRemixRunnerPortal() {
     paymentCheckInFlight.current = true;
     setPaymentChecking(true);
     const controller = new AbortController();
+    paymentCheckAbort.current = controller;
     const timeout = window.setTimeout(() => controller.abort(), 15_000);
     void refreshQuote(item.id, requestBody, requestBodyKey, true);
     try {
@@ -603,9 +622,13 @@ function FeedRemixRunnerPortal() {
           : "Статус этой оплаты пока нельзя подтвердить. Проверьте операцию у платёжного сервиса или обратитесь в поддержку. Новая оплата не создаётся.");
       }
     } catch (checkError) {
+      if (activeScope.current === scope && checkError instanceof FeedApiError && [401, 403].includes(checkError.status)) {
+        revokePaymentAccess(scope.actorId); return;
+      }
       if (!quiet && activeScope.current === scope) setError(checkError instanceof Error ? checkError.message : "Не удалось проверить оплату. Попробуйте позже.");
     } finally {
       window.clearTimeout(timeout);
+      if (paymentCheckAbort.current === controller) paymentCheckAbort.current = null;
       paymentCheckInFlight.current = false;
       if (activeScope.current === scope) setPaymentChecking(false);
     }
@@ -660,11 +683,13 @@ function FeedRemixRunnerPortal() {
     setPaymentBusy(true);
     setError("");
     const controller = new AbortController();
+    paymentAbort.current = controller;
     const timeout = window.setTimeout(() => controller.abort(), 45_000);
     try {
       const response = await apiJson<Record<string, unknown>>(`/topup/${provider}`, {
         method: "POST", body: JSON.stringify({ plan_key: plan.key }), signal: controller.signal,
       });
+      if (controller.signal.aborted) return;
       const nextPayment = paymentFromResponse(pending, response);
       // Preserve the returned same-checkout URL before Telegram or the browser can leave this page.
       const liveScope = activeScope.current;
@@ -687,12 +712,16 @@ function FeedRemixRunnerPortal() {
       toast.success("Оплата открыта — вернись сюда после зачисления");
     } catch (payError) {
       if (activeScope.current === scope) {
+        if (payError instanceof FeedApiError && [401, 403].includes(payError.status)) {
+          revokePaymentAccess(scope.actorId); return;
+        }
         const message = payError instanceof Error ? payError.message : "Не удалось открыть оплату";
         setError(`${message} Проверьте текущую оплату: новый счёт не создаётся.`);
         toast.error(message);
       }
     } finally {
       window.clearTimeout(timeout);
+      if (paymentAbort.current === controller) paymentAbort.current = null;
       paymentInFlight.current = false;
       if (activeScope.current === scope) setPaymentBusy(false);
     }

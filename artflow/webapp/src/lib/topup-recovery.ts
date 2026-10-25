@@ -4,6 +4,17 @@ type StoragePort = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 const key = (actorId: number) => `apix:pending-topup:v1:${actorId}`;
 const unknownPayment = (): RepeatPayment => ({ startedAt: 0, provider: null, planKey: null, transactionId: null, checkoutUrl: null });
 
+// Independent mounted roots must revoke the same actor synchronously. This is
+// only a lifetime notification, never a payment receipt or persisted auth state.
+const accessListeners = new Set<(actorId: number) => void>();
+export function subscribePaymentAccessRevoked(listener: (actorId: number) => void) {
+  accessListeners.add(listener);
+  return () => { accessListeners.delete(listener); };
+}
+export function revokePaymentAccess(actorId: number) {
+  accessListeners.forEach(listener => listener(actorId));
+}
+
 export function sameTopupAttempt(first: RepeatPayment, second: RepeatPayment): boolean {
   return first.startedAt === second.startedAt && first.provider === second.provider
     && first.planKey === second.planKey && first.transactionId === second.transactionId;

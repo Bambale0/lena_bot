@@ -112,6 +112,129 @@ test("curated sufficient balance never confirms an unrelated pending invoice", a
   expect(state.runs).toHaveLength(0); expect(state.payments).toBe(1);
 });
 
+test("global held preflight adopts the inline invoice created while its cabinet was closed", async ({ page }) => {
+  const state = await prepare(page, 0);
+  await page.goto("/?ux=3&startapp=trend_101");
+  const runner = page.locator("#apix-trend-runner-root").getByRole("dialog");
+  await expect(runner.getByRole("button", { name: /Пополнить здесь/ })).toBeEnabled();
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  let preflight = false;
+  await page.route("**/api/v1/plans", async route => {
+    preflight = true;
+    await held;
+    await route.fulfill({ json: [{ key: "small", title: "Пакет", credits: 100, price_rub: 200 }] });
+  });
+  await runner.getByRole("button", { name: "Пополнить", exact: true }).click();
+  const cabinet = page.getByRole("dialog", { name: "Кабинет оплаты" });
+  await cabinet.getByRole("button", { name: /Оплатить через/ }).click();
+  await expect.poll(() => preflight).toBe(true);
+  await cabinet.getByRole("button", { name: "Закрыть", exact: true }).click();
+  await runner.getByRole("button", { name: /Пополнить здесь/ }).click();
+  await expect.poll(() => state.payments).toBe(1);
+  const marker = await page.evaluate(() => sessionStorage.getItem("apix:pending-topup:v1:7"));
+  expect(JSON.parse(marker!)).toMatchObject({ transactionId: 55 });
+  release();
+  await runner.getByRole("button", { name: "Закрыть", exact: true }).click();
+  await page.getByRole("button", { name: "Баланс — Пополнить" }).click();
+  await expect(cabinet.getByRole("button", { name: "Проверить оплату", exact: true })).toBeEnabled();
+  await expect(cabinet.getByRole("button", { name: /Оплатить через/ })).toBeDisabled();
+  expect(state.payments).toBe(1);
+  expect(await page.evaluate(() => sessionStorage.getItem("apix:pending-topup:v1:7"))).toBe(marker);
+});
+
+for (const entry of ["global", "curated", "feed"] as const) {
+  for (const boundary of ["invoice", "history", "preflight"] as const) {
+    for (const status of [401, 403]) test(`${entry} direct ${boundary} ${status} revokes payment access and preserves submitted attempts`, async ({ page }) => {
+      const state = await prepare(page, 0);
+      await page.goto(entry === "curated" ? "/?ux=3&startapp=trend_101" : entry === "feed" ? "/?ux=3&feed=201" : "/?ux=3");
+      if (entry === "global") await page.getByRole("button", { name: "Баланс — Пополнить" }).click();
+      const dialog = entry === "global" ? page.getByRole("dialog", { name: "Кабинет оплаты" })
+        : page.locator(entry === "curated" ? "#apix-trend-runner-root" : "#apix-feed-remix-runner-root").getByRole("dialog");
+      if (entry === "feed") {
+        await expect(dialog.locator("input[type=file]")).toBeEnabled();
+        await dialog.locator("input[type=file]").setInputFiles(photo);
+      }
+      const pay = dialog.getByRole("button", { name: entry === "global" ? /Оплатить через/ : /Пополнить здесь/ });
+      await expect(pay).toBeEnabled();
+      const endpoint = boundary === "history" ? "**/api/web/billing/transactions?limit=100"
+        : boundary === "invoice" ? "**/api/v1/topup/tbank"
+        : entry === "global" ? "**/api/v1/plans"
+        : entry === "curated" ? "**/api/v1/trends/101/checkout**" : "**/api/v1/feed/201/remix/quote";
+      let rejected = 0;
+      await page.route(endpoint, route => {
+        rejected++;
+        if (boundary === "invoice") state.payments++;
+        return route.fulfill({ status, json: { detail: "Session access revoked" } });
+      });
+      if (boundary === "preflight" && entry !== "global") {
+        await dialog.getByRole("button", { name: "Пополнить", exact: true }).click();
+        await page.getByRole("dialog", { name: "Кабинет оплаты" }).getByRole("button", { name: "Закрыть", exact: true }).click();
+      } else {
+        await pay.click();
+        if (boundary === "history") await dialog.getByRole("button", { name: "Проверить оплату", exact: true }).click();
+      }
+      await expect.poll(() => rejected).toBeGreaterThan(0);
+      await expect(page.locator('[data-ui-version="3"]')).toHaveCount(0);
+      await expect(dialog).not.toBeVisible();
+      await expect(page.getByText("Сессия недоступна. Откройте приложение заново из бота.", { exact: true })).toBeVisible();
+      // A fresh successful /me poll cannot resurrect the revoked payment lifetime.
+      await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+      await expect(page.getByRole("button", { name: "Баланс — Пополнить" })).toHaveCount(0);
+      const marker = await page.evaluate(() => sessionStorage.getItem("apix:pending-topup:v1:7"));
+      if (boundary === "preflight") { expect(marker).toBeNull(); expect(state.payments).toBe(0); }
+      else { expect(marker).not.toBeNull(); expect(state.payments).toBe(1); }
+      expect(state.runs).toHaveLength(0);
+    });
+  }
+}
+
+test("curated direct payment-methods 403 revokes before invoice creation", async ({ page }) => {
+  const state = await prepare(page, 0);
+  await page.goto("/?ux=3");
+  await expect(page.getByRole("button", { name: /Кинопортрет/ })).toBeVisible();
+  await page.route("**/api/v1/payment-methods", route => route.fulfill({ status: 403, json: { detail: "Forbidden" } }));
+  await page.getByRole("button", { name: /Кинопортрет/ }).click();
+  await expect(page.locator('[data-ui-version="3"]')).toHaveCount(0);
+  await expect(page.locator("#apix-trend-runner-root").getByRole("dialog")).not.toBeVisible();
+  expect(state.payments).toBe(0);
+  expect(await page.evaluate(() => sessionStorage.getItem("apix:pending-topup:v1:7"))).toBeNull();
+});
+
+test("inline auth revocation cancels held global preflight and fresh login retains the unresolved invoice", async ({ page }) => {
+  const state = await prepare(page, 0);
+  await page.goto("/?ux=3&startapp=trend_101");
+  const runner = page.locator("#apix-trend-runner-root").getByRole("dialog");
+  await expect(runner.getByRole("button", { name: /Пополнить здесь/ })).toBeEnabled();
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  let preflight = false;
+  await page.route("**/api/v1/plans", async route => {
+    preflight = true; await held;
+    await route.fulfill({ json: [{ key: "small", title: "Пакет", credits: 100, price_rub: 200 }] }).catch(() => {});
+  });
+  await page.route("**/api/v1/topup/tbank", route => { state.payments++; return route.fulfill({ status: 403, json: { detail: "Forbidden" } }); });
+  await runner.getByRole("button", { name: "Пополнить", exact: true }).click();
+  const cabinet = page.getByRole("dialog", { name: "Кабинет оплаты" });
+  await cabinet.getByRole("button", { name: /Оплатить через/ }).click();
+  await expect.poll(() => preflight).toBe(true);
+  await cabinet.getByRole("button", { name: "Закрыть", exact: true }).click();
+  await runner.getByRole("button", { name: /Пополнить здесь/ }).click();
+  await expect(page.getByRole("button", { name: "Проверить снова", exact: true })).toBeVisible();
+  const marker = await page.evaluate(() => sessionStorage.getItem("apix:pending-topup:v1:7"));
+  expect(marker).not.toBeNull();
+  release();
+  await page.unroute("**/api/v1/plans");
+  await page.unroute("**/api/v1/topup/tbank");
+  await page.getByRole("button", { name: "Проверить снова", exact: true }).click();
+  await page.getByRole("button", { name: "Баланс — Пополнить" }).click();
+  await expect(cabinet.getByRole("button", { name: /Оплатить через/ })).toBeDisabled();
+  await expect(cabinet.getByRole("button", { name: "Проверить оплату", exact: true })).toBeEnabled();
+  expect(state.payments).toBe(1);
+  expect(await page.evaluate(() => sessionStorage.getItem("apix:pending-topup:v1:7"))).toBe(marker);
+  expect(state.runs).toHaveLength(0);
+});
+
 test("global lost invoice response stays guarded across cancel and reload", async ({ page }) => {
   const state = await prepare(page, 0);
   await page.setViewportSize({ width: 320, height: 844 });
