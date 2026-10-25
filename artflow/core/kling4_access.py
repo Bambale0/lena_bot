@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from fastapi import HTTPException
 from sqlalchemy import select
 
@@ -36,10 +38,27 @@ async def visible_model_costs(session, costs, user=None):
     return [cost for cost in costs if visible or not is_kling4_key(cost.model_key)]
 
 
-async def set_kling4_access(session, audience: str, *, admin_tg_id: int, source: str) -> str:
-    if admin_tg_id not in settings.ADMIN_IDS:
-        raise HTTPException(status_code=403, detail="Administrator required")
-    if audience not in {"admin", "public", "disabled"} or source not in {"web", "bot"}:
+async def set_kling4_access(
+    session,
+    audience: str,
+    *,
+    admin_tg_id: int | None = None,
+    source: str,
+    operator_identity: str | None = None,
+) -> str:
+    if audience not in {"admin", "public", "disabled"}:
+        raise ValueError("Invalid Kling 4 rollout policy")
+    if source in {"web", "bot"}:
+        if admin_tg_id not in settings.ADMIN_IDS:
+            raise HTTPException(status_code=403, detail="Administrator required")
+        if operator_identity is not None:
+            raise ValueError("Authenticated admin changes cannot name an ops actor")
+    elif source == "ops":
+        identity = str(operator_identity or "").strip()
+        if admin_tg_id is not None or not re.fullmatch(r"[A-Za-z0-9_.:@-]{3,128}", identity):
+            raise ValueError("Trusted ops identity is required")
+        operator_identity = identity
+    else:
         raise ValueError("Invalid Kling 4 rollout policy")
     policy = (
         await session.execute(
@@ -52,6 +71,7 @@ async def set_kling4_access(session, audience: str, *, admin_tg_id: int, source:
                 previous_audience=policy.audience,
                 new_audience=audience,
                 changed_by_admin_tg_id=admin_tg_id,
+                changed_by_operator=operator_identity,
                 source=source,
             )
         )

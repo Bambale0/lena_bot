@@ -1,6 +1,6 @@
 # Фото → Промпт
 
-Функция бесплатно анализирует отправленное пользователем изображение и создаёт подробный англоязычный промпт, с которым можно воспроизвести сцену в любой совместимой AI-модели.
+Функция бесплатно анализирует отправленное пользователем изображение и создаёт подробный русскоязычный промпт, с которым можно воспроизвести сцену в любой совместимой AI-модели.
 
 ## Где доступна кнопка
 
@@ -27,25 +27,35 @@
 
 ### Маршрутизация Vision
 
-Primary и fallback задаются через переменные окружения:
-
-| Роль | Переменная окружения | Дефолт |
-|---|---|---|
-| Primary | `KIE_PHOTO_PROMPT_MODEL` | `gpt-5-2` |
-| Fallback | `KIE_PHOTO_PROMPT_FALLBACK` | `gpt-5-5` |
+Порядок провайдеров хранится в `qwen_routing_settings` для режима `image` и
+меняется только через аутентифицированный web-admin либо доверенную
+операторскую команду. Модель KIE задаётся `KIE_PHOTO_PROMPT_MODEL`; проверенный
+контракт для этого маршрута — `gpt-5-2`.
 
 - Base URL KIE: `https://api.kie.ai`.
 - Auth: `Authorization: Bearer {KIE_AI_KEY}`.
-- Для chat-completions используется `reasoning_effort: "high"`.
-- Для Responses API используется `reasoning: {"effort": "high"}`.
+- Для KIE chat-completions используется `reasoning_effort: "high"`.
 - Изображение передаётся как base64 data URL: `data:{mime};base64,...`.
 - Таймаут каждого запроса: 90 секунд.
-- Сначала вызываются primary и fallback KIE. После ошибок обоих маршрутов допускается резервный вызов через CometAPI.
-- Если все провайдеры недоступны, пользователь получает понятную ошибку; кредиты не списываются.
+- Автоматический переход к резервному провайдеру разрешён только после
+  однозначного отказа до выполнения. Таймаут, 503 и другой неопределённый итог
+  не повторяются у второго платного провайдера, чтобы исключить двойное
+  списание.
+- При проблемах Neironych безопасный оперативный маршрут для фото — KIE primary
+  и Neironych backup:
+
+  `python scripts/set_qwen_route.py image kie neironych --operator <stable-handle>`
+
+- Откат после подтверждённого восстановления Neironych:
+
+  `python scripts/set_qwen_route.py image neironych kie --operator <stable-handle>`
+
+Команда записывает отдельного ops-исполнителя в неизменяемый аудит и не
+имитирует Telegram-пользователя.
 
 ### Формат системной инструкции
 
-Vision-модель должна вернуть только готовый промпт на английском языке без заголовков, пояснений, Markdown и кавычек. Анализ включает:
+Vision-модель должна вернуть только готовый промпт на русском языке без заголовков, пояснений, Markdown и кавычек. Анализ включает:
 
 - главный объект и важные элементы;
 - стиль и технику;
@@ -61,11 +71,7 @@ Vision-модель должна вернуть только готовый пр
 ```env
 KIE_AI_KEY=your_kie_key
 KIE_PHOTO_PROMPT_MODEL=gpt-5-2
-KIE_PHOTO_PROMPT_FALLBACK=gpt-5-5
-
-# Резервный провайдер уже используется другими функциями проекта
-COMET_API_KEY=your_comet_key
-COMET_BASE_URL=https://api.cometapi.com
+NEIRONYCH_API_KEY=your_neironych_key
 ```
 
 ### Файлы
@@ -73,6 +79,8 @@ COMET_BASE_URL=https://api.cometapi.com
 | Файл | Назначение |
 |---|---|
 | `api/photo_prompt_service.py` | Vision-запросы, валидация изображения и provider fallback |
+| `core/qwen_routing.py` | DB-маршрут, валидация и аудит изменений |
+| `scripts/set_qwen_route.py` | Доверенное production-переключение с ops-атрибуцией |
 | `bot/handlers/photo_prompt.py` | Полный Telegram-флоу, запуск в серии, выбор модели, возврат и keyboard hooks |
 | `bot/handlers/__init__.py` | Регистрация отдельного роутера перед legacy image-flow |
 | `bot/ui/image_menu.py` и `bot/keyboards/models.py` | Клавиатуры подключаются через безопасные hooks без дублирования кнопки |
