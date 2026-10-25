@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import getpass
-import socket
 import sys
 from pathlib import Path
 
@@ -22,8 +20,7 @@ engine = create_async_engine(settings.DATABASE_URL, echo=False, pool_pre_ping=Tr
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
-async def run(*, audience: str) -> int:
-    operator_identity = f"{getpass.getuser()}@{socket.gethostname()}"
+async def run(*, audience: str, operator_identity: str) -> int:
     async with AsyncSessionLocal() as session:
         applied = await set_kling4_access(
             session,
@@ -38,9 +35,16 @@ async def run(*, audience: str) -> int:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("audience", choices=("admin", "public", "disabled"))
+    parser.add_argument(
+        "--operator",
+        required=True,
+        help="Stable personal operator handle recorded in the immutable audit",
+    )
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    raise SystemExit(asyncio.run(run(audience=args.audience)))
+    raise SystemExit(
+        asyncio.run(run(audience=args.audience, operator_identity=args.operator))
+    )
