@@ -28,7 +28,7 @@ def test_feed_video_repeat_uses_duration_slider_bound_to_model_options() -> None
     assert 'max={Math.max(0, durations.length - 1)}' in source
     assert 'const nextDuration = durations[Number(event.target.value)]' in source
     assert 'setDuration(nextDuration)' in source
-    assert 'onClick={() => setDuration(value)}' in source
+    assert 'onClick={() => { setDuration(value); setDurationOverride(value); }}' in source
 
 
 def test_video_trend_admin_uses_model_aware_duration_slider() -> None:

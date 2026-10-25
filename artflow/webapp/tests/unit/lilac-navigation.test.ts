@@ -14,5 +14,7 @@ test("all nested supported Studio destinations have a visible five-section paren
   for (const tab of ["photo", "video", "motion", "models", "music", "services", "assistant"] as AppTab[]) assert.equal(lilacParent(tab), "create");
   for (const tab of ["feed", "trends", "library"] as AppTab[]) assert.equal(lilacParent(tab), "ideas");
   for (const tab of ["billing", "help", "settings", "owner"] as AppTab[]) assert.equal(lilacParent(tab), "profile");
-  for (const tab of ["home", "create", "ideas", "works", "profile"] as AppTab[]) { assert.equal(lilacParent(tab), null); assert.equal(lilacPrimaryTab(tab), tab); }
+  for (const tab of ["home", "create", "ideas", "profile"] as AppTab[]) { assert.equal(lilacParent(tab), null); assert.equal(lilacPrimaryTab(tab), tab); }
+  assert.equal(lilacPrimaryTab("works"), "profile");
+  assert.equal(lilacParent("works"), "profile");
 });

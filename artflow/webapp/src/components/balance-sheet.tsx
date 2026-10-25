@@ -36,6 +36,11 @@ interface BalanceSheetProps {
   error?: string;
   onOpenChange: (open: boolean) => void;
   onPay: (provider: PaymentProvider, plan: PaymentPlan) => void;
+  pending?: boolean;
+  checking?: boolean;
+  onCheck?: () => void;
+  onReopen?: () => void;
+  onAcknowledge?: () => void;
 }
 
 function planPrice(plan: PaymentPlan, method: PaymentProvider): string {
@@ -54,7 +59,7 @@ function planListPrice(plan: PaymentPlan): string {
   return [rub, usd].filter(Boolean).join(" | ");
 }
 
-function BalanceSheet({ open, user, plans, availableProviders, lavaPlanKeys = [], busy, error, onOpenChange, onPay }: BalanceSheetProps) {
+function BalanceSheet({ open, user, plans, availableProviders, lavaPlanKeys = [], busy, error, onOpenChange, onPay, pending, checking, onCheck, onReopen, onAcknowledge }: BalanceSheetProps) {
   const copy = t(user.language);
   const [selectedPlanKey, setSelectedPlanKey] = useState("");
   const [method, setMethod] = useState<PaymentProvider>("tbank");
@@ -72,10 +77,11 @@ function BalanceSheet({ open, user, plans, availableProviders, lavaPlanKeys = []
   const selectedMethod = availableMethods.find((item) => item.id === method) || availableMethods[0];
   const MethodIcon = selectedMethod?.icon || CreditCard;
   const selectedPrice = selectedPlan && selectedMethod ? planPrice(selectedPlan, selectedMethod.id) : "";
-  const payDisabled = busy || !selectedPlan || !selectedMethod || !selectedPrice;
+  const payDisabled = busy || pending || !selectedPlan || !selectedMethod || !selectedPrice;
 
   return (
     <Sheet
+      balanceSheet
       open={open}
       onOpenChange={onOpenChange}
       title={copy.balance.title}
@@ -170,6 +176,12 @@ function BalanceSheet({ open, user, plans, availableProviders, lavaPlanKeys = []
             {busy ? copy.balance.creating : selectedMethod ? `${copy.balance.payVia} ${selectedMethod.title}` : copy.balance.unavailableMethod}
           </Button>
           {error && <p className="mt-2 text-sm" role="alert">{error}</p>}
+          {pending && <div className="mt-3 grid gap-2" role="status">
+            <p className="text-sm">Статус предыдущего пополнения не подтверждён. Достаточный баланс не подтверждает оплату этого счёта.</p>
+            <Button variant="outline" disabled={busy || checking} onClick={onCheck}>{checking ? "Проверяем…" : "Проверить оплату"}</Button>
+            {onReopen && <Button variant="outline" disabled={busy || checking} onClick={onReopen}>Открыть эту оплату</Button>}
+            {onAcknowledge && <><p className="text-xs">Не удалось связать попытку с конкретным счётом. Проверьте историю и платёжный сервис: новое пополнение может привести к повторной оплате.</p><Button variant="outline" className="whitespace-normal" disabled={busy || checking} onClick={onAcknowledge}>Историю проверил — разрешить новое пополнение</Button></>}
+          </div>}
           <div className="mt-2 grid gap-1.5 text-[10px] text-muted-foreground">
             <p className="flex items-start gap-1.5"><ShieldCheck className="mt-0.5 size-3.5 shrink-0" />{copy.balance.safety}</p>
             <p className="flex items-start gap-1.5"><Info className="mt-0.5 size-3.5 shrink-0" />{copy.balance.webhook}</p>

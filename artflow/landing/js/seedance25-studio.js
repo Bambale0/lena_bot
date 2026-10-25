@@ -19,6 +19,14 @@
     return modelSelect()?.value === MODEL;
   }
 
+  function exactFeedRepeat() {
+    // The shared composer owns exact replay photos and the duration override.
+    // General-generation controls must never be injected into its author recipe.
+    return typeof state !== "undefined" && state.feedRepeat?.scope === feedRepeatScope()
+      && state.feedRepeat?.authEpoch === state.authEpoch
+      && typeof state.feedRepeat?.source?.source_has_video_reference === "boolean";
+  }
+
   function token(key, value) {
     return `${TOKEN_PREFIX}${key}=${String(value)}`;
   }
@@ -39,14 +47,14 @@
   function applySurface() {
     const refs = document.querySelector("[data-reference-section]");
     const seedMode = genericSeedModeLabel();
-    if (refs) refs.style.display = selected() ? "none" : "";
+    if (refs) refs.style.display = selected() && !exactFeedRepeat() ? "none" : "";
     if (seedMode) seedMode.style.display = selected() ? "none" : "";
   }
 
   function ensurePanel() {
     applySurface();
     const existing = document.querySelector("[data-seedance25-studio]");
-    if (!selected()) {
+    if (!selected() || exactFeedRepeat()) {
       if (existing) existing.hidden = true;
       return;
     }
@@ -168,6 +176,9 @@
       return originalFetch(input, init);
     }
     if (String(body.model || "") !== MODEL) return originalFetch(input, init);
+    if (/\/api\/web\/feed\/\d+\/remix(?:\/quote)?$/.test(url) && exactFeedRepeat()) {
+      return originalFetch(input, init);
+    }
 
     const panel = document.querySelector("[data-seedance25-studio]");
     const uploadedImages = [];

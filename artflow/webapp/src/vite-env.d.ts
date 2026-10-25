@@ -1,6 +1,8 @@
 /// <reference types="vite/client" />
 
 declare global {
+  type TelegramWebAppEvent = "safeAreaChanged" | "contentSafeAreaChanged" | "viewportChanged" | "fullscreenChanged" | "fullscreenFailed";
+  type TelegramSafeArea = { top: number; right: number; bottom: number; left: number };
   type TelegramWebApp = {
     initData: string;
     initDataUnsafe?: {
@@ -14,6 +16,20 @@ declare global {
       };
     };
     colorScheme?: "light" | "dark";
+    version?: string;
+    isVersionAtLeast?: (version: string) => boolean;
+    isFullscreen?: boolean;
+    requestFullscreen?: () => void;
+    safeAreaInset?: TelegramSafeArea;
+    contentSafeAreaInset?: TelegramSafeArea;
+    onEvent?: (event: TelegramWebAppEvent, callback: () => void) => void;
+    offEvent?: (event: TelegramWebAppEvent, callback: () => void) => void;
+    headerColor?: string;
+    backgroundColor?: string;
+    bottomBarColor?: string;
+    setHeaderColor?: (color: string) => void;
+    setBackgroundColor?: (color: string) => void;
+    setBottomBarColor?: (color: string) => void;
     ready?: () => void;
     expand?: () => void;
     openLink?: (url: string) => void;

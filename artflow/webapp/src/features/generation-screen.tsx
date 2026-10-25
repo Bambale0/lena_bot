@@ -307,7 +307,7 @@ function GenerationScreen({
     });
   };
 
-  const disabled = submitting || mediaUploading || !selectedModel || missingPrompt || missingReference || missingVideo || tooManyRefs || insufficientCredits || advancedInvalid || unsupportedSettings || !quoteReady || (preserveMedia && mediaInspection.issues.length > 0);
+  const disabled = submitting || mediaUploading || !selectedModel || missingPrompt || missingReference || missingVideo || tooManyRefs || advancedInvalid || unsupportedSettings || !quoteReady || (preserveMedia && mediaInspection.issues.length > 0);
   const showReferenceUploader = !kling4Selected && (kind === "image" || draft.mode === "image" || kind === "motion" || (isWan30 && draft.mode === "video") || selectedModel?.key === SEEDANCE_25_MODEL || (preserveMedia && (allReferences.length > 0 || (mediaInspection.referenceInputsSupported && (selectedModel?.auto_route_by_inputs === true || modes.includes("multimodal"))))));
   const showVideoUploader = !kling4Selected && (draft.mode === "video" || kind === "motion" || Boolean(selectedModel?.supports_video_input && !isWan30) || (preserveMedia && Boolean(draft.videoUrl)));
   const remainingRefs = Math.max(0, maxRefs - draft.referenceUrls.length);

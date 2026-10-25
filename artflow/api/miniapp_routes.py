@@ -156,6 +156,7 @@ from core.neironych_video_poll_gate import (
     protect_neironych_video_poll_settlement,
 )
 from core.provider_routing import get_nano21_route
+from core.repeat_duration import duration_offer, resolve_repeat_duration
 from core.seedance_reconciliation import (
     handle_submission_not_sent,
     handle_submission_unknown,
@@ -2114,6 +2115,7 @@ class FeedRemixRequest(BaseModel):
     change_request: str = Field(default="", max_length=800)
     mode: str = "text"                    # "text" | "image"
     duration: int = Field(default=5, ge=2, le=30)
+    duration_override: int | None = Field(default=None, strict=True, ge=1, le=30)
     aspect_ratio: str | None = None
     resolution: str | None = None
     image_url: str | None = None
@@ -4085,6 +4087,13 @@ def _prepare_feed_remix_inputs(
     recipe_source: Generation | None = None,
 ) -> tuple[str, list[str], FeedRemixRequest, bool, bool, bool]:
     """Return normalized inputs and original-recipe provenance for photo repeats."""
+    if body.duration_override is not None and body.model not in VIDEO_CAPS:
+        if body.model != "midjourney-video":
+            raise HTTPException(status_code=422, detail="Длительность доступна только для видео")
+        try:
+            resolve_repeat_duration(body.model, 5, body.duration_override)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
     source_urls = _generation_result_urls(source)
     source_type = getattr(getattr(source, "gen_type", None), "value", getattr(source, "gen_type", None))
     if source_type == "image":
@@ -4349,6 +4358,10 @@ async def _normalize_feed_video_inputs(
     )
     if body.model in WAN30_MODELS:
         normalized.update(restored)
+    try:
+        normalized["duration"] = resolve_repeat_duration(body.model, normalized["duration"], body.duration_override)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if body.model == SEEDANCE25_MODEL_KEY:
         identity_transfer = bool(seedance25_adapter._control_payload(
             [str(item) for item in (normalized.get("audio_ids") or [])]
@@ -4363,10 +4376,22 @@ async def _normalize_feed_video_inputs(
             logger.warning("Seedance feed source preflight unavailable: %s", type(exc).__name__)
             raise HTTPException(status_code=503, detail="Не удалось проверить исходное видео. Попробуй позже; поцелуи не списаны.") from exc
         if duration is not None:
+            if body.duration_override is not None:
+                raise HTTPException(status_code=422, detail="Длительность определяется исходным видео; изменить её нельзя.")
             normalized.update(
                 duration=duration, billing_duration=duration, provider_duration=-1,
                 aspect_ratio="adaptive", seedance_video_edit=True,
             )
+    from api.genjutsu_adapter import MODEL_KEYS as GENJUTSU_MODEL_KEYS
+    from api.genjutsu_adapter import resolve_source_duration_seconds
+    if body.model in GENJUTSU_MODEL_KEYS:
+        try:
+            measured = await resolve_source_duration_seconds(normalized["reference_video_url"])
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except (OSError, RuntimeError) as exc:
+            raise HTTPException(status_code=503, detail="Не удалось проверить исходное видео; поцелуи не списаны.") from exc
+        normalized.update(duration=measured, billing_duration=measured, seedance_video_edit=True)
     return normalized
 
 
@@ -4475,6 +4500,7 @@ async def quote_feed_remix(
             count = int(normalized["duration"])
             if normalized.get("seedance_video_edit"):
                 edit_quote = {"source_video_edit": True, "effective_duration_seconds": count}
+            edit_quote.update(duration_offer(body.model, body.duration, count, source_edit=bool(normalized.get("seedance_video_edit"))))
         else:
             image_refs = repeat_refs
             _, quality = _normalize_image_request(
@@ -4489,6 +4515,8 @@ async def quote_feed_remix(
             cost_row = await repo.resolve_image_model_cost(session, body.model, quality=quality)
             count = body.count
 
+    if body.model == "midjourney-video":
+        edit_quote.update(duration_offer(body.model, 5, 5))
     if wan_quote is None and (cost_row is None or not bool(getattr(cost_row, "is_active", True))):
         raise HTTPException(status_code=422, detail="Model not available")
 
@@ -4767,6 +4795,8 @@ async def remix_feed_post(
                 normalized_video, VIDEO_CAPS.get(body.model, {}), model_cost.credits,
             )
             _require_video_price_confirmation(body.quoted_credits, nominal_credits, billing_seconds)
+            if body.duration_override is not None and (body.quoted_credits is None or round(body.quoted_credits, 6) != round(nominal_credits, 6)):
+                raise HTTPException(status_code=409, detail="Цена изменилась. Проверь сумму и подтверди запуск.")
         normalized_video.update({
             "billing_output_seconds": billing_seconds.output,
             "billing_reference_seconds": billing_seconds.references,

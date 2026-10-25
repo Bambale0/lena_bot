@@ -86,6 +86,8 @@ test("API forwards the gallery source to the shared runner unchanged", async () 
 test("runner open event restores selected source and explicit selection wins before quote", async (t) => {
   const payment = await import("../../src/features/feed-repeat-payment.ts");
   const references = await import("../../src/features/feed-repeat-references.ts");
+  const balance = await import("../../src/lib/studio-balance.ts");
+  const topup = await import("../../src/lib/topup-recovery.ts");
   const values = new Map<string, string>();
   const storage = { getItem: (key: string) => values.get(key) ?? null,
     setItem: (key: string, value: string) => { values.set(key, value); },
@@ -118,11 +120,14 @@ test("runner open event restores selected source and explicit selection wins bef
     useMemo(fn: () => unknown) { const value = fn(); memos.push(value); return value; },
     useCallback(fn: unknown) { return fn; },
     useEffect(fn: () => unknown) { effects.push(fn); },
+    useLayoutEffect(fn: () => unknown) { effects.push(fn); },
+    useSyncExternalStore(_subscribe: unknown, getSnapshot: () => unknown) { return getSnapshot(); },
   };
   const { Portal } = loadProduction("../../src/features/feed-remix-runner.tsx", {
     react, "react-dom/client": {}, "sonner": { toast: {} },
     "@/components/ui/button": { Button: "button" }, "@/components/ui/sheet": { Sheet: "sheet" },
     "@/lib/telegram": {}, "@/lib/utils": utils,
+    "@/lib/studio-balance": balance, "@/lib/topup-recovery": topup,
     "@/features/feed-repeat-references": references, "@/features/feed-repeat-payment": payment,
   }, "\nexports.Portal = FeedRemixRunnerPortal;");
   let rendered: any;
@@ -183,7 +188,7 @@ test("runner open event restores selected source and explicit selection wins bef
     assert.equal(body.source_image_url, legacySource || null, "The new document must actually restore the intended legacy fixture");
     if (missing) assert.match(textOf(rendered.props.footer), /Выберите фото заново в ленте/);
     assert.deepEqual(body.reference_urls, ["https://example.test/user.jpg"]);
-    assert.deepEqual(payment.readRepeatDraft(storage, 1, 201)?.payment, pending);
+    assert.deepEqual(payment.readRepeatDraft(storage, 1, 201)?.payment, { ...pending, sharedGuard: true });
     assert.equal(payment.readRepeatDraft(storage, 1, 201)?.sourceMediaUrl, legacySource);
     assert.equal((await open(one)).source_image_url, one, "A fresh gallery click repairs the legacy selection");
   }

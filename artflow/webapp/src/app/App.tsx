@@ -1,5 +1,5 @@
 import { isKling4, kling4Body, kling4Intent } from "@/lib/kling4";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { LoaderCircle } from "lucide-react";
 import { Toaster, toast } from "sonner";
 
@@ -29,9 +29,15 @@ import { LilacLibrary, type LibraryPrompt } from "@/features/lilac/library-scree
 import { LilacAssistant } from "@/features/lilac/assistant-screen";
 import { LilacHelp, LilacBilling } from "@/features/lilac/account-screens";
 import { LilacOwner } from "@/features/lilac/owner-screen";
+import { LilacAdminSystemPanel } from "@/features/lilac/admin/system-panel";
 import { LilacAccountEditor } from "@/features/lilac/account-editor";
 import { LilacImageSeries } from "@/features/lilac/image-series";
 import { lilacRequested } from "@/lib/lilac";
+import { publishStudioBalance } from "@/lib/studio-balance";
+import { clearPendingTopup, readPendingTopup, savePendingTopup, sameTopupAttempt, revokePaymentAccess, subscribePaymentAccessRevoked } from "@/lib/topup-recovery";
+import { isInsufficientCreditError } from "@/lib/credit-recovery";
+import { creditErrorToast } from "@/lib/credit-error-toast";
+import { canReopenPayment, paymentFromResponse, paymentResolution, type RepeatPayment } from "@/features/feed-repeat-payment";
 import { SettingsScreen } from "@/features/settings-screen";
 import { TrendsScreen } from "@/features/trends-screen";
 import { openTrendRunner } from "@/features/trend-runner";
@@ -39,6 +45,7 @@ import { supportsPlan, checkoutPrice } from "@/lib/billing-methods";
 import { ApiError, FEED_PAGE_SIZE, MAX_HISTORY_ITEMS, MiniAppApi } from "@/lib/api";
 import {
   configureTelegramWebApp,
+  configureStudioChrome,
   haptic,
   notifyHaptic,
   openExternalUrl,
@@ -66,7 +73,7 @@ import type {
 import { firstMedia, isPendingTask, safeExternalUrl } from "@/lib/utils";
 import { saveDownload } from "@/lib/download";
 
-window.__APIX_MINIAPP_BUILD_ID__ = "20261024-studio-central-create-capabilities";
+window.__APIX_MINIAPP_BUILD_ID__ = "20261025-studio-black-red-r1";
 
 type FeedSource = "recent" | "top_day" | "top";
 type VideoQuote = Awaited<ReturnType<MiniAppApi["quoteVideo"]>>;
@@ -206,22 +213,62 @@ function App() {
     else delete document.documentElement.dataset.apixStudio;
     return () => { delete document.documentElement.dataset.apixStudio; };
   }, [lilac]);
+  useEffect(() => lilac ? configureStudioChrome() : undefined, [lilac]);
+  useEffect(() => configureTelegramWebApp(), []);
   const [worksRefreshing, setWorksRefreshing] = useState(false);
   const [draftStorageUnavailable, setDraftStorageUnavailable] = useState(false);
   const draftOwner = useRef<number | null>(null);
   const submissionLock = useRef(false);
   const latestActor = useRef<number | null>(null);
-  latestActor.current = data?.user.id ?? null;
+  latestActor.current = mode === "live" ? data?.user.id ?? null : null;
 
   const [selectedTask, setSelectedTask] = useState<GenerationTask | null>(null);
   const [taskOpen, setTaskOpen] = useState(false);
   const [taskBusy, setTaskBusy] = useState(false);
   const [balanceOpen, setBalanceOpen] = useState(false);
+  useLayoutEffect(() => {
+    if (mode !== "live" || !lilac || !data?.user.miniapp_ux2_available) {
+      publishStudioBalance(null);
+      return;
+    }
+    const actorId = data.user.id;
+    publishStudioBalance({ actorId, credits: data.user.credits, language: data.user.language || "ru", open: balanceOpen,
+      onOpen: () => { if (latestActor.current === actorId) setBalanceOpen(true); } });
+    return () => publishStudioBalance(null);
+  }, [mode, lilac, data?.user.id, data?.user.credits, data?.user.language, data?.user.miniapp_ux2_available, balanceOpen]);
   const [paymentBusy, setPaymentBusy] = useState(false);
   const paymentRequest = useRef(false);
   const [paymentError, setPaymentError] = useState("");
+  const [pendingTopup, setPendingTopup] = useState<RepeatPayment | null>(null);
+  const pendingTopupRef = useRef<RepeatPayment | null>(null);
+  const [topupChecking, setTopupChecking] = useState(false);
+  const [topupChecked, setTopupChecked] = useState<RepeatPayment | null>(null);
+  const topupAbort = useRef<AbortController | null>(null);
+  const topupCheckAbort = useRef<AbortController | null>(null);
+  const topupStorage = () => { try { return window.sessionStorage; } catch { return null; } };
+  useLayoutEffect(() => {
+    const saved = data?.user.id ? readPendingTopup(topupStorage(), data.user.id) : null;
+    pendingTopupRef.current = saved; setPendingTopup(saved); setTopupChecked(null); setTopupChecking(false); setPaymentError("");
+    return () => { topupAbort.current?.abort(); topupCheckAbort.current?.abort(); };
+  }, [data?.user.id]);
+  useLayoutEffect(() => {
+    if (mode !== "live") {
+      topupAbort.current?.abort(); topupCheckAbort.current?.abort();
+      setTopupChecked(null);
+    }
+  }, [mode]);
+  useLayoutEffect(() => {
+    if (balanceOpen && data?.user.id) {
+      const saved = readPendingTopup(topupStorage(), data.user.id);
+      const previous = pendingTopupRef.current;
+      const current = saved && previous && sameTopupAttempt(saved, previous) ? previous : saved;
+      pendingTopupRef.current = current; setPendingTopup(current); setTopupChecked(null);
+    }
+  }, [balanceOpen, data?.user.id]);
   const [submitting, setSubmitting] = useState(false);
   const [videoConfirmation, setVideoConfirmation] = useState<VideoConfirmation | null>(null);
+  const [videoQuoteRefreshing, setVideoQuoteRefreshing] = useState(false);
+  const previousBalanceOpen = useRef(false);
   const [remixingId, setRemixingId] = useState<number | null>(null);
   const [feedSource, setFeedSource] = useState<FeedSource>("recent");
   const [feedLimit, setFeedLimit] = useState(FEED_PAGE_SIZE);
@@ -253,6 +300,16 @@ function App() {
   latestOperations.current = submitting || Boolean(referenceUploadingKind || videoUploadingKind);
   const processedStartParam = useRef("");
   const refreshAbortRef = useRef<AbortController | null>(null);
+  useLayoutEffect(() => subscribePaymentAccessRevoked(actorId => {
+    if (latestActor.current !== actorId) return;
+    latestActor.current = null;
+    topupAbort.current?.abort(); topupCheckAbort.current?.abort(); refreshAbortRef.current?.abort();
+    pendingTopupRef.current = null; setPendingTopup(null); setTopupChecked(null);
+    setLilac(false); setUx2(false); setTaskOpen(false); setSelectedTask(null); setBalanceOpen(false);
+    setData(null); setApi(null);
+    publishStudioBalance(null);
+    setErrorMessage("Сессия недоступна. Откройте приложение заново из бота."); setMode("locked");
+  }), []);
 
   const hydrateDraftDefaults = useCallback((bootstrap: BootstrapData, preview: boolean) => {
     if (draftOwner.current === bootstrap.user.id) return;
@@ -482,7 +539,6 @@ function App() {
     setRetrying(true);
     setMode("booting");
     setErrorMessage("");
-    configureTelegramWebApp();
 
     const authProbe = new MiniAppApi("");
     authProbe.getAuthConfig().then((config) => setBotUsername(config.bot_username || "")).catch(() => undefined);
@@ -572,8 +628,9 @@ function App() {
         if (lilac || ux2) setActiveTab("feed");
       }
       const core = { user, recentTasks: await api.getRecentHistory(controller.signal) };
+      if (controller.signal.aborted) return;
       setData((current) => {
-        if (!current) return current;
+        if (!current || current.user.id !== core.user.id) return current;
         const freshTaskIds = new Set(core.recentTasks.map((task) => task.id));
         // Fresh page (newest 100) wins on overlapping ids, so status updates
         // propagate; the tail is preserved but bounded. Items that fall out
@@ -774,11 +831,10 @@ function App() {
       if (needsVideoQuote) {
         const quote = await api.quoteVideo(videoBody);
         const bodyKey = JSON.stringify(videoBody);
-        if (!Number.isFinite(quote.cost_credits) || quote.cost_credits < 0) throw new Error("Стоимость видео недоступна. Повторите попытку.");
-        if (!quote.can_run || quote.balance_credits < quote.cost_credits * taskCount) {
-          throw new Error(`Недостаточно кредитов: нужно ${quote.cost_credits * taskCount} 💋.`);
-        }
-        if (!confirmed || confirmed.owner !== data.user.id || confirmed.kind !== kind
+        const latest = latestGenerationContext.current;
+        if (latestActor.current !== data.user.id || latest.owner !== data.user.id || JSON.stringify(latest.drafts[kind]) !== JSON.stringify(sourceDraft)) return;
+        if (!Number.isFinite(quote.cost_credits) || quote.cost_credits < 0 || !Number.isFinite(quote.balance_credits) || typeof quote.can_run !== "boolean") throw new Error("Стоимость видео недоступна. Повторите попытку.");
+        if (!quote.can_run || quote.balance_credits < quote.cost_credits * taskCount || !confirmed || confirmed.owner !== data.user.id || confirmed.kind !== kind
             || confirmed.bodyKey !== bodyKey || confirmed.quote.cost_credits !== quote.cost_credits
             || confirmed.count !== taskCount) {
           setVideoConfirmation({ kind, bodyKey, owner: data.user.id, quote, count: taskCount });
@@ -825,6 +881,10 @@ function App() {
         } : current);
       }
       notifyHaptic("error");
+      if (latestActor.current === data.user.id && isInsufficientCreditError(error)) {
+        toast.error("Недостаточно кредитов. Пополни баланс, затем вернись и подтверди запуск.", { action: { label: "Пополнить", onClick: () => { if (latestActor.current === data.user.id) setBalanceOpen(true); } } });
+        return;
+      }
       const prefix = createdTasks.length ? `Создано ${createdTasks.length}, дальше ошибка: ` : "";
       if (checkingReferences) setReferenceCheckVersion(value => value + 1);
       toast.error(checkingReferences ? "Не удалось проверить файлы. Запуск не отправлен, материалы сохранены."
@@ -836,6 +896,23 @@ function App() {
       setSubmitting(false);
     }
   }, [api, currentDraft, data, refreshCore, submitting, ux2, referenceUploadingKind, videoUploadingKind, photoQueue, checkReference]);
+
+  useEffect(() => {
+    const wasOpen = previousBalanceOpen.current;
+    previousBalanceOpen.current = balanceOpen;
+    if (!videoConfirmation) return;
+    if (balanceOpen) { setVideoQuoteRefreshing(true); return; }
+    if (wasOpen && videoConfirmation.owner === latestActor.current) {
+      // Resume only recalculates. Passing no confirmation cannot create a video.
+      setVideoQuoteRefreshing(true);
+      setVideoConfirmation(null);
+      void submitGeneration(videoConfirmation.kind).finally(() => setVideoQuoteRefreshing(false));
+    }
+  }, [balanceOpen, videoConfirmation, submitGeneration]);
+
+  useEffect(() => {
+    if (videoConfirmation && (mode !== "live" || videoConfirmation.owner !== data?.user.id)) setVideoConfirmation(null);
+  }, [data?.user.id, mode, videoConfirmation]);
 
   const refreshTask = useCallback(async (task: GenerationTask) => {
     if (!api || taskBusy) return;
@@ -980,6 +1057,7 @@ function App() {
 
   const sendAssistant = useCallback(async (message: string) => {
     if (!api || assistantBusy) return;
+    const owner = latestActor.current;
     const nextHistory = [...assistantMessages, { role: "user" as const, text: message }];
     setAssistantMessages(nextHistory);
     setAssistantBusy(true);
@@ -987,7 +1065,7 @@ function App() {
       const reply = await api.sendAssistant(message, assistantMessages);
       setAssistantMessages((current) => [...current, { role: "assistant", text: reply }]);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Помощник временно недоступен");
+      if (owner === latestActor.current) creditErrorToast(error, "Помощник временно недоступен", () => { if (owner === latestActor.current) setBalanceOpen(true); });
     } finally {
       setAssistantBusy(false);
     }
@@ -995,6 +1073,7 @@ function App() {
 
   const createPhotoPrompt = useCallback(async (file: File) => {
     if (!api || photoPromptBusy) return;
+    const owner = latestActor.current;
     setPhotoPromptBusy(true);
     setPhotoPromptResult(null);
     try {
@@ -1002,7 +1081,7 @@ function App() {
       setPhotoPromptResult(result);
       toast.success("Промпт готов");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Не удалось проанализировать фото");
+      if (owner === latestActor.current) creditErrorToast(error, "Не удалось проанализировать фото", () => { if (owner === latestActor.current) setBalanceOpen(true); });
     } finally {
       setPhotoPromptBusy(false);
     }
@@ -1010,6 +1089,7 @@ function App() {
 
   const createVideoPrompt = useCallback(async (file: File) => {
     if (!api || videoPromptBusy) return;
+    const owner = latestActor.current;
     setVideoPromptBusy(true);
     setVideoPromptResult(null);
     try {
@@ -1017,36 +1097,102 @@ function App() {
       setVideoPromptResult(result);
       toast.success("Видео-промпт готов");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Не удалось проанализировать видео");
+      if (owner === latestActor.current) creditErrorToast(error, "Не удалось проанализировать видео", () => { if (owner === latestActor.current) setBalanceOpen(true); });
     } finally {
       setVideoPromptBusy(false);
     }
   }, [api, videoPromptBusy]);
 
   const pay = useCallback(async (provider: "tbank" | "crypto" | "tribute" | "lava", plan: PaymentPlan) => {
-    if (!api || !data || paymentRequest.current) return;
+    if (!api || !data || latestActor.current !== data.user.id || paymentRequest.current) return;
     const owner = data.user.id;
+    if (pendingTopupRef.current || readPendingTopup(topupStorage(), owner)) return;
     paymentRequest.current = true; setPaymentBusy(true); setPaymentError("");
+    const controller = new AbortController(); topupAbort.current = controller;
+    const timeout = window.setTimeout(() => controller.abort(), 20_000);
     try {
-      const [plans, providers, options] = await Promise.all([api.request<PaymentPlan[]>("/plans"), api.request<string[]>("/payment-methods"), api.request<{ lava_plan_keys?: string[] }>("/payment-options")]);
-      if (latestActor.current !== owner) return;
+      const [plans, providers, options] = await Promise.all([api.request<PaymentPlan[]>("/plans", {}, controller.signal), api.request<string[]>("/payment-methods", {}, controller.signal), api.request<{ lava_plan_keys?: string[] }>("/payment-options", {}, controller.signal)]);
+      if (latestActor.current !== owner || controller.signal.aborted) return;
       if (!Array.isArray(plans) || !Array.isArray(providers)) throw new Error("Не удалось проверить условия оплаты. Обновите баланс.");
       const keys = Array.isArray(options.lava_plan_keys) ? options.lava_plan_keys : [];
       const fresh = plans.find(row => row.key === plan.key);
       setData(current => current?.user.id === owner ? { ...current, paymentPlans: plans, paymentMethods: providers, lavaPlanKeys: keys } : current);
       if (!fresh || !providers.includes(provider) || !supportsPlan(provider, fresh, keys)) throw new Error("Этот способ оплаты больше не доступен для пакета. Выберите другой.");
       if (fresh.credits !== plan.credits || checkoutPrice(provider, fresh) !== checkoutPrice(provider, plan)) throw new Error("Условия пакета изменились. Проверьте новую цену и количество кредитов перед оплатой.");
-      const result = await api.createPayment(provider, plan.key);
-      if (latestActor.current !== owner) return;
-      const url = safeExternalUrl(String(result.invoice_link || result.invoice_url || result.pay_url || result.url || ""));
+      // Another entry can create an invoice while this cabinet awaits preflight.
+      // Adopt it; checking and claiming below must have no asynchronous gap.
+      const existing = readPendingTopup(topupStorage(), owner);
+      if (existing) {
+        pendingTopupRef.current = existing; setPendingTopup(existing); setTopupChecked(null);
+        return;
+      }
+      const pending: RepeatPayment = { startedAt: Date.now(), provider, planKey: plan.key, transactionId: null, checkoutUrl: null };
+      if (!savePendingTopup(topupStorage(), owner, pending)) throw new Error("Не удалось сохранить защиту оплаты. Разрешите хранилище браузера и повторите попытку.");
+      pendingTopupRef.current = pending; setPendingTopup(pending); setTopupChecked(null);
+      let result: Record<string, unknown>;
+      try { result = await api.createPayment(provider, plan.key, controller.signal); }
+      catch (error) {
+        if (error instanceof ApiError && [401, 403].includes(error.status)) throw error;
+        if (error instanceof ApiError && error.status >= 400 && error.status < 500 && error.status !== 408) {
+          if (clearPendingTopup(topupStorage(), owner, pending) && latestActor.current === owner) { pendingTopupRef.current = null; setPendingTopup(null); }
+        }
+        throw error;
+      }
+      if (latestActor.current !== owner || controller.signal.aborted) return;
+      const identified = paymentFromResponse(pending, result);
+      if (!savePendingTopup(topupStorage(), owner, identified)) throw new Error("Не удалось сохранить номер оплаты. Проверьте её статус перед новой попыткой.");
+      pendingTopupRef.current = identified; setPendingTopup(identified);
+      const url = identified.checkoutUrl;
       if (!url) throw new Error("Платёжная ссылка не получена");
       openExternalUrl(url);
     } catch (error) {
-      if (latestActor.current === owner) setPaymentError(error instanceof Error ? error.message : "Не удалось создать платёж. Проверьте историю платежей перед повтором.");
+      if (latestActor.current === owner && error instanceof ApiError && [401, 403].includes(error.status)) {
+        revokePaymentAccess(owner); return;
+      }
+      if (latestActor.current === owner) setPaymentError(controller.signal.aborted ? "Время ожидания истекло. Если счёт уже отправлен, проверьте оплату перед новой попыткой." : error instanceof Error ? error.message : "Не удалось создать платёж. Проверьте историю платежей перед повтором.");
     } finally {
+      window.clearTimeout(timeout);
+      if (topupAbort.current === controller) topupAbort.current = null;
       paymentRequest.current = false; setPaymentBusy(false);
     }
   }, [api, data]);
+
+  const checkTopup = async () => {
+    const pending = pendingTopupRef.current, owner = latestActor.current;
+    if (!api || !pending || !owner || topupChecking) return;
+    setTopupChecking(true); setTopupChecked(null);
+    const controller = new AbortController(); topupCheckAbort.current = controller;
+    const timeout = window.setTimeout(() => controller.abort(), 15_000);
+    try {
+      const history = await api.requestWeb<{ transactions: unknown[] }>("/billing/transactions?limit=100", {}, controller.signal);
+      if (latestActor.current !== owner || pendingTopupRef.current !== pending || controller.signal.aborted) return;
+      if (!Array.isArray(history.transactions)) throw new Error("История оплаты недоступна. Повторите проверку позже.");
+      const resolution = paymentResolution(pending, history.transactions);
+      if (resolution === "pending") {
+        setTopupChecked(pending);
+        setPaymentError("Платёж пока не подтверждён. Отсутствие записи в последних операциях не означает отмену платежа.");
+      } else {
+        if (!clearPendingTopup(topupStorage(), owner, pending)) throw new Error("Текущая оплата изменилась. Закройте и откройте кабинет для новой проверки.");
+        pendingTopupRef.current = null; setPendingTopup(null);
+        setPaymentError(resolution === "paid" ? "Оплата подтверждена. Закройте окно, проверьте новую стоимость и подтвердите запуск."
+          : resolution === "failed" ? "Платёж завершился ошибкой. Можно выбрать новое пополнение." : "Платёж возвращён. Можно выбрать новое пополнение.");
+        void refreshCore();
+      }
+    } catch (error) {
+      if (latestActor.current === owner && error instanceof ApiError && [401, 403].includes(error.status)) {
+        revokePaymentAccess(owner); return;
+      }
+      if (latestActor.current === owner && pendingTopupRef.current === pending) setPaymentError(error instanceof Error ? error.message : "Не удалось проверить оплату");
+    } finally { window.clearTimeout(timeout); if (topupCheckAbort.current === controller) topupCheckAbort.current = null; if (latestActor.current === owner) setTopupChecking(false); }
+  };
+
+  const acknowledgeTopup = () => {
+    const pending = pendingTopupRef.current, owner = latestActor.current;
+    if (!owner || !pending || pending !== topupChecked || pending.transactionId || topupChecking) return;
+    if (!clearPendingTopup(topupStorage(), owner, pending)) { setPaymentError("Текущая оплата изменилась. Откройте кабинет ещё раз."); return; }
+    pendingTopupRef.current = null; setPendingTopup(null); setTopupChecked(null);
+    setPaymentError("Статус прошлой оплаты остаётся неизвестным. Новый счёт создаётся только по вашему нажатию.");
+  };
 
   const changeLanguage = useCallback(async (language: AppLanguage) => {
     if (!api || !data || languageBusy) return;
@@ -1144,13 +1290,21 @@ function App() {
     }
     setActiveTab(tab);
   };
+  const studioWorks = <>{lilac && api && <LilacImageSeries key={data.user.id} api={api} models={data.imageModels} onContinue={series => {
+        if (photoQueue.hasPending()) { toast.info("Дождитесь завершения загрузки фото."); return; }
+        const model = data.imageModels.find(row => row.key === series.model);
+        if (!model) { toast.error("Модель серии недоступна. Исходный черновик сохранён."); return; }
+        const draft = { ...emptyDraft("image"), model: model.key, mode: series.mode, aspectRatio: series.aspect_ratio || imageDraft.aspectRatio, quality: series.quality, count: series.count, prompt: series.prompt_hidden || series.prompt_actions_allowed === false ? (imageDraft.promptId === null ? imageDraft.prompt : "") : series.last_prompt || series.base_prompt || "" };
+        setImageDraft(appendReferenceUrls(draft, Array.from(new Set([series.reference_url, ...(series.reference_urls || [])].filter((url): url is string => Boolean(url))))));
+        setActiveTab("photo");
+      }} />}<WorksScreen tasks={data.recentTasks} models={[...data.imageModels, ...data.videoModels]} language={data.user.language} unavailable={data.historyUnavailable} refreshing={worksRefreshing} onOpenTask={openTask} onCreate={() => setActiveTab("create")} onRefresh={() => void refreshWorks()} /></>;
   const screen = (() => {
     if (lilac && api) {
       if (activeTab === "home") return <LilacHome data={data} drafts={[imageDraft, videoDraft, motionDraft]} onNavigate={navigateStudio} onTask={openTask} />;
       if (activeTab === "create") return <LilacCreate onNavigate={navigateStudio} />;
       if (activeTab === "ideas") return <LilacIdeas onNavigate={setActiveTab} />;
       if (activeTab === "assistant") return <LilacAssistant messages={assistantMessages} busy={assistantBusy} onSend={message => void sendAssistant(message)} />;
-      if (activeTab === "music") return <div className="lilac-page"><header className="lilac-title"><p>Музыка и собственные голоса</p><h1>Создать музыку</h1><span>Выберите модель, опишите звучание и проверьте стоимость.</span></header><MusicSunoPanel key={data.user.id} audioToolsApi={api} initialModel={musicModel} initialPrompt={musicPrompt} onInitialPromptConsumed={consumeMusicPrompt} onCreated={task => { if (latestActor.current !== data.user.id) return; setData(current => current ? { ...current, recentTasks: [task, ...current.recentTasks.filter(row => row.id !== task.id)] } : current); openTask(task); void refreshCore(); }} /></div>;
+      if (activeTab === "music") return <div className="lilac-page"><header className="lilac-title"><p>Музыка и собственные голоса</p><h1>Создать музыку</h1><span>Выберите модель, опишите звучание и проверьте стоимость.</span></header><MusicSunoPanel key={data.user.id} audioToolsApi={api} initialModel={musicModel} initialPrompt={musicPrompt} onInitialPromptConsumed={consumeMusicPrompt} onBalanceOpen={() => { if (latestActor.current === data.user.id) setBalanceOpen(true); }} onCreated={task => { if (latestActor.current !== data.user.id) return; setData(current => current ? { ...current, recentTasks: [task, ...current.recentTasks.filter(row => row.id !== task.id)] } : current); openTask(task); void refreshCore(); }} /></div>;
       if (activeTab === "models") return <LilacModels api={api} imageModels={data.imageModels} videoModels={data.videoModels} onSelect={(model, kind) => {
         if (photoQueue.hasPending() || referenceUploadingKind || videoUploadingKind || submitting) { toast.info("Дождитесь завершения текущей операции."); return; }
         if (kind === "music") { setMusicModel(model.key); setActiveTab("music"); return; }
@@ -1182,22 +1336,13 @@ function App() {
       }} />;
       if (activeTab === "help") return <LilacHelp api={api} onNavigate={setActiveTab} />;
       if (activeTab === "billing") return <LilacBilling api={api} user={data.user} onTopup={() => setBalanceOpen(true)} />;
-      if (activeTab === "owner" && data.user.miniapp_ux2_available === true) return <LilacOwner key={data.user.id} api={api} ownerId={data.user.id} />;
+      if (activeTab === "owner" && data.user.miniapp_ux2_available === true) return <LilacOwner key={data.user.id} api={api} ownerId={data.user.id} systemPanel={<LilacAdminSystemPanel api={api} ownerId={data.user.id} />} />;
       if (activeTab === "account") return <LilacAccountEditor key={data.user.id} api={api} ownerId={data.user.id} onSaved={() => void refreshCore()} />;
     }
     if (ux2 && activeTab === "create") {
       return <CreateScreen imageModels={data.imageModels} videoModels={data.videoModels} drafts={[imageDraft, videoDraft, motionDraft]} language={data.user.language} onNavigate={setActiveTab} />;
     }
-    if (ux2 && activeTab === "works") {
-      return <>{lilac && api && <LilacImageSeries api={api} onContinue={series => {
-        if (photoQueue.hasPending()) { toast.info("Дождитесь завершения загрузки фото."); return; }
-        const model = data.imageModels.find(row => row.key === series.model);
-        if (!model) { toast.error("Модель серии недоступна. Исходный черновик сохранён."); return; }
-        const draft = { ...emptyDraft("image"), model: model.key, mode: series.mode, aspectRatio: series.aspect_ratio || imageDraft.aspectRatio, quality: series.quality, count: series.count, prompt: series.prompt_hidden || series.prompt_actions_allowed === false ? (imageDraft.promptId === null ? imageDraft.prompt : "") : series.last_prompt || series.base_prompt || "" };
-        setImageDraft(appendReferenceUrls(draft, Array.from(new Set([series.reference_url, ...(series.reference_urls || [])].filter((url): url is string => Boolean(url))))));
-        setActiveTab("photo");
-      }} />}<WorksScreen tasks={data.recentTasks} models={[...data.imageModels, ...data.videoModels]} language={data.user.language} unavailable={data.historyUnavailable} refreshing={worksRefreshing} onOpenTask={openTask} onCreate={() => setActiveTab("create")} onRefresh={() => void refreshWorks()} /></>;
-    }
+    if (ux2 && activeTab === "works") return studioWorks;
     if (showFeed) {
       return (
         <FeedScreen
@@ -1232,13 +1377,14 @@ function App() {
       return <TrendsScreen items={data.trends} filter={trendsFilter} loading={trendsLoading} preparingId={preparingTrendId} onFilterChange={setTrendsFilter} onRefresh={() => void loadTrends()} onPrepare={(trend) => void prepareTrend(trend)} />;
     }
     if (activeTab === "services") {
-      return <ServicesScreen lilac={lilac} messages={assistantMessages} assistantBusy={assistantBusy} photoPromptBusy={photoPromptBusy} photoPromptResult={photoPromptResult} videoPromptBusy={videoPromptBusy} videoPromptResult={videoPromptResult} onAssistantSend={(message) => void sendAssistant(message)} onPhotoPrompt={(file) => void createPhotoPrompt(file)} onVideoPrompt={(file) => void createVideoPrompt(file)} onUsePrompt={(prompt) => { setImageDraft((current) => ({ ...current, prompt, promptId: null, sourceTitle: "" })); setActiveTab("photo"); }} onUseVideoPrompt={(prompt) => { setVideoDraft((current) => ({ ...current, prompt, promptId: null, sourceTitle: "" })); setActiveTab("video"); }} onNavigate={setActiveTab} />;
+      return <ServicesScreen lilac={lilac} onBalanceOpen={() => { if (latestActor.current === data.user.id) setBalanceOpen(true); }} messages={assistantMessages} assistantBusy={assistantBusy} photoPromptBusy={photoPromptBusy} photoPromptResult={photoPromptResult} videoPromptBusy={videoPromptBusy} videoPromptResult={videoPromptResult} onAssistantSend={(message) => void sendAssistant(message)} onPhotoPrompt={(file) => void createPhotoPrompt(file)} onVideoPrompt={(file) => void createVideoPrompt(file)} onUsePrompt={(prompt) => { setImageDraft((current) => ({ ...current, prompt, promptId: null, sourceTitle: "" })); setActiveTab("photo"); }} onUseVideoPrompt={(prompt) => { setVideoDraft((current) => ({ ...current, prompt, promptId: null, sourceTitle: "" })); setActiveTab("video"); }} onNavigate={setActiveTab} />;
     }
     if (activeTab === "settings") {
       return <SettingsScreen previewEnabled={ux2} onPreviewChange={changePreview} user={data.user} busy={languageBusy} onLanguageChange={(language) => void changeLanguage(language)} onResetApp={() => void initialize()} />;
     }
     return (
       <ProfileScreen
+        worksSection={lilac ? studioWorks : undefined}
         user={data.user}
         tasks={data.recentTasks}
         referrals={referrals}
@@ -1278,9 +1424,12 @@ function App() {
         patchDraft(kind, current => ({ ...current, prompt: task.prompt!, promptId: null, sourceTitle: "" }));
         setTaskOpen(false); setActiveTab(kind === "image" ? "photo" : "video"); toast.info("Задание скопировано. Проверьте модель и исходные материалы перед запуском.");
       } : undefined} />
-      <BalanceSheet open={balanceOpen} user={data.user} plans={data.paymentPlans} availableProviders={data.paymentMethods} lavaPlanKeys={data.lavaPlanKeys} busy={paymentBusy} error={paymentError} onOpenChange={setBalanceOpen} onPay={(provider, plan) => void pay(provider, plan)} />
-      <Sheet open={Boolean(videoConfirmation)} title="Стоимость видео" description="Проверены видеореференсы и параметры запуска" onOpenChange={(open) => { if (!open) setVideoConfirmation(null); }} footer={
-        <Button className="w-full" disabled={submitting || !videoConfirmation?.quote.can_run} onClick={() => { if (videoConfirmation) void submitGeneration(videoConfirmation.kind, videoConfirmation); }}>
+      <BalanceSheet open={balanceOpen} user={data.user} plans={data.paymentPlans} availableProviders={data.paymentMethods} lavaPlanKeys={data.lavaPlanKeys} busy={paymentBusy} error={paymentError} onOpenChange={setBalanceOpen} onPay={(provider, plan) => void pay(provider, plan)}
+        pending={Boolean(pendingTopup)} checking={topupChecking} onCheck={() => void checkTopup()}
+        onReopen={pendingTopup && canReopenPayment(pendingTopup) ? () => { if (pendingTopupRef.current === pendingTopup) openExternalUrl(pendingTopup.checkoutUrl!); } : undefined}
+        onAcknowledge={pendingTopup && !pendingTopup.transactionId && topupChecked === pendingTopup ? acknowledgeTopup : undefined} />
+      <Sheet balanceUnavailableReason={submitting ? "Дождитесь проверки стоимости." : undefined} open={Boolean(videoConfirmation)} title="Стоимость видео" description="Проверьте стоимость перед запуском" onOpenChange={(open) => { if (!open) setVideoConfirmation(null); }} footer={
+        <Button className="w-full" disabled={submitting || videoQuoteRefreshing || !videoConfirmation?.quote.can_run || videoConfirmation.quote.balance_credits < videoConfirmation.quote.cost_credits * videoConfirmation.count} onClick={() => { if (videoConfirmation) void submitGeneration(videoConfirmation.kind, videoConfirmation); }}>
           {submitting ? "Проверяем цену…" : `Запустить за ${(videoConfirmation?.quote.cost_credits || 0) * (videoConfirmation?.count || 1)} 💋`}
         </Button>
       }>
@@ -1288,6 +1437,10 @@ function App() {
           <p>Видеореференсы: {videoConfirmation.quote.reference_seconds} сек</p>
           <p>Результат: {videoConfirmation.quote.output_seconds} сек</p>
           <p>К оплате: <strong>{videoConfirmation.quote.cost_credits} 💋 за задачу</strong></p>
+          <p>Баланс: {videoConfirmation.quote.balance_credits} 💋</p>
+          {videoConfirmation.quote.balance_credits < videoConfirmation.quote.cost_credits * videoConfirmation.count && <p>Не хватает: {Math.max(0, videoConfirmation.quote.cost_credits * videoConfirmation.count - videoConfirmation.quote.balance_credits)} 💋</p>}
+          {videoQuoteRefreshing && <p role="status">Обновляем стоимость. Запуск нужно подтвердить отдельно.</p>}
+          {!lilac && <Button variant="outline" disabled={submitting} onClick={() => setBalanceOpen(true)}>Пополнить</Button>}
           {videoConfirmation.count > 1 && <p>Всего задач: {videoConfirmation.count}</p>}
         </div>}
       </Sheet>

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createRoot } from "react-dom/client";
 import "./style.css";
 import { openFeedRemixRunner } from "./features/feed-remix-runner";
+import { configureTelegramWebApp } from "./lib/telegram";
 
 const API_BASE = "/api/v1";
 const REALTIME_MAX_FAILURES = 5;
@@ -3737,13 +3738,7 @@ function App() {
   const generationScreen = useRef("studio");
   const handledTrendLink = useRef(false);
 
-  useEffect(() => {
-    const webApp = tg();
-    try {
-      webApp?.ready?.();
-      webApp?.expand?.();
-    } catch (_) {}
-  }, []);
+  useEffect(() => configureTelegramWebApp(), []);
 
   useEffect(() => {
     const resetScroll = () => {

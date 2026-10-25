@@ -624,6 +624,10 @@ registerDomain("09 · Каталог трендов и пользователь�
 registerDomain("10 · Запуск тренда через upload-first runner", async (page, seed) => {
   const trend = makeTrend(seed, "image");
   const captures: Captures = {};
+  let runPosts = 0;
+  page.on("request", request => {
+    if (request.method() === "POST" && /\/trends\/\d+\/run$/.test(new URL(request.url()).pathname)) runPosts++;
+  });
   await mockMiniApp(page, { trends: [trend], captures });
   await openApp(page);
   await page.getByRole("tab", { name: "Тренды", exact: true }).click();
@@ -637,12 +641,18 @@ registerDomain("10 · Запуск тренда через upload-first runner",
     mimeType: "image/jpeg",
     buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
   });
+  const launch = dialog.getByRole("button", { name: /Создать · 1[,.]5/ });
+  await expect(launch).toBeEnabled();
+  expect(captures.trendRun).toBeUndefined();
+  expect(runPosts).toBe(0);
+  await launch.click();
   await expect(page.getByRole("dialog", { name: /Задача #/ })).toBeVisible();
   expect(captures.trendRun).toMatchObject({ asset_id: "apixasset.journey.signature" });
   expect(typeof captures.trendRun?.idempotency_key).toBe("string");
   expect(captures.trendRun?.quoted_credits).toBe(1.5);
   expect(captures.trendRun).not.toHaveProperty("model");
   expect(captures.trendRun).not.toHaveProperty("prompt");
+  expect(runPosts).toBe(1);
 });
 
 registerDomain("11 · Настройки, сервисы и профиль пользователя", async (page, seed) => {

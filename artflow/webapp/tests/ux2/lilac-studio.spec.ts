@@ -23,6 +23,8 @@ async function prepare(page: Page, admin = true) {
     if (path.endsWith("/models/video")) return json([{ key: "fixture-video", display_name: "Видео модель", modes: ["text", "image"], credits: 10, max_refs: 1, aspect_ratios: ["16:9", "9:16"], durations: [5], resolutions: ["720p"] }]);
     if (path.endsWith("/models/music")) return json([{ key: "fixture-music", display_name: "Музыкальная модель", credits: 20 }]);
     if (path.endsWith("/music/voices")) return json([]);
+    if (path.endsWith("/plans")) return json([{ key:"fixture-plan", title:"Серверный пакет", credits:50, price_rub:99 }]);
+    if (path.endsWith("/payment-methods")) return json(["tbank"]);
     if (path.endsWith("/referrals")) return json({ counts: {}, balance: {}, children: {}, withdrawals: [] });
     if (path.endsWith("/services/pinterest")) return json({ title: "Pinterest AI", price_credits: 5, description: "Ваша версия кадра" });
     if (path.endsWith("/help")) return json({ title: "Помощь APIX", text: "Выберите задачу, добавьте фото и проверьте стоимость." });
@@ -42,6 +44,203 @@ test("new studio is an explicit admin entry while regular UI remains the default
   await page.getByRole("button", { name: "Открыть новую студию APIX" }).click();
   await expect(page.locator('[data-ui-version="3"]')).toBeVisible();
   await expect(page.getByRole("heading", { name: "Что создадим сегодня?" })).toBeVisible();
+});
+
+test("black red foundation: palette, five destinations and full profile works", async ({ page }, info) => {
+  await prepare(page);
+  await page.goto("/?ux=3");
+  await expect(page.locator('[data-ui-version="3"]')).toBeVisible();
+  await expect(page.locator("body")).toHaveCSS("background-color", "rgb(0, 0, 0)");
+  const nav = page.getByRole("navigation", { name: "Основная навигация" });
+  await expect(nav.getByRole("tab", { name: "Проекты", exact: true })).toHaveCount(0);
+  await expect(nav.getByRole("button", { name: "Пополнить", exact: true })).toBeVisible();
+  for (const width of [320, 390, 768, 1280]) {
+    await page.setViewportSize({ width, height: 844 });
+    const create = await nav.locator('[data-destination="create"]').boundingBox();
+    expect(create!.width).toBeGreaterThanOrEqual(44); expect(create!.height).toBeGreaterThanOrEqual(44);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await expect(page.locator(".apix-balance-button")).toContainText("Пополнить");
+    await page.screenshot({ path: info.outputPath(`black-red-home-${width}.png`), fullPage: true });
+  }
+  await nav.getByRole("tab", { name: "Профиль", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Мои работы", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Обновить работы", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "В работе", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Все работы", exact: true })).toHaveCount(0);
+  for (const width of [320, 390, 768, 1280]) {
+    await page.setViewportSize({ width, height: 844 });
+    await page.screenshot({ path: info.outputPath(`black-red-profile-${width}.png`), fullPage: true });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  }
+  await nav.getByRole("tab", { name: "Главная", exact: true }).click();
+  await page.getByRole("button", { name: "Все проекты", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Мои работы", exact: true })).toBeVisible();
+  await expect(nav.getByRole("tab", { name: "Профиль", exact: true })).toHaveAttribute("aria-selected", "true");
+  await page.locator("[data-apix-editor-back]").click();
+  await expect(page.locator(".studio-profile-works")).toBeVisible();
+  await expect(page.locator("[data-apix-editor-back]")).toHaveCount(0);
+});
+
+test("black red foundation: phone profile header stays reachable after works scroll and topup cancel", async ({ page }, info) => {
+  await prepare(page); await page.setViewportSize({width:390,height:844}); await page.goto("/?ux=3");
+  await page.getByRole("navigation").getByRole("tab", {name:"Профиль",exact:true}).click();
+  const balance = page.locator(".apix-balance-button");
+  const measurements: unknown[] = [];
+  const checkHeader = async () => {
+    await expect(balance).toBeInViewport({ratio:1});
+    await expect(page.locator(".ux2-wordmark")).toBeInViewport({ratio:1});
+    const position = await balance.evaluate(node => {
+      const rect = node.getBoundingClientRect();
+      return { x:rect.x,y:rect.y,width:rect.width,height:rect.height,scrollY:window.scrollY,reachable:node.contains(document.elementFromPoint(rect.x+rect.width/2,rect.y+rect.height/2)) };
+    });
+    expect(position.reachable).toBe(true); expect(position.y).toBeGreaterThanOrEqual(0);
+    measurements.push(position);
+  };
+  await checkHeader();
+  await page.locator(".apix-shell > main").evaluate(node => {node.scrollTop=node.scrollHeight;});
+  await checkHeader(); await balance.click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.getByRole("dialog").getByRole("button",{name:"Закрыть",exact:true}).click();
+  await checkHeader(); await expect(page.locator(".studio-profile-works")).toBeVisible();
+  await page.screenshot({path:info.outputPath("black-red-profile-persistent-header-390.png"),fullPage:true});
+  await info.attach("profile-header-bounds",{body:JSON.stringify(measurements,null,2),contentType:"application/json"});
+});
+
+test("black red foundation: explicit topup cancels with the same editor and task", async ({ page }) => {
+  const writes = await prepare(page);
+  await page.route("**/api/v1/history?**", route => route.fulfill({ json: [{ id: 77, model: "fixture-image", gen_type: "image", prompt: "Моя работа", status: "done" }] }));
+  await page.goto("/?ux=3");
+  await page.getByRole("button", { name: "Создать фото", exact: true }).click();
+  await page.getByRole("textbox", { name: /^Промпт/ }).fill("Черновик до пополнения");
+  await page.getByRole("navigation").getByRole("button", { name: "Пополнить", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(1);
+  await expect(page.getByRole("dialog")).toContainText("Серверный пакет");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("textbox", { name: /^Промпт/ })).toHaveValue("Черновик до пополнения");
+  await page.getByRole("tab", { name: "Профиль", exact: true }).click();
+  await page.getByRole("button", { name: "Моя работа — Готово", exact: true }).click();
+  const task = page.getByRole("dialog", { name: "Задача #77" });
+  await task.getByRole("button", { name: "Пополнить", exact: true }).click();
+  await expect(task).not.toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(1);
+  await page.keyboard.press("Escape");
+  await expect(task).toBeVisible();
+  await expect(task.getByRole("button", { name: "Пополнить", exact: true })).toBeFocused();
+  expect(writes.filter(write => /\/topup\/|\/generate\//.test(write.path))).toHaveLength(0);
+});
+
+for (const entry of ["studio", "ordinary", "legacy"] as const) for (const supported of [true, false]) {
+  test(`black red foundation: ${entry} Telegram ${supported ? "modern" : "unsupported"} fullscreen and safe chrome`, async ({ page }) => {
+    await prepare(page);
+    await page.addInitScript(({ supported }) => {
+      const calls: string[] = [], events: Record<string, () => void> = {};
+      (window as any).__telegramCalls = calls; (window as any).__telegramEvents = events;
+      Object.assign(window.Telegram!.WebApp!, {
+        version: supported ? "8.0" : "7.10", headerColor: "#123456", backgroundColor: "#234567", bottomBarColor: "#345678",
+        safeAreaInset: { top: 24, bottom: 12, left: 0, right: 0 }, contentSafeAreaInset: { top: 32, bottom: 0, left: 0, right: 0 },
+        ready() { calls.push("ready"); }, expand() { calls.push("expand"); },
+        requestFullscreen() { calls.push("fullscreen"); },
+        onEvent(name: string, callback: () => void) { events[name] = callback; }, offEvent(name: string) { delete events[name]; },
+        setHeaderColor(color: string) { calls.push(`header:${color}`); }, setBackgroundColor(color: string) { calls.push(`background:${color}`); }, setBottomBarColor(color: string) { calls.push(`bottom:${color}`); },
+      });
+      document.documentElement.requestFullscreen = () => { throw new Error("Browser fullscreen must not be requested"); };
+    }, { supported });
+    await page.goto(entry === "studio" ? "/?ux=3" : entry === "legacy" ? "/?legacy=1" : "/");
+    await expect.poll(() => page.evaluate(() => (window as any).__telegramCalls.includes("expand"))).toBe(true);
+    expect(await page.evaluate(() => (window as any).__telegramCalls.filter((x: string) => x === "fullscreen").length)).toBe(supported ? 1 : 0);
+    await page.evaluate(() => { (window as any).__telegramEvents.fullscreenChanged?.(); (window as any).__telegramEvents.fullscreenFailed?.(); });
+    expect(await page.evaluate(() => (window as any).__telegramCalls.filter((x: string) => x === "fullscreen").length)).toBe(supported ? 1 : 0);
+    if (entry === "studio") {
+      await expect(page.locator('[data-ui-version="3"]')).toBeVisible();
+      expect((await page.locator(".apix-app-header").boundingBox())!.y).toBeGreaterThanOrEqual(56);
+      await page.getByRole("button", { name: "Обычный интерфейс", exact: true }).click();
+      await expect.poll(() => page.evaluate(() => (window as any).__telegramCalls.includes("header:#123456"))).toBe(true);
+      expect(await page.evaluate(() => (window as any).__telegramCalls.includes("header:#000000"))).toBe(true);
+    }
+  });
+}
+
+test("black red foundation: actual contrast, red text, focus and short viewport", async ({ page }, info) => {
+  await prepare(page); await page.emulateMedia({ reducedMotion: "reduce" }); await page.goto("/?ux=3");
+  await expect(page.locator('[data-ui-version="3"]')).toBeVisible();
+  const contrast = await page.evaluate(() => {
+    const pixel = (color: string) => { const c = document.createElement("canvas"); c.width = c.height = 1; const ctx = c.getContext("2d")!; ctx.fillStyle = color; ctx.fillRect(0,0,1,1); return [...ctx.getImageData(0,0,1,1).data].slice(0,3); };
+    const lum = (rgb: number[]) => rgb.map(x => x/255).map(x => x <= .04045 ? x/12.92 : ((x+.055)/1.055)**2.4).reduce((sum,x,i) => sum+x*[.2126,.7152,.0722][i],0);
+    const root = getComputedStyle(document.documentElement);
+    return [["--foreground", "--background"], ["--foreground", "--card"], ["--muted-foreground", "--card"], ["--primary", "--card"], ["--primary-foreground", "--primary"]].map(([fg,bg]) => {
+      const f = pixel(root.getPropertyValue(fg)), b = pixel(root.getPropertyValue(bg));
+      return { fg, bg, ratio:(Math.max(lum(f),lum(b))+.05)/(Math.min(lum(f),lum(b))+.05), red: f[0] > f[2] };
+    });
+  });
+  for (const pair of contrast) { expect(pair.ratio, `${pair.fg} on ${pair.bg}`).toBeGreaterThanOrEqual(4.5); expect(pair.red).toBe(true); }
+  await info.attach("computed-contrast", { body: JSON.stringify(contrast, null, 2), contentType:"application/json" });
+  await expect(page.locator(".ux2-wordmark strong")).toHaveCSS("color", "rgb(255, 105, 121)");
+  await page.getByRole("button", { name: "Создать фото", exact: true }).click();
+  const prompt = page.getByRole("textbox", { name: /^Промпт/ }); await prompt.focus();
+  await expect(prompt).toHaveCSS("outline-style", "solid");
+  await expect(prompt).toHaveCSS("outline-width", "2px");
+  await page.setViewportSize({ width:320,height:420 }); await prompt.fill("Короткий экран с клавиатурой");
+  await page.locator(".apix-shell > main").evaluate(node => { node.scrollTop = node.scrollHeight; });
+  const balance = page.locator(".apix-balance-button");
+  await expect(balance).toBeInViewport(); await balance.click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expect(page.getByRole("dialog").getByRole("button", { name:"Закрыть", exact:true })).toBeInViewport();
+  for (let i=0;i<8;i++) await page.keyboard.press("Tab");
+  expect(await page.getByRole("dialog").evaluate(node => node.contains(document.activeElement))).toBe(true);
+  await page.screenshot({ path:info.outputPath("black-red-short-topup.png"), fullPage:true });
+  await page.keyboard.press("Escape"); await expect(prompt).toHaveValue("Короткий экран с клавиатурой");
+});
+
+async function prepareRepeat(page: Page, pending = false) {
+  const writes = await prepare(page);
+  const source = { id:201, model:"fixture-image", gen_type:"image", result_url:"https://media.example.test/source.png", is_mine:true, aspect_ratio:"1:1" };
+  await page.route("**/api/v1/feed/201", route => route.fulfill({json:source}));
+  await page.route("**/api/v1/feed/201/remix/quote", route => route.fulfill({json:{ cost_credits:5, balance_credits:120, can_run:true, deficit_credits:0, recommended_plan:null }}));
+  await page.route("https://media.example.test/**", route => route.fulfill({ contentType:"image/png", body:Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9WlZ5xkAAAAASUVORK5CYII=","base64") }));
+  await page.addInitScript(({pending}) => {
+    const handlers = new Set<() => void>();
+    window.Telegram!.WebApp!.BackButton = { show(){}, hide(){}, onClick(callback){handlers.add(callback);}, offClick(callback){handlers.delete(callback);} };
+    window.addEventListener("test:telegram-back", () => handlers.forEach(callback => callback()));
+    if (pending) sessionStorage.setItem("apix:feed-repeat-draft:v2:7:201", JSON.stringify({ savedAt:Date.now(), sourceMediaUrl:"https://media.example.test/source.png", references:[], changeRequest:"Ожидающий черновик", modelKey:"fixture-image", mode:"image", aspectRatio:"1:1", quality:"basic", count:1, duration:5, resolution:"720p", grokMode:"normal", payment:{ startedAt:Date.now(), provider:"tbank", planKey:"fixture-plan", transactionId:41, checkoutUrl:"https://pay.example.test/41" } }));
+  }, {pending});
+  await page.goto("/?ux=3&feed=201");
+  return writes;
+}
+
+test("black red foundation: independent repeat portal preserves draft through topup and native Back", async ({ page }, info) => {
+  const writes = await prepareRepeat(page);
+  const repeat = page.getByRole("dialog", {name:"Повторить работу"});
+  const draft = repeat.getByLabel("Что изменить в образе");
+  await repeat.getByText("Что изменить (необязательно)", { exact: true }).click();
+  await draft.fill("Новый красный фон");
+  await repeat.getByRole("button", {name:"Пополнить", exact:true}).click();
+  await expect(repeat).not.toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(1);
+  await page.evaluate(() => window.dispatchEvent(new Event("test:telegram-back")));
+  await expect(repeat).toBeVisible(); await expect(draft).toHaveValue("Новый красный фон");
+  await expect(repeat.getByRole("button", {name:"Пополнить", exact:true})).toBeFocused();
+  await page.screenshot({ path:info.outputPath("black-red-repeat.png"), fullPage:true });
+  expect(writes.filter(write => /\/topup\/|\/generate\/|\/remix$/.test(write.path))).toHaveLength(0);
+});
+
+test("black red foundation: pending inline checkout blocks generic topup without losing payment marker", async ({ page }) => {
+  const writes = await prepareRepeat(page,true);
+  const repeat = page.getByRole("dialog", {name:"Повторить работу"});
+  await expect(repeat.getByRole("button", {name:"Пополнить", exact:true})).toBeDisabled();
+  await expect(repeat.getByText("Завершите текущую операцию или проверьте уже открытую оплату ниже.", {exact:true})).toBeVisible();
+  await expect(repeat.getByRole("button", {name:"Проверить оплату", exact:true})).toBeVisible();
+  expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem("apix:feed-repeat-draft:v2:7:201")!).payment.transactionId)).toBe(41);
+  expect(writes.filter(write => /\/topup\//.test(write.path))).toHaveLength(0);
+});
+
+for (const revoked of ["admission", "actor"] as const) test(`black red foundation: revoking ${revoked} removes the portal balance bridge`, async ({ page }) => {
+  await prepareRepeat(page);
+  const repeat = page.getByRole("dialog", {name:"Повторить работу"});
+  await expect(repeat.getByRole("button", {name:"Пополнить", exact:true})).toBeEnabled();
+  await page.route("**/api/v1/me", route => route.fulfill({json:{id:revoked === "actor" ? 8 : 7,tg_id:123,credits:120,language:"ru",miniapp_ux2_available:revoked === "actor"}}));
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await expect(page.locator('[data-ui-version="3"]')).toHaveCount(0);
+  await expect(page.locator(".studio-overlay-balance")).toHaveCount(0);
 });
 
 test("ordinary user cannot enable new studio by direct query", async ({ page }) => {
@@ -83,12 +282,15 @@ test("assistant preserves earlier conversation content on the second request", a
 });
 
 for (const width of [320, 390, 768, 1280]) {
-  test(`five studio tabs fit and home does not overflow at ${width}px`, async ({ page }) => {
+  test(`five studio destinations fit and home does not overflow at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 844 });
     await prepare(page);
     await page.goto("/?ux=3");
-    const tabs = page.getByRole("tablist", { name: "Разделы Mini App" }).getByRole("tab");
+    const rail = page.getByRole("tablist", { name: "Разделы Mini App" });
+    const tabs = rail.locator("button");
     await expect(tabs).toHaveCount(5);
+    await expect(rail.getByRole("tab")).toHaveCount(4);
+    await expect(rail.getByRole("button", {name:"Пополнить",exact:true})).not.toHaveAttribute("aria-selected");
     await expect(tabs.nth(2)).toHaveAccessibleName("Создать");
     const createBox = await tabs.nth(2).boundingBox();
     expect(Math.abs(createBox!.x + createBox!.width / 2 - width / 2)).toBeLessThanOrEqual(2);
@@ -115,7 +317,7 @@ test("public prompt publication requires a separate explicit confirmation", asyn
   const writes = await prepare(page);
   await page.route("**/api/v1/history?**", route => route.fulfill({ json: [{ id: 77, model: "fixture-image", gen_type: "image", prompt: "Мой приватный портрет", status: "done", result_url: "https://media.example.test/result.png", created_at: "2026-10-24T12:00:00Z" }] }));
   await page.goto("/?ux=3");
-  await page.getByRole("tab", { name: "Проекты", exact: true }).click();
+  await page.getByRole("tab", { name: "Профиль", exact: true }).click();
   await page.getByRole("button", { name: "Мой приватный портрет — Готово" }).click();
   await page.getByRole("button", { name: "Опубликовать промпт", exact: true }).click();
   await expect(page.getByText("Задание станет доступно другим пользователям.", { exact: true })).toBeVisible();
@@ -244,7 +446,7 @@ test("protected series restore keeps prompt hidden and requires replacement cons
   await page.getByRole("button", { name: "Библиотека промптов", exact: true }).click();
   await page.getByRole("button", { name: /Мой портрет/ }).click();
   await page.getByRole("button", { name: "Использовать задание", exact: true }).click();
-  await page.getByRole("tab", { name: "Проекты", exact: true }).click();
+  await page.getByRole("tab", { name: "Профиль", exact: true }).click();
   await page.getByRole("button", { name: "Продолжить серию", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "Восстановить серию?" })).toBeVisible();
   await page.getByRole("button", { name: "Заменить черновик фото", exact: true }).click();
@@ -255,7 +457,7 @@ test("protected series restore keeps prompt hidden and requires replacement cons
 test("multi-output results retain original URLs and animate without submitting", async ({ page }) => {
   const writes = await prepare(page);
   await page.route("**/api/v1/history?**", route => route.fulfill({ json: [{ id: 81, model: "fixture-image", gen_type: "image", prompt: "Два результата", status: "done", result_url: "https://media.example.test/original.png", result_urls: ["https://media.example.test/original.png", "https://media.example.test/second.png"], preview_url: "https://media.example.test/thumb.png" }] }));
-  await page.goto("/?ux=3"); await page.getByRole("tab", { name: "Проекты", exact: true }).click();
+  await page.goto("/?ux=3"); await page.getByRole("tab", { name: "Профиль", exact: true }).click();
   await page.getByRole("button", { name: "Два результата — Готово", exact: true }).click();
   await expect(page.getByRole("button", { name: "Оригинал 2", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Создать видео из результата", exact: true }).click();

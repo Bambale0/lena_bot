@@ -9,6 +9,7 @@ def test_studio_loads_generation_parity_layer():
     html = (ROOT / "landing/studio.html").read_text()
     assert "js/prototype-premium.js" in html
     assert "js/generation-parity.js" in html
+    assert "seedance25-studio.js?v=20261025_exact_repeat" in html
 
 
 def test_web_parity_layer_exposes_advanced_video_contract():
@@ -58,7 +59,7 @@ def test_public_site_billing_keeps_tribute_usd_provider_parity():
 
 
 def test_public_site_uses_current_cached_runtime_release():
-    expected = "prototype-premium.js?v=20261023_kling4_references"
+    expected = "prototype-premium.js?v=20261025_repeat_duration"
     pages = sorted((ROOT / "landing").glob("*.html"))
     referenced = [path for path in pages if "prototype-premium.js?v=" in path.read_text()]
     assert referenced

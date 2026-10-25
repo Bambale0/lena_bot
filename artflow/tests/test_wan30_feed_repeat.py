@@ -30,6 +30,44 @@ OUTPUT = "https://example.test/final-output.mp4"
 SECRET = "Synthetic creator recipe; replace the subject with the reader."
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("surface", ["v1", "web"])
+async def test_explicit_duration_survives_all_wan_recipe_restores(harness, surface):
+    recipe(harness, "wan/3-0-video")
+    path = f"/api/{surface}/feed/77/remix"
+    body = {"model": harness.source.model, "image_url": PHOTO, "duration_override": 20}
+    quote = await harness.client.post(path + "/quote", json=body)
+    assert quote.status_code == 200, quote.text
+    assert quote.json().get("data", quote.json())["cost_credits"] == 104
+    launched = await harness.client.post(path, json={**body, "quoted_credits": 104})
+    assert launched.status_code == 202, launched.text
+    assert harness.submit.await_args.args[0].duration == 20
+    assert harness.source.input_params["wan30_request"]["duration"] == 15
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("seconds", [True, 15.5, "15", 0, 31])
+async def test_duration_override_is_strict_before_debit(harness, seconds):
+    recipe(harness, "wan/3-0-video")
+    response = await harness.client.post("/api/v1/feed/77/remix", json={
+        "model": harness.source.model, "image_url": PHOTO, "duration_override": seconds, "quoted_credits": 84,
+    })
+    assert response.status_code == 422, response.text
+    harness.charge.assert_not_awaited()
+    harness.submit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_wan_output_override_keeps_reference_budget_guard(harness):
+    recipe(harness, "wan/3-0-video")
+    response = await harness.client.post("/api/v1/feed/77/remix", json={
+        "model": harness.source.model, "image_url": PHOTO, "duration_override": 25, "quoted_credits": 124,
+    })
+    assert response.status_code == 422
+    harness.charge.assert_not_awaited()
+    harness.submit.assert_not_awaited()
+
+
 @pytest.fixture
 async def harness(monkeypatch):
     source = SimpleNamespace(
@@ -402,6 +440,30 @@ async def test_telegram_public_repeat_uses_the_same_recipe_and_quote(harness, mo
 
 
 @pytest.mark.asyncio
+async def test_telegram_duration_choice_survives_restore_and_changes_fingerprint(harness, monkeypatch):
+    from api.wan30_feed_recipe import recipe_options
+    from bot.handlers import video_gen
+    recipe(harness, "wan/3-0-video")
+    monkeypatch.setattr(video_gen, "_external_source_feed_id", AsyncMock(return_value=77))
+    fingerprints = []
+    for duration in (15, 20):
+        _, _, data, _ = await video_gen._prepare_feed_video_inputs(
+            session=harness.session, db_user=harness.user, source_feed_gen_id=77,
+            model_key=harness.source.model, prompt=SECRET, image_url=PHOTO,
+            data={"duration": 5, "duration_override": duration},
+        )
+        assert data["duration"] == duration
+        request = await wan30_launch.create_wan30_request(
+            model=harness.source.model, prompt=SECRET, mode=data["mode"], image_urls=[PHOTO],
+            video_url=data["reference_video_url"], duration=data["duration"], resolution=data["resolution"],
+            aspect_ratio=data["aspect_ratio"], options=recipe_options(data),
+        )
+        quote = await wan30_launch.get_wan30_quote(harness.session, request)
+        fingerprints.append(quote.stored_params())
+    assert fingerprints[0] != fingerprints[1]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("provider", ["kie", "neironych"])
 async def test_unknown_paid_result_keeps_existing_recovery_without_refund_or_replay(
     harness, monkeypatch, provider
@@ -473,6 +535,16 @@ async def test_telegram_confirmation_quotes_restored_settings_not_ui_defaults(ha
     text = message.answer.await_args.args[0]
     assert "<b>84" in text and "<b>15" in text and "480p" in text
     assert data["wan30_quote"]["fingerprint"]
+    first_quote = dict(data["wan30_quote"])
+    data["duration_override"] = 20
+    launched = await video_gen._launch_video_generation_from_state(
+        source_message=message, state=state, session=harness.session, db_user=harness.user,
+        bot=AsyncMock(), prompt=SECRET, source_feed_gen_id=77, hidden_feed_prompt=True,
+        wan_confirmation_token=first_quote["token"],
+    )
+    assert launched is False
+    assert data["wan30_quote"]["fingerprint"] != first_quote["fingerprint"]
+    assert "<b>104" in message.answer.await_args.args[0]
     harness.charge.assert_not_awaited()
     harness.submit.assert_not_awaited()
     assert SECRET not in str(message.answer.await_args)

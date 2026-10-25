@@ -15,5 +15,5 @@ def test_seedance25_website_uses_one_multimodal_reference_surface() -> None:
     assert 'token("scenario"' not in enhancer
     assert 'body.mode = "text"' in enhancer
     assert 'body.grok_mode = null' in enhancer
-    assert 'refs.style.display = selected() ? "none" : ""' in enhancer
+    assert 'refs.style.display = selected() && !exactFeedRepeat() ? "none" : ""' in enhancer
     assert 'seedMode.style.display = selected() ? "none" : ""' in enhancer

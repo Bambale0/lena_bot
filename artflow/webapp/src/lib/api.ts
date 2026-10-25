@@ -500,11 +500,11 @@ export class MiniAppApi {
     };
   }
 
-  createPayment(provider: "tbank" | "crypto" | "tribute" | "lava", planKey: string): Promise<Record<string, unknown>> {
+  createPayment(provider: "tbank" | "crypto" | "tribute" | "lava", planKey: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.request<Record<string, unknown>>(`/topup/${provider}`, {
       method: "POST",
       body: JSON.stringify({ plan_key: planKey }),
-    });
+    }, signal);
   }
 
   getAuthConfig(): Promise<{ bot_username?: string }> {

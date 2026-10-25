@@ -3,11 +3,11 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from typing import Any
+from typing import Annotated, Any
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,6 +31,7 @@ from bot.utils.deep_links import build_start_payload
 from core.config import settings
 from core.gemini_omni import GEMINI_OMNI_DURATIONS, GEMINI_OMNI_VIDEO_MODEL
 from core.model_pricing import split_pricing_variant_key
+from core.repeat_duration import duration_offer, resolve_repeat_duration
 from core.trend_user_fields import (
     TrendUserFieldsError,
     normalize_configured_trend_user_fields,
@@ -92,6 +93,7 @@ class TrendRunRequest(BaseModel):
     idempotency_key: str = Field(min_length=8, max_length=128)
     user_values: dict[str, str] = Field(default_factory=dict, max_length=6)
     quoted_credits: float | None = Field(default=None, ge=0)
+    duration: int | None = Field(default=None, strict=True, ge=1, le=30)
 
 
 class TrendUploadResponse(BaseModel):
@@ -182,13 +184,13 @@ async def _get_public_trend(session: AsyncSession, trend_id: int) -> UserPrompt:
     return prompt
 
 
-async def _trend_cost_credits(session: AsyncSession, trend: UserPrompt) -> float:
+async def _trend_cost_credits(session: AsyncSession, trend: UserPrompt, duration_override: int | None = None) -> float:
     if not trend.model:
         raise HTTPException(status_code=409, detail="Trend has no configured model")
     kind = trend_kind(trend)
     runtime_model, settings_payload = _runtime_model_and_settings(trend)
     if kind == "video":
-        duration = _trend_video_duration(runtime_model, settings_payload)
+        duration = _resolve_trend_duration(runtime_model, settings_payload, duration_override)
         from api.wan30_contract import WAN30_MODELS, Wan30Request
         from api.wan30_launch import get_wan30_quote
 
@@ -251,6 +253,17 @@ def _trend_video_duration(model: str, settings_payload: dict[str, Any]) -> int:
     return duration
 
 
+def _resolve_trend_duration(model: str, settings_payload: dict[str, Any], override: int | None) -> int:
+    from api.kling4_contract import KLING4_MODELS
+
+    if model in KLING4_MODELS:
+        raise HTTPException(status_code=422, detail="Открой Kling 4 в студии: роли материалов требуют отдельного подтверждения")
+    try:
+        return resolve_repeat_duration(model, _trend_video_duration(model, settings_payload), override)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 def _validate_trend_video_settings(model: str, settings_payload: dict[str, Any]) -> None:
     if model == GEMINI_OMNI_VIDEO_MODEL:
         if _safe_int(settings_payload.get("duration"), GEMINI_OMNI_DURATIONS[0]) == 5:
@@ -259,8 +272,11 @@ def _validate_trend_video_settings(model: str, settings_payload: dict[str, Any])
 
 
 def _trend_request_hash(trend_id: int, body: TrendRunRequest) -> str:
+    identity = [trend_id, body.asset_id, body.user_values, body.quoted_credits]
+    if body.duration is not None:
+        identity.append(body.duration)
     encoded = json.dumps(
-        [trend_id, body.asset_id, body.user_values, body.quoted_credits],
+        identity,
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
@@ -323,6 +339,7 @@ async def _patch_trend_snapshot(
     asset_payload: dict[str, Any],
     idempotency_key: str,
     user_values: dict[str, str] | None = None,
+    requested_duration: int | None = None,
 ) -> None:
     generation = await repo.get_generation_by_id(session, generation_id)
     if not generation:
@@ -344,6 +361,8 @@ async def _patch_trend_snapshot(
             "trend_user_values": dict(user_values or {}),
         }
     )
+    if requested_duration is not None:
+        existing["trend_requested_duration"] = requested_duration
     generation.input_params = json.dumps(existing, ensure_ascii=False, separators=(",", ":"))
     await session.commit()
 
@@ -447,6 +466,7 @@ async def run_trend(
             previous.get("trend_id") != trend_id
             or previous.get("user_asset_id") != body.asset_id
             or previous.get("trend_user_values", {}) != body.user_values
+            or previous.get("trend_requested_duration") != body.duration
         ):
             raise HTTPException(
                 status_code=409, detail="Request key already belongs to a different trend run"
@@ -469,6 +489,7 @@ async def run_trend(
     asset_url = str(asset["url"])
 
     if kind == "video":
+        settings_payload["duration"] = _resolve_trend_duration(runtime_model, settings_payload, body.duration)
         request = VideoGenRequest(
             model=runtime_model,
             prompt="Использовать скрытый трендовый промпт",
@@ -483,7 +504,7 @@ async def run_trend(
         )
         from api.wan30_contract import WAN30_MODELS
 
-        if runtime_model in WAN30_MODELS:
+        if runtime_model in WAN30_MODELS or body.duration is not None:
             quote = await quote_video_generation(request, session, user)
             if body.quoted_credits is None or round(body.quoted_credits, 6) != round(
                 float(quote["cost_credits"]), 6
@@ -497,6 +518,8 @@ async def run_trend(
                 )
             request.quoted_credits = float(quote["cost_credits"])
     else:
+        if body.duration is not None:
+            raise HTTPException(status_code=422, detail="Длительность доступна только для видео")
         request = ImageGenRequest(
             model=runtime_model,
             prompt="Использовать скрытый трендовый промпт",
@@ -578,6 +601,7 @@ async def run_trend(
         asset_payload=asset,
         idempotency_key=body.idempotency_key,
         user_values=body.user_values,
+        requested_duration=body.duration,
     )
     claim.generation_id = task.id
     claim.status = "complete"
@@ -613,14 +637,31 @@ async def _existing_trend_run_response(
     }
 
 
+def _parse_duration_query(value: Any) -> int | None:
+    if value is None or type(value) is int:
+        return value
+    if isinstance(value, str) and value.isascii() and value.isdecimal() and len(value) <= 2:
+        return int(value)
+    raise ValueError("Duration must be an integer")
+
+
 @router.get("/trends/{trend_id}/checkout")
 async def trend_checkout(
     trend_id: int,
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_miniapp_user),
+    duration: Annotated[int | None, BeforeValidator(_parse_duration_query)] = None,
 ) -> dict[str, Any]:
     trend = await _get_public_trend(session, trend_id)
-    cost = await _trend_cost_credits(session, trend)
+    requested = duration
+    offer = {}
+    if trend_kind(trend) == "video":
+        runtime_model, saved = _runtime_model_and_settings(trend)
+        effective = _resolve_trend_duration(runtime_model, saved, requested)
+        offer = duration_offer(runtime_model, _trend_video_duration(runtime_model, saved), effective)
+    elif requested is not None:
+        raise HTTPException(status_code=422, detail="Длительность доступна только для видео")
+    cost = await _trend_cost_credits(session, trend, requested) if requested is not None else await _trend_cost_credits(session, trend)
     balance = _credits_out(user.credits)
     deficit = round(max(0.0, cost - balance), 6)
     plan = None
@@ -641,6 +682,7 @@ async def trend_checkout(
         "can_run": deficit <= 0,
         "deficit_credits": round(deficit, 6),
         "recommended_plan": plan,
+        **offer,
     }
 
 

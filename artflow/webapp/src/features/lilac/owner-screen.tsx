@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,6 +8,8 @@ import type { MiniAppApi } from "@/lib/api";
 import { formatCredits } from "@/lib/utils";
 import { tabStorage } from "@/lib/draft-storage";
 import { LilacModeration } from "./moderation-panel";
+import { AdminBoundary, useAdminSession } from "./admin/primitives";
+import { LilacAdminWorkspace } from "./admin/workspace";
 
 interface Account { id: number; tg_id: number; full_name?: string; username?: string; credits: number; is_banned: boolean; }
 interface Withdrawal { id: number; amount_rub: number; status: string; payout_details: string; user: Account; }
@@ -22,7 +24,11 @@ interface Detail {
 interface Action { path: string; body: Record<string, unknown>; title: string; }
 interface PendingAdjustment { targetId: number; title: string; }
 
-export function LilacOwner({ api, ownerId }: { api: MiniAppApi; ownerId: number }) {
+export function LilacOwner({ api, ownerId, systemPanel }: { api: MiniAppApi; ownerId: number; systemPanel?: ReactNode }) {
+  return <AdminBoundary api={api} ownerId={ownerId}><OwnerContent api={api} ownerId={ownerId} systemPanel={systemPanel} /></AdminBoundary>;
+}
+function OwnerContent({ api, ownerId, systemPanel }: { api: MiniAppApi; ownerId: number; systemPanel?: ReactNode }) {
+  const session = useAdminSession();
   const pendingKey = `apix:lilac:owner-adjustment:${ownerId}`;
   const [pending, setPending] = useState<PendingAdjustment | null>(() => {
     try { const raw = tabStorage()?.getItem(pendingKey); if (!raw) return null;
@@ -39,21 +45,21 @@ export function LilacOwner({ api, ownerId }: { api: MiniAppApi; ownerId: number 
   const load = async (signal?: AbortSignal) => {
     setLoading(true); setError("");
     try {
-      const [overview, accounts, requests] = await Promise.all([api.request<{ summary: Record<string, number> }>("/admin/overview", {}, signal), api.request<{ items: Account[] }>(`/admin/users?query=${encodeURIComponent(query)}&limit=25`, {}, signal), api.request<{ items: Withdrawal[] }>(`/admin/withdrawals?status=${status}`, {}, signal)]);
+      const [overview, accounts, requests] = await Promise.all([session.request<{ summary: Record<string, number> }>("/admin/overview", {}, signal), session.request<{ items: Account[] }>(`/admin/users?query=${encodeURIComponent(query)}&limit=25`, {}, signal), session.request<{ items: Withdrawal[] }>(`/admin/withdrawals?status=${status}`, {}, signal)]);
       if (!signal?.aborted) { setSummary(overview.summary); setUsers(accounts.items); setWithdrawals(requests.items); }
     } catch (e) { if (!signal?.aborted) setError(e instanceof Error ? e.message : "Нет доступа к управлению"); }
     finally { if (!signal?.aborted) setLoading(false); }
   };
-  useEffect(() => { const controller = new AbortController(); void load(controller.signal); return () => controller.abort(); }, [api, status]);
+  useEffect(() => { const controller = new AbortController(); void load(controller.signal); return () => controller.abort(); }, [session, status]);
   const openAccount = async (id: number) => {
-    if (busy) return;
+    if (busy || !session.active()) return;
     setBusy(true);
-    try { setDetail(await api.request<Detail>(`/admin/users/${id}`, { cache: "no-store" })); setAmount(""); setNote(""); if (pending?.targetId === id) setLedgerReviewed(true); }
-    catch (e) { toast.error(e instanceof Error ? e.message : "Не удалось открыть аккаунт"); }
+    try { setDetail(await session.request<Detail>(`/admin/users/${id}`, { cache: "no-store" })); setAmount(""); setNote(""); if (pending?.targetId === id) setLedgerReviewed(true); }
+    catch (e) { if (session.active()) toast.error(e instanceof Error ? e.message : "Не удалось открыть аккаунт"); }
     finally { setBusy(false); }
   };
   const execute = async () => {
-    if (!action || busy || mutation.current || pending) return;
+    if (!action || busy || mutation.current || pending || !session.active()) return;
     const creditTarget = /^\/admin\/users\/(\d+)\/credits$/.exec(action.path);
     if (creditTarget) {
       const marker = { targetId: Number(creditTarget[1]), title: action.title };
@@ -64,10 +70,11 @@ export function LilacOwner({ api, ownerId }: { api: MiniAppApi; ownerId: number 
     mutation.current = true;
     setBusy(true);
     try {
-      await api.request(action.path, { method: "POST", body: JSON.stringify(action.body) });
+      await session.request(action.path, { method: "POST", body: JSON.stringify(action.body) });
       if (creditTarget) { try { tabStorage()?.removeItem(pendingKey); setPending(null); } catch { /* Keep pending until explicit ledger review. */ } }
       setAction(null); setDetail(null); toast.success("Изменение сохранено"); await load();
     } catch (e) {
+      if (!session.active()) return;
       setAction(null);
       toast.error(creditTarget ? "Ответ не подтверждён. Не повторяйте корректировку — сначала проверьте историю баланса." : e instanceof Error ? e.message : "Не удалось сохранить изменение");
     }
@@ -84,6 +91,7 @@ export function LilacOwner({ api, ownerId }: { api: MiniAppApi; ownerId: number 
     {loading && <p role="status">Загружаем кабинет…</p>}{error && <div role="alert"><p>{error}</p><Button onClick={() => void load()}>Повторить</Button></div>}
     <div className="lilac-task-grid">{metrics.map(([key, label]) => <div className="lilac-create-card" key={key}><strong>{formatCredits(summary[key] || 0)}</strong><span>{label}</span></div>)}</div>
     <LilacModeration key={ownerId} api={api} />
+    <LilacAdminWorkspace api={api} ownerId={ownerId} systemPanel={systemPanel} />
     <section><h2>Пользователи</h2><form className="flex gap-2" onSubmit={e => { e.preventDefault(); void load(); }}><Input aria-label="Поиск пользователя" value={query} onChange={e => setQuery(e.target.value)} placeholder="Имя, username или ID" /><Button type="submit" disabled={loading}>Найти</Button></form>
       {users.map(user => <button className="lilac-row" disabled={busy} key={user.id} onClick={() => void openAccount(user.id)}><span><strong>{user.full_name || user.username || `ID ${user.id}`}</strong><small>{formatCredits(user.credits)} кр. · {user.is_banned ? "Заблокирован" : "Активен"}</small></span></button>)}
       {!loading && !error && !users.length && <p className="lilac-note">Пользователи не найдены.</p>}

@@ -2,7 +2,7 @@
 
 - Version: `1.0.0`
 - OpenAPI: `3.1.0`
-- Paths: `199`
+- Paths: `200`
 
 APIX AI API for Telegram auth, content generation, billing, prompt library, feed, and provider webhooks.
 
@@ -1580,6 +1580,30 @@ Responses:
 - `401`: Missing, invalid or expired user credentials
 - `422`: Validation Error (`application/json`)
 
+#### `GET /api/v1/studio/preview`
+
+- Summary: Admit Lilac Studio
+- Operation ID: `admit_lilac_studio_api_v1_studio_preview_get`
+- Auth: yes
+- Request body: none
+
+Admit an authenticated administrator to the opt-in Studio UI.
+
+Shared generation/payment endpoints retain their existing authorization.
+The query string and browser storage are never authorization inputs.
+
+Parameters:
+
+| Name | In | Required | Type |
+| --- | --- | --- | --- |
+| `x-telegram-init-data` | `header` | no | `string | null` |
+| `x-web-auth-token` | `header` | no | `string | null` |
+
+Responses:
+- `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `422`: Validation Error (`application/json`)
+
 #### `POST /api/v1/topup/crypto`
 
 - Summary: Topup Crypto
@@ -1882,6 +1906,7 @@ Parameters:
 | Name | In | Required | Type |
 | --- | --- | --- | --- |
 | `trend_id` | `path` | yes | `integer` |
+| `duration` | `query` | no | `integer | null` |
 | `x-telegram-init-data` | `header` | no | `string | null` |
 | `x-web-auth-token` | `header` | no | `string | null` |
 

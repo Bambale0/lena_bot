@@ -197,6 +197,85 @@
         ]
       }
     },
+    "/api/v1/studio/preview": {
+      "get": {
+        "tags": [
+          "miniapp"
+        ],
+        "summary": "Admit Lilac Studio",
+        "description": "Admit an authenticated administrator to the opt-in Studio UI.\n\nShared generation/payment endpoints retain their existing authorization.\nThe query string and browser storage are never authorization inputs.",
+        "operationId": "admit_lilac_studio_api_v1_studio_preview_get",
+        "parameters": [
+          {
+            "name": "x-telegram-init-data",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Telegram-Init-Data"
+            }
+          },
+          {
+            "name": "x-web-auth-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Web-Auth-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Admit Lilac Studio Api V1 Studio Preview Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
+          }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          }
+        ]
+      }
+    },
     "/api/v1/me/feed": {
       "get": {
         "tags": [
@@ -6534,6 +6613,22 @@
             "schema": {
               "type": "integer",
               "title": "Trend Id"
+            }
+          },
+          {
+            "name": "duration",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Duration"
             }
           },
           {
@@ -19522,6 +19617,19 @@
             "title": "Duration",
             "default": 5
           },
+          "duration_override": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 30.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Override"
+          },
           "aspect_ratio": {
             "anyOf": [
               {
@@ -21673,6 +21781,19 @@
               }
             ],
             "title": "Quoted Credits"
+          },
+          "duration": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 30.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration"
           }
         },
         "type": "object",

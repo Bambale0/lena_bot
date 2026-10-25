@@ -3,11 +3,11 @@ import { ArrowLeft, ArrowRight, Copy, Heart, Library, Plus, RefreshCw } from "lu
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Select } from "@/components/ui/select";
 import { Sheet } from "@/components/ui/sheet";
 import type { MiniAppApi } from "@/lib/api";
 import { safeExternalUrl } from "@/lib/utils";
+import { LilacPromptPublication } from "./prompt-publication";
 
 export interface LibraryPrompt { id: number; title: string; description?: string; prompt_text?: string; model?: string; tags?: string[]; preview_url?: string; category?: string; status?: string; reject_reason?: string; likes?: number; uses_count?: number; }
 interface Props { api: MiniAppApi; onUse: (prompt: LibraryPrompt, signal: AbortSignal) => Promise<void>; }
@@ -31,7 +31,7 @@ export function LilacLibrary({ api, onUse }: Props) {
     catch (e) { if (!controller.signal.aborted) setUseError(e instanceof Error ? e.message : "Не удалось открыть задание"); }
     finally { if (useRequest.current === controller) useRequest.current = null; if (!controller.signal.aborted) setBusy(false); }
   };
-  const [title, setTitle] = useState(""), [description, setDescription] = useState(""), [prompt, setPrompt] = useState(""), [category, setCategory] = useState("other"), [publicConsent, setPublicConsent] = useState(false);
+  const [refresh, setRefresh] = useState(0);
   const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true); setError("");
     try { const params = new URLSearchParams({ page: String(page), limit: "20", source });
@@ -45,7 +45,7 @@ export function LilacLibrary({ api, onUse }: Props) {
       }
     } catch (e) { if (!signal?.aborted) setError(e instanceof Error ? e.message : "Не удалось загрузить библиотеку"); }
     finally { if (!signal?.aborted) setLoading(false); }
-  }, [api, mine, page, source, filterCategory, tag]);
+  }, [api, mine, page, source, filterCategory, tag, refresh]);
   useEffect(() => { const controller = new AbortController(); void load(controller.signal); return () => controller.abort(); }, [load]);
   const copyLink = async (item: LibraryPrompt) => {
     setBusy(true);
@@ -56,13 +56,6 @@ export function LilacLibrary({ api, onUse }: Props) {
     setBusy(true);
     try { const result = await api.request<{ likes: number }>(`/prompts/${item.id}/like`, { method: "POST", body: "{}" }); setSelected({ ...item, likes: result.likes }); }
     catch (e) { toast.error(e instanceof Error ? e.message : "Не удалось поставить отметку"); } finally { setBusy(false); }
-  };
-  const submit = async () => {
-    if (busy || !publicConsent || title.trim().length < 3 || prompt.trim().length < 10) return;
-    setBusy(true);
-    try { await api.request("/prompts", { method: "POST", body: JSON.stringify({ title: title.trim(), description: description.trim(), prompt_text: prompt.trim(), category }) });
-      toast.success("Промпт отправлен на проверку"); setAdding(false); setTitle(""); setDescription(""); setPrompt(""); setPublicConsent(false); setMine(true); setPage(1); if (mine) await load();
-    } catch (e) { toast.error(e instanceof Error ? e.message : "Не удалось отправить промпт"); } finally { setBusy(false); }
   };
   const deactivate = async (item: LibraryPrompt) => {
     if (busy) return; setBusy(true);
@@ -89,10 +82,6 @@ export function LilacLibrary({ api, onUse }: Props) {
         <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={busy || selected.status !== "approved"} onClick={() => void like(selected)}><Heart />{selected.likes || 0}</Button><Button variant="outline" disabled={busy || selected.status !== "approved"} onClick={() => void copyLink(selected)}><Copy />Скопировать ссылку</Button></div>
       </div>}
     </Sheet>
-    <Sheet open={adding} title="Опубликовать промпт" description="Публикация будет доступна другим пользователям после проверки." onOpenChange={setAdding} footer={<Button className="w-full" disabled={busy || !publicConsent || title.trim().length < 3 || prompt.trim().length < 10} onClick={() => void submit()}>{busy ? "Отправляем…" : "Отправить на проверку"}</Button>}>
-      <div className="grid gap-3"><label>Название<Input value={title} maxLength={120} onChange={e => setTitle(e.target.value)} /></label><label>Краткое описание<Textarea value={description} maxLength={500} onChange={e => setDescription(e.target.value)} /></label><label>Задание<Textarea value={prompt} maxLength={4000} onChange={e => setPrompt(e.target.value)} /></label><label>Категория<Select value={category} onChange={e => setCategory(e.target.value)}><option value="photo">Фото</option><option value="art">Арт</option><option value="business">Бизнес</option><option value="marketing">Маркетинг</option><option value="other">Разное</option></Select></label>
-        <label className="lilac-consent"><input type="checkbox" checked={publicConsent} onChange={e => setPublicConsent(e.target.checked)} />Я понимаю, что публикую задание для других пользователей.</label>
-      </div>
-    </Sheet>
+    {adding && <LilacPromptPublication api={api} onClose={() => setAdding(false)} onPublished={() => { toast.success("Промпт отправлен на проверку"); setAdding(false); setMine(true); setPage(1); setQuery(""); setRefresh(value => value + 1); }} />}
   </div>;
 }

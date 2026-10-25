@@ -25,6 +25,27 @@ AUTHOR_VIDEO = "https://example.test/original-input-video.mp4"
 PROMPT = "A woman in a pearl jacket dances at dusk, with a cinematic camera move."
 
 
+@pytest.mark.asyncio
+async def test_telegram_genjutsu_repeat_keeps_existing_source_admission(video_launch, monkeypatch):
+    from api.genjutsu_adapter import MOTION_MODEL
+
+    video_launch.source.model = MOTION_MODEL
+    video_launch.source.prompt = PROMPT
+    video_launch.source.input_params = origin(video_url=AUTHOR_VIDEO)
+    probe = AsyncMock(return_value=7)
+    monkeypatch.setattr(video_gen, "resolve_genjutsu_source_duration", probe)
+    # Genjutsu's installed feed-source admission is closed. Duration work must
+    # not enable it merely because the standalone model accepts source videos.
+    with pytest.raises(video_gen.FeedRemixUnavailable):
+        await video_gen._prepare_feed_video_inputs(
+            session=video_launch.kwargs["session"], db_user=video_launch.kwargs["db_user"], source_feed_gen_id=77,
+            model_key=MOTION_MODEL, prompt=PROMPT, image_url=USER,
+            data={"duration": 10, "resolution": "480p"},
+        )
+    probe.assert_not_awaited()
+    video_launch.repo.spend_credits.assert_not_awaited()
+
+
 def origin(*, video_url=None):
     return {
         "mode": "multimodal",
@@ -73,6 +94,33 @@ async def test_api_feed_video_created_from_photo_reuses_author_prompt_without_an
     assert saved["reference_video_url"] is None
     assert saved["duration"] == 10
     assert saved["aspect_ratio"] == "9:16"
+
+
+@pytest.mark.asyncio
+async def test_bot_replay_restores_recipe_except_explicit_duration(video_launch):
+    video_launch.source.gen_type = GenerationType.video
+    video_launch.source.model = MODEL
+    video_launch.source.prompt = PROMPT
+    video_launch.source.result_url = RESULT_MP4
+    video_launch.source.input_params = origin()
+    _, _, restored, _ = await video_gen._prepare_feed_video_inputs(
+        session=video_launch.kwargs["session"], db_user=video_launch.kwargs["db_user"],
+        source_feed_gen_id=77, model_key=MODEL, prompt=PROMPT, image_url=USER,
+        data={**video_launch.data, "duration_override": 15, "aspect_ratio": "16:9", "resolution": "720p"},
+    )
+    assert restored["duration"] == 15
+    assert restored["resolution"] == "480p"
+    assert restored["aspect_ratio"] == "9:16"
+
+
+def test_source_edit_bot_keyboard_locks_time_but_wan_reference_does_not():
+    edit = {"feed_use_gen_id": 77, "feed_use_gen_type": "video", "feed_use_needs_video_reference": True,
+            "feed_use_prompt": "Edit the video: replace the clothing", "duration": 7}
+    rows = video_gen._video_params_reply_markup(MODEL, edit).inline_keyboard
+    assert not any(str(button.callback_data).startswith("vpar_dur:") for row in rows for button in row)
+    assert "исходного" in video_gen._video_params_hint(MODEL, edit)
+    rows = video_gen._video_params_reply_markup("wan/3-0-video", edit).inline_keyboard
+    assert any(button.callback_data == "vpar_dur:15" for row in rows for button in row)
 
 
 @pytest.mark.asyncio
@@ -269,9 +317,12 @@ def test_source_provenance_is_unknown_if_no_input_snapshot():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("provider", ["kie", "neironych"])
-async def test_creator_photo_replay_provider_payload_has_no_video_input(api_launch, monkeypatch, provider):
+@pytest.mark.parametrize("override", [None, 15, 30])
+async def test_creator_photo_replay_provider_payload_has_no_video_input(api_launch, monkeypatch, provider, override):
     """Provider contract: neither Kie nor Neironych receives the rendered MP4."""
     from api import neironych_seedance_runtime, video_runtime_fixes
+
+    api_launch.user.credits = 1000
 
     api_launch.source.gen_type = GenerationType.video
     api_launch.source.model = MODEL
@@ -302,14 +353,17 @@ async def test_creator_photo_replay_provider_payload_has_no_video_input(api_laun
 
     api_launch.generate.side_effect = dispatch
     body = api_launch.routes.FeedRemixRequest(
-        model=MODEL, image_url=USER, duration=5, resolution="720p",
+        model=MODEL, image_url=USER, duration=5, resolution="720p", duration_override=override,
     )
+    quote = await api_launch.routes.quote_feed_remix(77, body, api_launch.session, api_launch.user)
+    assert quote["cost_credits"] == (override or 10) * 4
+    body.quoted_credits = quote["cost_credits"]
     await api_launch.routes.remix_feed_post(77, body, api_launch.session, api_launch.user)
     if provider == "kie":
         payload = kie.await_args.args[0]["input"]
         assert payload["reference_image_urls"] == [USER]
         assert not payload.get("reference_video_urls")
-        assert payload["duration"] == 10
+        assert payload["duration"] == (override or 10)
         assert payload["aspect_ratio"] == "9:16"
         assert payload["resolution"] == "480p"
         assert payload["prompt"] == PROMPT
@@ -325,6 +379,7 @@ async def test_creator_photo_replay_provider_payload_has_no_video_input(api_laun
         assert model_name
         assert payload.get("reference_videos") in (None, [])
         assert payload["reference_images"] == [{"url": USER}]
+        assert payload["duration"] == (override or 10)
         assert payload["prompt"] == PROMPT
     assert RESULT_MP4 not in str(payload)
 
