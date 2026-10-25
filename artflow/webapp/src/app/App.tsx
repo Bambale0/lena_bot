@@ -1189,7 +1189,7 @@ function App() {
       return <CreateScreen imageModels={data.imageModels} videoModels={data.videoModels} drafts={[imageDraft, videoDraft, motionDraft]} language={data.user.language} onNavigate={setActiveTab} />;
     }
     if (ux2 && activeTab === "works") {
-      return <>{lilac && api && <LilacImageSeries api={api} onContinue={series => {
+      return <>{lilac && api && <LilacImageSeries key={data.user.id} api={api} models={data.imageModels} onContinue={series => {
         if (photoQueue.hasPending()) { toast.info("Дождитесь завершения загрузки фото."); return; }
         const model = data.imageModels.find(row => row.key === series.model);
         if (!model) { toast.error("Модель серии недоступна. Исходный черновик сохранён."); return; }

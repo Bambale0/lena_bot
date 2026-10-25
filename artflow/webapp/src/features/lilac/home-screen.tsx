@@ -1,4 +1,5 @@
 import { ArrowRight, Bot, Film, ImageIcon, Library, LifeBuoy, Music2, Orbit, Shapes, Sparkles, WandSparkles } from "lucide-react";
+import { useState, type ReactNode } from "react";
 import { openTrendRunner } from "@/features/trend-runner";
 import { hasDraftInput } from "@/lib/draft-storage";
 import { firstMedia, formatRelativeDate, generationStatusLabel, safeExternalUrl } from "@/lib/utils";
@@ -18,6 +19,12 @@ const tasks = [
   { tab: "assistant", title: "AI-помощник", text: "Идеи, тексты и помощь с заданием", Icon: Bot },
 ] as const;
 
+function HomeThumbnail({ url, fallback = null }: { url?: string | null; fallback?: ReactNode }) {
+  const src = safeExternalUrl(url);
+  const [failed, setFailed] = useState("");
+  return src && failed !== src ? <img src={src} alt="" loading="lazy" onError={() => setFailed(src)} /> : <>{fallback}</>;
+}
+
 export function LilacHome({ data, drafts, onNavigate, onTask }: HomeProps) {
   const photoPreview = safeExternalUrl(data.feed.find(item => item.gen_type === "image")?.preview_url);
   const trendPreview = safeExternalUrl(data.trends.find(item => item.kind === "video")?.preview_url);
@@ -27,7 +34,7 @@ export function LilacHome({ data, drafts, onNavigate, onTask }: HomeProps) {
     <div className="lilac-task-grid">
       {tasks.map(({ tab, title, text, Icon }, index) => <button type="button" key={tab} aria-label={title}
         className={`lilac-task lilac-task-${index}`} onClick={() => onNavigate(tab)}>
-        {(index === 0 && photoPreview || index === 1 && trendPreview) ? <img src={index === 0 ? photoPreview : trendPreview} alt="" loading="lazy" /> : null}
+        {index < 2 && <HomeThumbnail url={index === 0 ? photoPreview : trendPreview} />}
         <span className="lilac-task-icon"><Icon size={25} aria-hidden="true" /></span>
         <span className="lilac-task-copy"><strong>{title}</strong><span>{text}</span></span><ArrowRight className="lilac-task-arrow" size={19} />
       </button>)}
@@ -43,13 +50,13 @@ export function LilacHome({ data, drafts, onNavigate, onTask }: HomeProps) {
       </button>)}<p className="lilac-note">Черновики сохраняются в этой вкладке браузера.</p></section>}
     <section><div className="lilac-section-title"><h2>Готовые сценарии</h2><button onClick={() => onNavigate("trends")}>Все шаблоны <ArrowRight size={15} /></button></div>
       {data.trends.length ? <div className="lilac-preview-rail">{data.trends.slice(0, 8).map(trend => <button key={trend.id} onClick={() => openTrendRunner(trend)}>
-        {safeExternalUrl(trend.preview_url) ? <img src={safeExternalUrl(trend.preview_url)} alt="" loading="lazy" /> : <Sparkles size={32} />}
+        <HomeThumbnail url={trend.preview_url} fallback={<Sparkles size={32} />} />
         <strong>{trend.title}</strong><small>{trend.kind === "video" ? "Видео" : "Фото"}</small>
       </button>)}</div> : <div className="lilac-empty"><Sparkles /><p>Готовых сценариев пока нет. Можно начать со своей идеи.</p><button className="lilac-primary" onClick={() => onNavigate("photo")}>Создать первое фото</button></div>}
     </section>
     <section><div className="lilac-section-title"><h2>Последние работы</h2><button onClick={() => onNavigate("works")}>Все проекты <ArrowRight size={15} /></button></div>
       {data.recentTasks.length ? data.recentTasks.slice(0, 3).map(task => <button key={task.id} className="lilac-row" onClick={() => onTask(task)}>
-        <span className="lilac-mini-preview">{task.gen_type === "image" && safeExternalUrl(firstMedia(task)) ? <img src={safeExternalUrl(firstMedia(task))} alt="" /> : <Film />}</span>
+        <span className="lilac-mini-preview"><HomeThumbnail url={task.gen_type === "image" ? firstMedia(task) : undefined} fallback={task.gen_type === "image" ? <ImageIcon /> : <Film />} /></span>
         <span><strong>{task.prompt_hidden || task.prompt_actions_allowed === false ? "Работа по шаблону" : task.prompt || task.model}</strong><small>{generationStatusLabel(task.status)} · {formatRelativeDate(task.created_at)}</small></span><ArrowRight size={18} />
       </button>) : <p className="lilac-note">Здесь появятся ваши фото, видео и песни после первого запуска.</p>}
     </section>
