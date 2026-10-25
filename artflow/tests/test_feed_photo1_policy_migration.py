@@ -33,7 +33,11 @@ def test_photo1_policy_migration_is_current_and_valid():
     config = Config()
     config.set_main_option("script_location", str(ROOT / "db/migrations"))
     scripts = ScriptDirectory.from_config(config)
-    assert scripts.get_heads() == ["049_trend_runtime_model_repair"]
+    assert scripts.get_heads() == ["050_kling4_ops_audit_actor"]
+    assert (
+        scripts.get_revision("050_kling4_ops_audit_actor").down_revision
+        == "049_trend_runtime_model_repair"
+    )
     assert scripts.get_revision("049_trend_runtime_model_repair").down_revision == "048_wan_routing"
     assert scripts.get_revision("048_wan_routing").down_revision == "047_kling4_preview"
     assert scripts.get_revision("047_kling4_preview").down_revision == "046_tribute_catalog"
