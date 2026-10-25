@@ -43,8 +43,7 @@ function useViewportVisibility(enabled: boolean) {
     const element = ref.current;
     if (!enabled || !element) { setVisible(false); return; }
     if (typeof IntersectionObserver === "function") {
-      const root = element.closest(".lilac-preview-rail");
-      const observer = new IntersectionObserver(([entry]) => setVisible(Boolean(entry?.isIntersecting && entry.intersectionRatio > 0)), { root, threshold: 0.01 });
+      const observer = new IntersectionObserver(([entry]) => setVisible(Boolean(entry?.isIntersecting && entry.intersectionRatio > 0)), { root: null, threshold: 0.01 });
       observer.observe(element);
       return () => observer.disconnect();
     }

@@ -175,11 +175,12 @@ test("home renders live MP4 previews without starting generation", async ({ page
   await page.route("https://media.example.test/live.mp4", route => route.fulfill({ contentType: "video/mp4", body: mp4 }));
   await page.goto("/?ux=3");
 
-  const tileVideo = page.getByRole("button", { name: "Оживить фото", exact: true }).locator("video");
+  const tileFrame = page.getByRole("button", { name: "Оживить фото", exact: true }).locator("[data-apix-home-preview-frame]");
   const trendCard = page.locator(".lilac-preview-rail > button").filter({ hasText: "Живой сценарий" });
-  const railVideo = trendCard.locator("video");
-  for (const video of [tileVideo, railVideo]) {
-    await video.scrollIntoViewIfNeeded();
+  const railFrame = trendCard.locator("[data-apix-home-preview-frame]");
+  for (const frame of [tileFrame, railFrame]) {
+    await frame.scrollIntoViewIfNeeded();
+    const video = frame.locator("video");
     await expect(video).toBeVisible();
     await expect.poll(() => video.evaluate((element: HTMLVideoElement) => element.readyState)).toBeGreaterThanOrEqual(1);
     expect(await video.evaluate((element: HTMLVideoElement) => ({
@@ -222,18 +223,65 @@ test("home video previews honor reduced motion and react to preference changes",
   await page.route("https://media.example.test/reduced.mp4", route => route.fulfill({ contentType: "video/mp4", body: mp4 }));
   await page.goto("/?ux=3");
 
-  const videos = page.locator(".lilac-home video");
-  await expect(videos).toHaveCount(2);
-  await expect.poll(() => videos.evaluateAll(nodes => nodes.every(node => (node as HTMLVideoElement).paused))).toBe(true);
-  expect(await videos.evaluateAll(nodes => nodes.every(node => !(node as HTMLVideoElement).autoplay))).toBe(true);
+  const tileFrame = page.getByRole("button", { name: "Оживить фото", exact: true }).locator("[data-apix-home-preview-frame]");
+  const railFrame = page.locator(".lilac-preview-rail [data-apix-home-preview-frame]").first();
+  await tileFrame.scrollIntoViewIfNeeded();
+  await expect(tileFrame.locator("video")).toHaveCount(1);
+  expect(await tileFrame.locator("video").evaluate((video: HTMLVideoElement) => ({ paused: video.paused, autoPlay: video.autoplay }))).toEqual({ paused: true, autoPlay: false });
+  await railFrame.scrollIntoViewIfNeeded();
+  await expect(railFrame.locator("video")).toHaveCount(1);
+  expect(await railFrame.locator("video").evaluate((video: HTMLVideoElement) => ({ paused: video.paused, autoPlay: video.autoplay }))).toEqual({ paused: true, autoPlay: false });
   expect(await page.evaluate(() => (window as unknown as { __homePreviewPlayCalls: number }).__homePreviewPlayCalls)).toBe(0);
-  expect(await videos.evaluateAll(nodes => nodes.every(node => !((node as HTMLVideoElement).dataset.apixPreviewActive)))).toBe(true);
+  expect(await railFrame.locator("video").evaluate((video: HTMLVideoElement) => !video.dataset.apixPreviewActive)).toBe(true);
 
   await page.emulateMedia({ reducedMotion: "no-preference" });
-  await expect.poll(() => videos.evaluateAll(nodes => nodes.some(node => !(node as HTMLVideoElement).paused))).toBe(true);
+  await expect.poll(() => railFrame.locator("video").evaluate((video: HTMLVideoElement) => !video.paused)).toBe(true);
   await expect.poll(() => page.evaluate(() => (window as unknown as { __homePreviewPlayCalls: number }).__homePreviewPlayCalls)).toBeGreaterThan(0);
   await page.emulateMedia({ reducedMotion: "reduce" });
-  await expect.poll(() => videos.evaluateAll(nodes => nodes.every(node => (node as HTMLVideoElement).paused))).toBe(true);
+  await expect.poll(() => railFrame.locator("video").evaluate((video: HTMLVideoElement) => video.paused)).toBe(true);
+});
+
+test("home keeps the entire video rail dormant while it is vertically outside the viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 260 });
+  await prepare(page);
+  await page.addInitScript(() => {
+    const originalPlay = HTMLMediaElement.prototype.play;
+    let railPlayCalls = 0;
+    Object.defineProperty(window, "__homeRailPlayCalls", { get: () => railPlayCalls });
+    HTMLMediaElement.prototype.play = function play() {
+      if (this.closest(".lilac-preview-rail")) railPlayCalls++;
+      return originalPlay.call(this);
+    };
+  });
+  const trends = Array.from({ length: 4 }, (_, index) => ({
+    id: 250 + index,
+    kind: "video",
+    title: `Вертикальный сценарий ${index + 1}`,
+    preview_url: `https://media.example.test/vertical-${index + 1}.mp4`,
+  }));
+  const requested: string[] = [];
+  await page.route("**/api/v1/trends?**", route => route.fulfill({ json: trends }));
+  await page.route("https://media.example.test/vertical-*.mp4", route => {
+    requested.push(route.request().url());
+    return route.fulfill({ contentType: "video/mp4", body: mp4 });
+  });
+  await page.goto("/?ux=3");
+
+  const rail = page.locator(".lilac-preview-rail");
+  const firstFrame = rail.locator("[data-apix-home-preview-frame]").first();
+  expect(await firstFrame.evaluate(element => new Promise<boolean>(resolve => {
+    const observer = new IntersectionObserver(([entry]) => { observer.disconnect(); resolve(Boolean(entry?.isIntersecting)); });
+    observer.observe(element);
+  }))).toBe(false);
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  await expect(rail.locator("video")).toHaveCount(0);
+  expect(requested.some(url => url.endsWith("/vertical-2.mp4"))).toBe(false);
+  expect(await page.evaluate(() => (window as unknown as { __homeRailPlayCalls: number }).__homeRailPlayCalls)).toBe(0);
+
+  await firstFrame.scrollIntoViewIfNeeded();
+  await expect.poll(() => firstFrame.locator("video").evaluate((video: HTMLVideoElement) => video.currentSrc)).toContain("vertical-1.mp4");
+  await expect.poll(() => firstFrame.locator("video").evaluate((video: HTMLVideoElement) => !video.paused)).toBe(true);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __homeRailPlayCalls: number }).__homeRailPlayCalls)).toBeGreaterThan(0);
 });
 
 test("home loads and plays only viewport-visible video previews", async ({ page }) => {
