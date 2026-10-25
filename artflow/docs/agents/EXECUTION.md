@@ -1967,3 +1967,48 @@ Acceptance: existing scheduled recovery claims only matching bound Kling4 provid
 Regression RED: four cases (both Kling models × done/failed) could not acquire a claim; five invalid identity cases correctly rejected. Minimal fix extends the existing exact-model, bound-marker and matching-task guard to the two verified Kling4 models, keeping all other delivery conditions. Focused tests/full gate/review and renewed exact-head PR296 CI required before deployment. Auto-merge disabled while amending. All previous70814bb required checks ultimately passed, but this material incident fix needs its own exact-head release.
 
 Incident verification: actual read-only production scheduler query selects generation63327, with bound provider identity and durable pending done notice/zero attempts. All79 focused notice/Kling/API/privacy tests pass from the correct artflow cwd; first root-cwd attempt had two relative-path fixture failures (no code failure). Full amended Python gate **3722passed/81dedicated skips/3existing warnings/0failures**. Independent reviewer traced startup→scan→claim→Telegram→ack and independently ran24outbox tests, no remaining finding. Host OCR reviewed added repository Python diff; identity/lease/backoff/financial invariants preserved. Actual production send must be checked after normal protected deploy; no direct DB write or manual send used.
+
+# 2026-10-25 — public Kling 4 rollout and Wan 3 primary verification
+
+Baseline `6d84c0288c9a7ba16e663b7305c44ba77946e187`; branch
+`feature/kling4-public-wan3-neironych-20261025`. Owner explicitly requested the
+APIX `lena_bot` rollout: expose Kling 4 to all users and make Neironych primary
+for Wan 3 across all surfaces. Production preflight found Kling 4 still
+`admin`, all six tariff rows active, and both Wan routes already DB-configured
+as `neironych_kie` with native IDs `wan-3` and `wan-3-prime`. The site, Mini App
+and Telegram share those access/routing adapters, so no surface-specific route
+change is required.
+
+Acceptance: add a trusted-shell control that uses the existing authenticated
+Kling access mutation and immutable audit instead of manual SQL or Telegram
+identity impersonation; open production only after protected merge/deploy; then
+verify exact SHA, public access, audit source, active tariffs, both Wan policies
+and native catalog mappings. The owner subsequently authorized bounded paid
+production smokes for Standard and Prime. Use separate durable journals and
+idempotency keys, verify provider task identity, billed seconds and downloaded
+media, and never replay an accepted or ambiguous request. KIE remains standby
+only after a definite rejection or unsupported input.
+
+Parity: `site`, `mini_app`, and `telegram_bot` already consume the same Kling 4
+policy and Wan provider entrypoint. Configuration remains DB-backed and audited.
+Migration 050 adds truthful trusted-shell actor provenance; no price, provider
+contract, credential or customer-balance change.
+
+Live evidence before the source release: the Neironych catalog exposed `wan-3`
+and `wan-3-prime`. Standard request
+`131f2fe5-b1e8-4bbc-90ba-e75a75f9c527` completed on Neironych with 5.0 billed
+seconds; its downloaded MP4 was 5.038 seconds and 7,862,290 bytes. Prime request
+`6d3d531d-1779-4433-99d2-ce2dbe2d37a8` was definitively rejected after
+admission because the model was temporarily at capacity; no billed seconds and
+no KIE fallback/replay. One separately journaled Prime retry is allowed after
+that terminal unbilled outcome. Retry
+`92c63e09-2ea3-4dbd-8fa2-b56d0fe71b04` received the same terminal capacity
+failure with no billed seconds; stop further paid Prime attempts and report the
+upstream capacity blocker honestly.
+
+Skills: claw backend-integration, telegram-miniapp, frontend-qa,
+release-hardening and kie-seedance; Bambale0 wayfinder, implement, TDD and
+code-review; Anthropic webapp-testing. Steps: [x] current source/production
+preflight; [x] acceptance/parity/security plan; [ ] RED/green focused tests and
+full relevant gates; [ ] independent review; [ ] PR/exact-head CI/native
+auto-merge/deploy; [ ] production policy change and live verification.

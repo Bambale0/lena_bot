@@ -761,7 +761,8 @@ class Kling4AccessAudit(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     previous_audience: Mapped[str] = mapped_column(String(16), nullable=False)
     new_audience: Mapped[str] = mapped_column(String(16), nullable=False)
-    changed_by_admin_tg_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    changed_by_admin_tg_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    changed_by_operator: Mapped[str | None] = mapped_column(String(128), nullable=True)
     source: Mapped[str] = mapped_column(String(16), nullable=False)
     changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
