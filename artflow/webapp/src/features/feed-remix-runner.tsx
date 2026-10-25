@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { Film, ImageIcon, LoaderCircle, Repeat2, UploadCloud, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Sheet } from "@/components/ui/sheet";
+import { readStudioBalance, subscribeStudioBalance } from "@/lib/studio-balance";
+import { clearPendingTopup, readPendingTopup, savePendingTopup, sameTopupAttempt } from "@/lib/topup-recovery";
 import type { FeedItem, GenerationTask, ModelInfo } from "@/lib/types";
 import { notifyHaptic, openExternalUrl } from "@/lib/telegram";
 import { cn, firstMedia, safeExternalUrl } from "@/lib/utils";
@@ -183,6 +185,8 @@ function itemLooksVideo(item: FeedItem): boolean {
 }
 
 function FeedRemixRunnerPortal() {
+  const balance = useSyncExternalStore(subscribeStudioBalance, readStudioBalance, () => null);
+  const previousBalance = useRef(balance);
   const [item, setItem] = useState<FeedItem | null>(null);
   const [sourceMediaUrl, setSourceMediaUrl] = useState("");
   const [sourceSelectionMissing, setSourceSelectionMissing] = useState(false);
@@ -312,7 +316,7 @@ function FeedRemixRunnerPortal() {
   const requestBodyKey = requestBody ? JSON.stringify(requestBody) : "";
   const liveQuoteRequest = useRef<{ id: number; body: Record<string, unknown>; key: string } | null>(null);
   liveQuoteRequest.current = item && requestBody && !sourceSelectionMissing ? { id: item.id, body: requestBody, key: requestBodyKey } : null;
-  const quoteReady = Boolean(quote && quotedBody === requestBodyKey && !quoteBusy && !sourceSelectionMissing);
+  const quoteReady = Boolean(quote && quotedBody === requestBodyKey && !quoteBusy && !sourceSelectionMissing && !balance?.open);
   const canLaunch = quoteReady && quote?.can_run === true && !launchUncertain && Boolean(activeScope.current);
   const paymentOptions = checkoutOptions(quote?.recommended_plan);
   const paymentOption = paymentOptions.find((option) => option.provider === selectedPaymentProvider) || paymentOptions[0];
@@ -411,7 +415,25 @@ function FeedRemixRunnerPortal() {
         activeScope.current = { actorId: viewer.id, sourceId: detail.item.id };
         const telegramId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id;
         const legacyId = telegramId && viewer.tg_id === telegramId ? telegramId : undefined;
-        resetForm(detail.item, readRepeatDraft(draftStorage(), viewer.id, detail.item.id, Date.now(), legacyId), detail.sourceMediaUrl);
+        const draft = readRepeatDraft(draftStorage(), viewer.id, detail.item.id, Date.now(), legacyId);
+        const shared = readPendingTopup(draftStorage(), viewer.id);
+        if (draft?.payment?.sharedGuard && !shared) {
+          // The common payment cabinet reconciled or explicitly acknowledged this attempt.
+          draft.payment = null;
+          saveRepeatDraft(draftStorage(), viewer.id, detail.item.id, draft);
+        } else if (draft?.payment && !shared) {
+          // Preserve legacy pending attempts when they first enter the shared flow.
+          if (!savePendingTopup(draftStorage(), viewer.id, draft.payment)) throw new Error("Не удалось сохранить проверку оплаты");
+          draft.payment = { ...draft.payment, sharedGuard: true };
+          saveRepeatDraft(draftStorage(), viewer.id, detail.item.id, draft);
+        } else if (draft && shared && (!draft.payment || (draft.payment.sharedGuard && !sameTopupAttempt(draft.payment, shared)))) {
+          draft.payment = { ...shared, sharedGuard: true };
+        } else if (draft?.payment && shared && sameTopupAttempt(draft.payment, shared)) {
+          draft.payment = { ...draft.payment, sharedGuard: true };
+          saveRepeatDraft(draftStorage(), viewer.id, detail.item.id, draft);
+        }
+        resetForm(detail.item, draft, detail.sourceMediaUrl);
+        if (!draft && shared) { paymentRef.current = { ...shared, sharedGuard: true }; setPayment(paymentRef.current); }
         setLaunchUncertain(launchIsUncertain(activeScope.current));
       }).catch(() => {
         if (sequence === openSequence.current) setError("Не удалось подтвердить аккаунт. Откройте повтор ещё раз перед оплатой.");
@@ -471,7 +493,10 @@ function FeedRemixRunnerPortal() {
       const latest = await apiJson<FeedCheckoutQuote>(`/feed/${id}/remix/quote`, {
         method: "POST", body: JSON.stringify(body),
       });
-      if (!Number.isFinite(Number(latest.cost_credits)) || typeof latest.can_run !== "boolean") {
+      if (typeof latest.cost_credits !== "number" || !Number.isFinite(latest.cost_credits) || latest.cost_credits < 0
+        || typeof latest.balance_credits !== "number" || !Number.isFinite(latest.balance_credits)
+        || typeof latest.deficit_credits !== "number" || !Number.isFinite(latest.deficit_credits) || latest.deficit_credits < 0
+        || typeof latest.can_run !== "boolean") {
         throw new Error("Стоимость повтора временно недоступна");
       }
       if (requestSequence === quoteRequestSequence.current) {
@@ -493,6 +518,33 @@ function FeedRemixRunnerPortal() {
       if (requestSequence === quoteRequestSequence.current) setQuoteBusy(false);
     }
   }, [sourceSelectionMissing]);
+
+  useLayoutEffect(() => {
+    const previous = previousBalance.current;
+    previousBalance.current = balance;
+    if (!item) return;
+    if (previous && (!balance || previous.actorId !== balance.actorId)) {
+      quoteRequestSequence.current++;
+      openSequence.current++;
+      activeScope.current = null;
+      cancelPending("Аккаунт изменился. Откройте повтор заново.");
+      resetForm(null);
+      return;
+    }
+    if (balance?.open) {
+      quoteRequestSequence.current++;
+      setQuote(null); setQuotedBody("");
+    } else if (previous?.open && balance && activeScope.current?.actorId === balance.actorId) {
+      const shared = readPendingTopup(draftStorage(), balance.actorId);
+      if (paymentRef.current?.sharedGuard && !shared) {
+        paymentRef.current = null; setPayment(null); persistDraft(null);
+      } else if (shared && (!paymentRef.current || (paymentRef.current.sharedGuard && !sameTopupAttempt(paymentRef.current, shared)))) {
+        paymentRef.current = { ...shared, sharedGuard: true }; setPayment(paymentRef.current);
+      }
+      const current = liveQuoteRequest.current;
+      if (current) void refreshQuote(current.id, current.body, current.key);
+    }
+  }, [balance, item?.id, refreshQuote, cancelPending, resetForm, persistDraft]);
 
   useEffect(() => {
     quoteRequestSequence.current++;
@@ -528,6 +580,7 @@ function FeedRemixRunnerPortal() {
       const resolution = paymentResolution(current, transactions.transactions);
       if (resolution !== "pending") {
         if (!persistDraft(null)) throw new Error("Не удалось сохранить результат проверки. Повторите проверку оплаты.");
+        if (current.sharedGuard && !clearPendingTopup(draftStorage(), scope.actorId, current)) throw new Error("Текущая оплата изменилась. Откройте повтор ещё раз для новой проверки.");
         // A receipt can beat its balance refresh. Never expose actions using the pre-settlement quote.
         setQuote(null);
         setQuotedBody("");
@@ -586,12 +639,18 @@ function FeedRemixRunnerPortal() {
     const provider = paymentOption?.provider;
     const scope = activeScope.current;
     if (!quoteReady || quote?.can_run || !plan || !provider || !scope || !draftSnapshot.current || busy || paymentBusy || paymentInFlight.current || paymentRef.current) return;
+    const existing = readPendingTopup(draftStorage(), scope.actorId);
+    if (existing) {
+      paymentRef.current = { ...existing, sharedGuard: true }; setPayment(paymentRef.current);
+      setError("Предыдущая оплата ещё не подтверждена. Проверь её в кабинете оплаты.");
+      return;
+    }
     const pending: RepeatPayment = {
-      startedAt: Date.now(), provider, planKey: plan.key, transactionId: null, checkoutUrl: null,
+      sharedGuard: true, startedAt: Date.now(), provider, planKey: plan.key, transactionId: null, checkoutUrl: null,
     };
     const snapshot = { ...draftSnapshot.current, savedAt: Date.now(), payment: pending };
     // A lost POST response may still have created an invoice. Save its guard before the first await.
-    if (!saveRepeatDraft(draftStorage(), scope.actorId, scope.sourceId, snapshot)) {
+    if (!savePendingTopup(draftStorage(), scope.actorId, pending) || !saveRepeatDraft(draftStorage(), scope.actorId, scope.sourceId, snapshot)) {
       setError("Не удалось сохранить оплату в этом браузере. Разрешите хранилище и откройте повтор ещё раз; счёт не создан.");
       return;
     }
@@ -615,13 +674,14 @@ function FeedRemixRunnerPortal() {
       const latestDraft = sameAttempt && draftSnapshot.current ? draftSnapshot.current
         : readRepeatDraft(draftStorage(), scope.actorId, scope.sourceId) || snapshot;
       const stored = saveRepeatDraft(draftStorage(), scope.actorId, scope.sourceId, { ...latestDraft, payment: nextPayment });
+      const sharedStored = savePendingTopup(draftStorage(), scope.actorId, nextPayment);
       // A reopened view of this attempt must not later autosave its pre-response marker over the invoice.
       if (sameAttempt) {
         paymentRef.current = nextPayment;
         setPayment(nextPayment);
       }
       if (liveScope !== scope) return; // Never navigate a newer view after a late response.
-      if (!stored) throw new Error("Ссылка оплаты получена, но не сохранена. Не создавайте новый платёж; проверьте текущую оплату.");
+      if (!stored || !sharedStored) throw new Error("Ссылка оплаты получена, но не сохранена. Не создавайте новый платёж; проверьте текущую оплату.");
       if (!nextPayment.checkoutUrl) throw new Error("Безопасная платёжная ссылка не получена. Проверьте текущую оплату перед повтором.");
       openExternalUrl(nextPayment.checkoutUrl);
       toast.success("Оплата открыта — вернись сюда после зачисления");
@@ -676,7 +736,7 @@ function FeedRemixRunnerPortal() {
         if (sequence !== openSequence.current) return;
         if (result.url) uploaded.push(result.url);
       }
-      if (!uploaded.length) throw new Error("Backend не вернул ссылки на референсы");
+      if (!uploaded.length) throw new Error("Не удалось получить загруженное фото. Попробуй ещё раз.");
       setReferences((current) => Array.from(new Set([...current, ...uploaded])));
       if (bucket === "video" && modeOptions.includes("image")) setMode("image");
       notifyHaptic("success");
@@ -766,15 +826,15 @@ function FeedRemixRunnerPortal() {
     if (phase === "uploading") return "Загружаем референсы…";
     if (phase === "generating") return "Запускаем повтор…";
     if (phase === "error") return "Проверь настройки и попробуй ещё раз";
-    return "Настройте повтор и нажмите «Запустить»";
+    return "Добавь свои материалы, проверь стоимость и нажми «Запустить повтор».";
   }, [phase]);
 
   return (
     <Sheet
-      balanceUnavailableReason={paymentWaiting || paymentBusy || busy ? "Завершите текущую операцию или проверьте уже открытую оплату ниже." : undefined}
+      balanceUnavailableReason={paymentWaiting || paymentBusy || busy || launchUncertain ? "Завершите текущую операцию или проверьте уже открытую оплату ниже." : undefined}
       open={Boolean(item)}
       title="Повторить работу"
-      description="Скрытый промпт останется на backend. Вы выбираете референсы, модель и параметры."
+      description="Сценарий автора уже выбран. Добавь свои материалы и подтверди стоимость."
       onOpenChange={(open) => {
         if (!open) close();
       }}
@@ -880,7 +940,7 @@ function FeedRemixRunnerPortal() {
             </div>
           </div>
 
-          {!creatorRecipeReplay ? <label className="grid gap-1 rounded-xl border border-primary/25 bg-primary/5 p-3 text-sm">
+          {!creatorRecipeReplay ? <details className="rounded-xl border border-border p-3"><summary className="apix-focus-ring cursor-pointer">Что изменить (необязательно)</summary><label className="mt-2 grid gap-1 text-sm">
             <span className="font-semibold">Что изменить в образе</span>
             <textarea
               rows={2}
@@ -892,13 +952,13 @@ function FeedRemixRunnerPortal() {
               onChange={(event) => setChangeRequest(event.target.value)}
             />
             <span className="text-[11px] text-muted-foreground">Для повтора фото загрузи свой референс: модель получит промпт автора и только твои фото. Промпт автора остаётся скрыт.</span>
-          </label> : <p className="rounded-xl border border-primary/25 bg-primary/5 p-3 text-xs">
+          </label></details> : <p className="rounded-xl border border-primary/25 bg-primary/5 p-3 text-xs">
             {creatorTextOnly
               ? "Это повтор по исходному текстовому промпту автора без фото-референсов."
               : "Это точный повтор авторской генерации: меняем только фото-референс, оригинальный промпт не раскрывается и не редактируется."}
           </p>}
 
-          <div className="grid gap-2 rounded-xl border border-border bg-card/60 p-3">
+          {!creatorTextOnly && <div className="grid gap-2 rounded-xl border border-border bg-card/60 p-3">
             <div className="flex items-center justify-between gap-2">
               <div>
                 <p className="font-semibold">Твоё фото / референсы</p>
@@ -931,8 +991,9 @@ function FeedRemixRunnerPortal() {
                 ))}
               </div>
             ) : null}
-          </div>
+          </div>}
 
+          <details className="rounded-xl border border-border p-3"><summary className="apix-focus-ring cursor-pointer">Настройки повтора</summary><div className="mt-3 grid gap-3">
           <label className="grid gap-1 text-xs font-semibold">
             Модель
             <select className="min-h-11 rounded-xl border border-input bg-background px-3 text-sm" value={modelKey} onChange={(event) => setModelKey(event.target.value)} disabled={busy || modelsLoading || creatorRecipeReplay}>
@@ -1045,6 +1106,7 @@ function FeedRemixRunnerPortal() {
             </label>
           ) : null}
 
+          </div></details>
           <div className="rounded-xl border border-primary/25 bg-primary/5 px-3 py-2 text-xs">
             {quoteReady ? (
               <div className="flex items-center justify-between gap-3">

@@ -210,7 +210,7 @@ test("video trend selects quoted duration without automatic launch", async ({ pa
   expect(sent).not.toHaveProperty("model");
 });
 
-test("one-photo trend runner uploads and runs without exposing generation controls", async ({ page }) => {
+test("one-photo trend waits for explicit launch without exposing generation controls", async ({ page }) => {
   let runPayload: Record<string, unknown> | null = null;
   await page.route("**/api/v1/trends/upload", async (route) => {
     await route.fulfill({ json: { asset_id: "apixasset.test.signature", url: "https://example.test/user.jpg", kind: "image", filename: "face.jpg" } });
@@ -256,6 +256,9 @@ test("one-photo trend runner uploads and runs without exposing generation contro
     buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
   });
 
+  await expect(dialog.getByRole("button", { name: "Создать · 1.5 💋" })).toBeEnabled();
+  expect(runPayload).toBeNull();
+  await dialog.getByRole("button", { name: "Создать · 1.5 💋" }).click();
   await expect(page.getByRole("dialog", { name: /Задача #9001/ })).toBeVisible();
   expect(runPayload).toMatchObject({ asset_id: "apixasset.test.signature" });
   expect(typeof runPayload?.idempotency_key).toBe("string");
@@ -286,6 +289,7 @@ test("retrying a trend after a lost response keeps the same request key", async 
   await dialog.locator("input[type=file]").setInputFiles({
     name: "face.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
   });
+  await dialog.getByRole("button", { name: /Создать/ }).click();
   await expect.poll(() => keys.length).toBe(1);
   await dialog.getByRole("button", { name: /Создать/ }).click();
   await expect.poll(() => keys.length).toBe(2);
@@ -309,6 +313,7 @@ test("trend runner shows a useful message for an empty server error", async ({ p
     name: "face.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
   });
 
+  await dialog.getByRole("button", { name: /Создать/ }).click();
   await expect(dialog.getByText("Не удалось запустить тренд. Попробуйте ещё раз.")).toBeVisible();
   await expect(dialog).not.toContainText("Ошибка API 500");
 });
@@ -353,6 +358,7 @@ test("stale trend price refreshes checkout and reuses the uploaded photo", async
   await dialog.locator("input[type=file]").setInputFiles({
     name: "face.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
   });
+  await dialog.getByRole("button", { name: /Создать/ }).click();
   await expect.poll(() => runs.length).toBe(1);
   await expect(dialog.getByRole("button", { name: "Создать · 2 💋" })).toBeVisible();
   await dialog.getByRole("button", { name: /Создать/ }).click();
@@ -440,13 +446,11 @@ for (const trend of trends) {
     await dialog.locator("input[type=file]").setInputFiles({
       name: "own-face.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
     });
-    if (trend.kind === "video") {
-      const confirm = dialog.getByRole("button", { name: "Создать · 1.5 💋", exact: true });
-      await expect(confirm).toBeEnabled();
-      await expect(confirm).toContainText("1.5");
-      expect(runs).toHaveLength(0);
-      await confirm.click();
-    }
+    const confirm = dialog.getByRole("button", { name: "Создать · 1.5 💋", exact: true });
+    await expect(confirm).toBeEnabled();
+    await expect(confirm).toContainText("1.5");
+    expect(runs).toHaveLength(0);
+    await confirm.click();
     await expect(page.getByRole("dialog", { name: `Задача #${9500 + trend.id}` })).toBeVisible();
     expect(runs).toHaveLength(1);
     expect(runs[0]).toMatchObject({ asset_id: "apixasset.bot-entry.signature", quoted_credits: 1.5 });

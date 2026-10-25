@@ -1,5 +1,12 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
+async function expandRepeatControls(dialog: Locator) {
+  await expect(dialog.getByText("Настройки повтора", { exact: true })).toBeVisible();
+  for (const panel of await dialog.locator("details").all()) {
+    if (await panel.getAttribute("open") === null) await panel.locator("summary").click();
+  }
+}
+
 // Server-issued opaque output bindings; API tests verify real digest membership.
 const boundPreview = (index: number, output = index) =>
   `/api/v1/feed/201/preview.webp?index=${index}&output_id=${["a", "b", "c"][output].repeat(64)}`;
@@ -170,6 +177,7 @@ test("feed work repeat asks for settings and preserves source media payload", as
   const dialog = page.getByRole("dialog", { name: "Повторить работу" });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText("Применим промпт автора к твоим фото. Готовую работу автора модели не отправляем.")).toBeVisible();
+  await expandRepeatControls(dialog);
   await expect(dialog.locator("select").first()).toBeVisible();
 
   await expect(dialog.getByRole("button", { name: "Добавить", exact: true })).toBeEnabled();
@@ -179,6 +187,7 @@ test("feed work repeat asks for settings and preserves source media payload", as
     buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
   });
   await expect(dialog.getByText("Реф #1")).toBeVisible();
+  await expandRepeatControls(dialog);
   await dialog.getByLabel("Что изменить в образе").fill("Замени одежду на красное платье до генерации");
   await expect(dialog.getByText("Стоимость: 1.5 💋").first()).toBeVisible();
   await dialog.getByRole("button", { name: /Запустить повтор/ }).click();
@@ -205,6 +214,7 @@ test("shared link opens exact repeat settings before any paid generation", async
   const dialog = page.getByRole("dialog", { name: "Повторить работу" });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText("Artist QA")).toBeVisible();
+  await expandRepeatControls(dialog);
   await expect(dialog.getByLabel("Что изменить в образе")).toBeVisible();
   expect(paidRequests).toBe(0);
 });
@@ -241,12 +251,14 @@ test("insufficient balance can top up inline while preserving photo and settings
   await dialog.locator("input[type=file]").setInputFiles({
     name: "face.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
   });
+  await expandRepeatControls(dialog);
   await dialog.getByLabel("Что изменить в образе").fill("Сделать белый костюм");
   await expect(dialog.getByText("Реф #1")).toBeVisible();
   await expect(dialog.getByRole("button", { name: /Запустить повтор/ })).toBeDisabled();
   expect(paidRequests).toBe(0);
   await dialog.getByRole("button", { name: "Пополнить здесь · 100 ₽" }).click();
   await expect(dialog.getByText("Реф #1")).toBeVisible();
+  await expandRepeatControls(dialog);
   await expect(dialog.getByLabel("Что изменить в образе")).toHaveValue("Сделать белый костюм");
   await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
   expect(topups).toBe(1);
@@ -258,6 +270,7 @@ test("insufficient balance can top up inline while preserving photo and settings
   const restored = page.getByRole("dialog", { name: "Повторить работу" });
   await expect(restored).toBeVisible();
   await expect(restored.getByText("Реф #1")).toBeVisible();
+  await expandRepeatControls(restored);
   await expect(restored.getByLabel("Что изменить в образе")).toHaveValue("Сделать белый костюм");
   await expect(restored.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
   funded = true; // provider webhook has now reconciled the balance
@@ -292,6 +305,7 @@ test("pending invoice is durable at the exact external handoff before any React 
   const state = await pendingCheckout(page);
   await page.goto("/?tgWebAppData=test&remix=201");
   const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+  await expandRepeatControls(dialog);
   await dialog.getByLabel("Что изменить в образе").fill("Сохранить мой образ");
   await page.evaluate(() => {
     window.Telegram!.WebApp!.openLink = () => {
@@ -310,6 +324,7 @@ test("pending invoice is durable at the exact external handoff before any React 
   expect(saved.payment).toMatchObject({ transactionId: 701, checkoutUrl: "https://pay.example.test/original" });
   expect(saved.changeRequest).toBe("Сохранить мой образ");
   await expect(dialog).toBeVisible();
+  await expandRepeatControls(dialog);
   await expect(dialog.getByLabel("Что изменить в образе")).toHaveValue("Сохранить мой образ");
   await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
   expect(state.topups).toBe(1);
@@ -401,6 +416,7 @@ test("delayed invoice response persists the latest edits before external navigat
     };
   });
   await dialog.getByRole("button", { name: /Пополнить здесь/ }).click();
+  await expandRepeatControls(dialog);
   await dialog.getByLabel("Что изменить в образе").fill("Последнее изменение");
   release();
   await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem("test:latest-handoff") || "null")?.changeRequest)).toBe("Последнее изменение");
@@ -564,9 +580,12 @@ test("Seedance source-video edit discloses measured billing without starting gen
   await page.goto("/?tgWebAppData=test");
   await page.getByRole("button", { name: "Повторить" }).first().click();
   const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+  await expandRepeatControls(dialog);
   await dialog.getByLabel("Что изменить в образе").fill("Сделай одежду синей");
   await expect(dialog.getByText("Редактирование исходного ролика: длительность и кадр берутся из источника. Для оплаты: 7 сек.")).toBeVisible();
+  await expandRepeatControls(dialog);
   await expect(dialog.getByLabel("Длительность видео в повторе")).toBeDisabled();
+  await expandRepeatControls(dialog);
   await expect(dialog.getByLabel("Длительность видео в повторе")).toHaveAttribute("aria-valuetext", "7 секунд");
   await expect(dialog.getByRole("contentinfo").getByText("Стоимость: 28 💋", { exact: true })).toBeVisible();
   expect(paidRequests).toBe(0);
@@ -605,6 +624,7 @@ test("image recipe uses all reference slots for reader photos", async ({ page })
   await dialog.locator("input[type=file]").setInputFiles([1, 2, 3, 4].map(photo));
   await expect(dialog.getByLabel("Удалить референс")).toHaveCount(4);
   await expect(dialog.getByRole("button", { name: "Добавить", exact: true })).toBeDisabled();
+  await expandRepeatControls(dialog);
   await expect(dialog.locator("select").first().locator('option[value="qwen/image-edit"]')).toHaveJSProperty("disabled", true);
   expect(uploads).toBe(4);
   await expect.poll(() => quotes).toBeGreaterThan(0);
@@ -643,6 +663,7 @@ test("one-reference image models retain text edits without offering impossible p
   await page.goto("/?tgWebAppData=test&remix=201");
   const dialog = page.getByRole("dialog", { name: "Повторить работу" });
   await expect(dialog.getByRole("button", { name: "Добавить", exact: true })).toBeDisabled();
+  await expandRepeatControls(dialog);
   await dialog.getByLabel("Что изменить в образе").fill("Сделай фон синим");
   await expect(dialog.getByRole("button", { name: /Запустить повтор · 2/ })).toBeEnabled();
   expect(latestQuote?.["reference_urls"]).toEqual([]);
@@ -800,6 +821,7 @@ test("creator photo-to-video replay selects duration, restores draft and reconfi
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText("Применим исходный промпт автора к твоему фото. Готовое видео автора не передаётся.")).toBeVisible();
   await expect(dialog.getByLabel("Что изменить в образе")).toHaveCount(0);
+  await expandRepeatControls(dialog);
   await expect(dialog.getByLabel("Модель")).toBeDisabled();
   await dialog.locator("input[type=file]").setInputFiles({
     name: "face.jpg", mimeType: "image/jpeg",
@@ -807,15 +829,19 @@ test("creator photo-to-video replay selects duration, restores draft and reconfi
   });
   await expect(dialog.getByText("Реф #1")).toBeVisible();
   await expect(dialog.getByText("Стоимость: 20 💋").first()).toBeVisible();
+  await expandRepeatControls(dialog);
   await expect(dialog.getByLabel("Длительность видео в повторе")).toHaveAttribute("aria-valuetext", "10 секунд");
+  await expandRepeatControls(dialog);
   await dialog.getByRole("button", { name: "15 сек", exact: true }).click();
   await expect(dialog.getByText("Стоимость: 30 💋").first()).toBeVisible();
   expect(sent).toBeNull();
   expect(quoted?.duration_override).toBe(15);
   await page.reload();
+  await expandRepeatControls(dialog);
   await expect(dialog.getByLabel("Длительность видео в повторе")).toHaveAttribute("aria-valuetext", "15 секунд");
   await expect(dialog.getByText("Стоимость: 30 💋").first()).toBeVisible();
   if (testInfo.project.name === "iPhone SE") {
+    await expandRepeatControls(dialog);
     await dialog.getByLabel("Длительность видео в повторе").scrollIntoViewIfNeeded();
     await page.screenshot({ path: testInfo.outputPath("duration-selection.png") });
   }
@@ -847,6 +873,7 @@ test("deep-linked older creator video retains photo-only recipe provenance", asy
   const dialog = page.getByRole("dialog", { name: "Повторить работу" });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText("Применим исходный промпт автора к твоему фото. Готовое видео автора не передаётся.")).toBeVisible();
+  await expandRepeatControls(dialog);
   await expect(dialog.getByLabel("Модель")).toBeDisabled();
 });
 
@@ -880,7 +907,7 @@ test("text-only source video can replay author prompt without photos", async ({ 
   await page.goto("/?tgWebAppData=test&feed=57218");
   const dialog = page.getByRole("dialog", { name: "Повторить работу" });
   await expect(dialog.getByText("Повторим исходный текстовый запрос автора. Эта модель не поддерживает фото-референсы.")).toBeVisible();
-  await expect(dialog.getByRole("button", { name: "Добавить" })).toBeDisabled();
+  await expect(dialog.getByRole("button", { name: "Добавить" })).toHaveCount(0);
   await expect(dialog.getByText("Стоимость: 12 💋").first()).toBeVisible();
   await dialog.getByRole("button", { name: /Запустить повтор/ }).click();
   await expect(page.getByRole("dialog", { name: /Задача #9206/ })).toBeVisible();
@@ -967,7 +994,7 @@ for (const surface of ["telegram", "browser"] as const) {
     let submitted: Record<string, unknown> | null = null;
     await page.route("**/api/v1/feed/201/remix/quote", route => {
       latestQuote = route.request().postDataJSON();
-      return route.fulfill({ json: { cost_credits: 1.5, balance_credits: 100, can_run: true } });
+      return route.fulfill({ json: { cost_credits: 1.5, balance_credits: 100, can_run: true, deficit_credits: 0 } });
     });
     await page.route("**/api/v1/feed/201/remix", route => {
       submitted = route.request().postDataJSON();
@@ -1078,6 +1105,7 @@ for (const restored of ["available", "expired", "legacy", "missing", "default"] 
     await dialog.locator("input[type=file]").setInputFiles({
       name: "ref.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
     });
+    await expandRepeatControls(dialog);
     await dialog.getByLabel("Что изменить в образе").fill("Белый костюм");
     await dialog.getByRole("button", { name: /Пополнить здесь/ }).click();
     await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
@@ -1104,6 +1132,7 @@ for (const restored of ["available", "expired", "legacy", "missing", "default"] 
     quoteBodies.length = 0;
     await page.goto("/?tgWebAppData=test&remix=201");
     await expect(dialog).toBeVisible();
+    await expandRepeatControls(dialog);
     await expect(dialog.getByLabel("Что изменить в образе")).toHaveValue("Белый костюм");
     await expect(dialog.getByText("Реф #1")).toBeVisible();
     await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();
@@ -1201,7 +1230,7 @@ for (const { reloadRejected, sourceEdit } of [
         return r.fulfill({ status: 503, json: { detail: "Проверка длительности временно недоступна" } });
       }
       if (sourceEdit ? body.duration_override != null : (body.duration_override ?? 10) + 16 > 30) return r.fulfill({ status: 422, json: { detail: rejectedMessage } });
-      if (sourceEdit) return r.fulfill({ json: { cost_credits: 28, balance_credits: 100, can_run: true,
+      if (sourceEdit) return r.fulfill({ json: { cost_credits: 28, balance_credits: 100, can_run: true, deficit_credits: 0,
         duration_options: [], source_video_edit: true, effective_duration_seconds: 7, effective_duration: 7,
         duration_lock_reason: rejectedMessage } });
       return r.fulfill({ json: { cost_credits: 104, balance_credits: 200, can_run: true, deficit_credits: 0,
@@ -1212,6 +1241,7 @@ for (const { reloadRejected, sourceEdit } of [
     await expect(dialog.getByRole("button", { name: "Добавить", exact: true })).toBeEnabled();
     await dialog.locator("input[type=file]").setInputFiles({ name: "reader.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) });
     await expect(dialog.getByText(sourceEdit ? "Проверка длительности временно недоступна" : "Стоимость: 104 💋").first()).toBeVisible();
+    await expandRepeatControls(dialog);
     await dialog.getByRole("button", { name: "15 сек", exact: true }).click();
     await expect(dialog.getByText(rejectedMessage, { exact: true }).first()).toBeVisible();
     if (reloadRejected) {
@@ -1219,17 +1249,21 @@ for (const { reloadRejected, sourceEdit } of [
       await expect(dialog.getByText(rejectedMessage, { exact: true }).first()).toBeVisible();
     }
     await expect(dialog.getByRole("button", { name: /Запустить повтор/ })).toBeDisabled();
+    await expandRepeatControls(dialog);
     await expect(dialog.getByRole("slider")).toBeEnabled();
     if (!reloadRejected) await expect(dialog.getByRole("button", { name: "30 сек", exact: true })).toHaveCount(0);
     if (!sourceEdit) {
+      await expandRepeatControls(dialog);
       const shorter = dialog.getByRole("button", { name: "10 сек", exact: true });
       await expect(shorter).toBeEnabled();
       await shorter.click();
       await expect(dialog.getByRole("button", { name: /Запустить повтор/ })).toBeEnabled();
       expect(quotes.at(-1)).toMatchObject({ duration: 10, duration_override: 10 });
+      await expandRepeatControls(dialog);
       await dialog.getByRole("button", { name: "15 сек", exact: true }).click();
       await expect(dialog.getByText(rejectedMessage, { exact: true }).first()).toBeVisible();
     }
+    await expandRepeatControls(dialog);
     await dialog.getByRole("button", { name: "Длительность автора", exact: true }).click();
     await expect(dialog.getByRole("button", { name: /Запустить повтор/ })).toBeEnabled();
     expect(quotes.at(-1)).not.toHaveProperty("duration_override");
@@ -1287,6 +1321,7 @@ for (const modelKey of ["wan/3-0-video", "wan/3-0-video-prime"]) {
     await page.goto("/?tgWebAppData=test&feed=201");
     const dialog = page.getByRole("dialog", { name: "Повторить работу" });
     await expect(dialog).toBeVisible();
+    await expandRepeatControls(dialog);
     await expect(dialog.getByLabel("Модель")).toBeDisabled();
     expect(launches).toHaveLength(0);
     await expect(dialog.getByRole("button", { name: "Добавить", exact: true })).toBeEnabled();

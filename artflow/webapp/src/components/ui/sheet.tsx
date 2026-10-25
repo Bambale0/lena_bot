@@ -24,6 +24,7 @@ const FOCUSABLE = [
   "input:not([disabled])",
   "select:not([disabled])",
   "textarea:not([disabled])",
+  "summary",
   '[tabindex]:not([tabindex="-1"])',
 ].join(",");
 
@@ -70,7 +71,7 @@ function Sheet({ open, title, description, children, footer, className, onOpenCh
       if (event.key !== "Tab" || !dialogRef.current) return;
       const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((node) => {
         const style = window.getComputedStyle(node);
-        return style.display !== "none" && style.visibility !== "hidden";
+        return style.display !== "none" && style.visibility !== "hidden" && node.getClientRects().length > 0;
       });
       if (!focusable.length) {
         event.preventDefault();

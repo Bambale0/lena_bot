@@ -79,6 +79,7 @@ for (const lostResponse of [false, true]) {
       name: "face.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
     });
     await expect(dialog.getByText("Реф #1")).toBeVisible();
+    await dialog.getByText("Что изменить (необязательно)", { exact: true }).click();
     await dialog.getByLabel("Что изменить в образе").fill("Белый костюм");
     await dialog.getByRole("button", { name: "Пополнить здесь · 2 USD", exact: true }).click();
     await expect(dialog.getByRole("button", { name: /Ждём подтверждение оплаты/ })).toBeDisabled();

@@ -19,8 +19,10 @@ import type { AppTab, AssistantMessage, GenerationTask, PhotoPromptResult, Video
 import { formatKisses } from "@/lib/utils";
 import type { MiniAppApi } from "@/lib/api";
 import { LilacAudioTools } from "@/features/lilac/audio-tools";
+import { creditErrorToast } from "@/lib/credit-error-toast";
 
 interface ServicesScreenProps {
+  onBalanceOpen?: () => void;
   lilac?: boolean;
   messages: AssistantMessage[];
   assistantBusy: boolean;
@@ -71,12 +73,13 @@ async function apiJson<T>(path: string, init: RequestInit = {}): Promise<T> {
     } catch {
       // keep generic message
     }
-    throw new Error(message);
+    throw Object.assign(new Error(message), { status: response.status });
   }
   return (await response.json()) as T;
 }
 
 function ServicesScreen({
+  onBalanceOpen,
   lilac = false,
   messages,
   assistantBusy,
@@ -276,7 +279,7 @@ function ServicesScreen({
               ) : null}
               <details className="apix-help">
                 <summary>Об обработке файла</summary>
-                <p className="pb-2">Изображение отправляется multipart на backend; HEIC/AVIF убраны из выбора, потому что backend их не принимает.</p>
+                <p className="pb-2">Выберите фото в одном из поддерживаемых форматов. Перед отправкой проверьте стоимость анализа.</p>
               </details>
             </CardContent>
           </Card>
@@ -329,19 +332,19 @@ function ServicesScreen({
               ) : null}
               <details className="apix-help">
                 <summary>Об обработке видео</summary>
-                <p className="pb-2">Видео отправляется на backend, цена списывается из баланса, а при ошибке анализа кредиты возвращаются автоматически.</p>
+                <p className="pb-2">После подтверждения видео отправится на анализ. Стоимость будет списана с баланса.</p>
               </details>
             </CardContent>
           </Card>
         </section>
 
-        {!lilac && <MusicSunoPanel />}
+        {!lilac && <MusicSunoPanel onBalanceOpen={onBalanceOpen} />}
       </div>
     </div>
   );
 }
 
-function MusicSunoPanel({ onCreated, initialModel, initialPrompt, onInitialPromptConsumed, audioToolsApi }: { onCreated?: (task: GenerationTask) => void; initialModel?: string; initialPrompt?: string; onInitialPromptConsumed?: () => void; audioToolsApi?: MiniAppApi } = {}) {
+function MusicSunoPanel({ onCreated, initialModel, initialPrompt, onInitialPromptConsumed, audioToolsApi, onBalanceOpen }: { onCreated?: (task: GenerationTask) => void; initialModel?: string; initialPrompt?: string; onInitialPromptConsumed?: () => void; audioToolsApi?: MiniAppApi; onBalanceOpen?: () => void } = {}) {
   const copy = t("ru").services;
   const [models, setModels] = useState<MusicModel[]>([]);
   const [voices, setVoices] = useState<SunoVoice[]>([]);
@@ -407,7 +410,7 @@ function MusicSunoPanel({ onCreated, initialModel, initialPrompt, onInitialPromp
       toast.success("Музыкальная задача создана");
       setPrompt("");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Не удалось создать музыку");
+      creditErrorToast(error, "Не удалось создать музыку", onBalanceOpen);
     } finally {
       setBusy(false);
     }
@@ -504,7 +507,7 @@ function MusicSunoPanel({ onCreated, initialModel, initialPrompt, onInitialPromp
           {!loading && !models.length && <p role="status">Музыкальные модели сейчас недоступны. Обновите список позже.</p>}
         </section>
 
-        {audioToolsApi && <LilacAudioTools api={audioToolsApi} model={selectedModel} onCreated={onCreated} />}
+        {audioToolsApi && <LilacAudioTools api={audioToolsApi} model={selectedModel} onCreated={onCreated} onBalanceOpen={onBalanceOpen} />}
         <section className="grid gap-2 rounded-xl border border-border bg-card/45 p-2.5">
           <div className="flex items-center justify-between gap-2">
             <h3 className="text-sm font-semibold">{copy.voices}</h3>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { Film, ImageIcon, ImagePlus, LoaderCircle, Plus, Ruler, Weight, X } from "lucide-react";
 import { toast } from "sonner";
@@ -6,6 +6,9 @@ import { toast } from "sonner";
 import { TaskDetailSheet } from "@/components/task-detail-sheet";
 import { Button } from "@/components/ui/button";
 import { Sheet } from "@/components/ui/sheet";
+import { readStudioBalance, subscribeStudioBalance } from "@/lib/studio-balance";
+import { clearPendingTopup, readPendingTopup, savePendingTopup, sameTopupAttempt } from "@/lib/topup-recovery";
+import { canReopenPayment, paymentFromResponse, paymentResolution, type RepeatPayment, type PaymentProvider } from "@/features/feed-repeat-payment";
 import { isPinterestServiceTrend } from "@/features/pinterest-service";
 import type { GenerationTask, TrendItem, TrendUserField } from "@/lib/types";
 import { notifyHaptic, openExternalUrl, readStartParam } from "@/lib/telegram";
@@ -289,7 +292,7 @@ function PinterestTrendFlow({
       const form = new FormData();
       form.append("file", file);
       const uploaded = await apiJson<TrendUploadResponse>("/trends/upload", { method: "POST", body: form });
-      if (!uploaded.asset_id) throw new Error("Backend не вернул asset_id");
+      if (!uploaded.asset_id) throw new Error("Не удалось подтвердить загрузку фото");
       const next: PinterestReference = { ...uploaded, preview };
       if (slot === "scene") {
         revokePreview(scene);
@@ -329,7 +332,7 @@ function PinterestTrendFlow({
         const form = new FormData();
         form.append("file", file);
         const result = await apiJson<TrendUploadResponse>("/trends/upload", { method: "POST", body: form });
-        if (!result.asset_id) throw new Error("Backend не вернул asset_id");
+        if (!result.asset_id) throw new Error("Не удалось подтвердить загрузку фото");
         return { ...result, preview: previews[index] } as PinterestReference;
       }));
       setIdentityExtras((current) => [...current, ...uploaded]);
@@ -373,7 +376,7 @@ function PinterestTrendFlow({
           idempotency_key: buildIdempotencyKey(trend.id),
         }),
       });
-      if (!result.task?.id) throw new Error("Backend не вернул задачу");
+      if (!result.task?.id) throw new Error("Не удалось подтвердить создание задачи");
       notifyHaptic("success");
       toast.success("Изображение отправлено в генерацию");
       onTask(result.task);
@@ -556,6 +559,8 @@ function PinterestTrendFlow({
 }
 
 function TrendRunnerPortal() {
+  const balance = useSyncExternalStore(subscribeStudioBalance, readStudioBalance, () => null);
+  const previousBalance = useRef(balance);
   const [trend, setTrend] = useState<TrendPublic | null>(null);
   const [phase, setPhase] = useState<RunnerPhase>("idle");
   const [error, setError] = useState("");
@@ -572,6 +577,16 @@ function TrendRunnerPortal() {
   const checkoutSequence = useRef(0);
   const [paymentBusy, setPaymentBusy] = useState(false);
   const [paymentWaiting, setPaymentWaiting] = useState(false);
+  const paymentRef = useRef<RepeatPayment | null>(null);
+  const [paymentChecking, setPaymentChecking] = useState(false);
+  const [paymentChecked, setPaymentChecked] = useState<RepeatPayment | null>(null);
+  const paymentOwner = useRef<number | null>(null);
+  const paymentAbort = useRef<AbortController | null>(null);
+  const heldTrend = useRef<TrendPublic | null>(null);
+  if (trend) heldTrend.current = trend;
+  const paymentStorage = () => { try { return window.sessionStorage; } catch { return null; } };
+  const paymentCheckInFlight = useRef(false);
+  const operationSequence = useRef(0);
   const [paymentMethods, setPaymentMethods] = useState<string[]>([]);
   const processedStart = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -588,6 +603,11 @@ function TrendRunnerPortal() {
   const personalized = userFields.length > 0;
 
   const resetRunner = useCallback(() => {
+    paymentAbort.current?.abort();
+    heldTrend.current = null;
+    paymentOwner.current = null;
+    setPaymentChecked(null);
+    operationSequence.current++;
     checkoutSequence.current++;
     setDuration(null);
     runKeyRef.current = null;
@@ -598,6 +618,7 @@ function TrendRunnerPortal() {
     setCheckoutBusy(false);
     setPaymentBusy(false);
     setPaymentWaiting(false);
+    paymentRef.current = null;
     setPaymentMethods([]);
     setUploadedAsset(null);
     setUserValues({});
@@ -608,47 +629,54 @@ function TrendRunnerPortal() {
   }, []);
 
   const closeRunner = useCallback(() => {
-    if (busy) return;
+    if (busy || paymentBusy) return;
+    if (paymentWaiting) { setTrend(null); return; }
     resetRunner();
     setTrend(null);
-  }, [busy, resetRunner]);
+  }, [busy, paymentWaiting, paymentBusy, resetRunner]);
+
+  const showTrend = useCallback((next: TrendPublic) => {
+    if (heldTrend.current && (paymentRef.current || heldTrend.current.id === next.id)) {
+      setTrend(heldTrend.current);
+      if (heldTrend.current.id !== next.id) setError("Сначала проверь оплату предыдущего повтора. Фото и настройки сохранены.");
+      return;
+    }
+    resetRunner(); setUserValues(initialTrendUserValues(next)); setTrend(next);
+  }, [resetRunner]);
 
   const loadTrend = useCallback(async (trendId: number) => {
     try {
       const payload = await apiJson<TrendPublic>(`/trends/${trendId}`);
-      resetRunner();
-      setUserValues(initialTrendUserValues(payload));
-      setTrend(payload);
+      showTrend(payload);
     } catch (loadError) {
       toast.error(loadError instanceof Error ? loadError.message : "Не удалось открыть тренд");
     }
-  }, [resetRunner]);
+  }, [showTrend]);
 
   useEffect(() => {
     const onOpen = (event: Event) => {
       const detail = (event as CustomEvent<TrendRunnerEventDetail>).detail || {};
       if (detail.trend) {
-        resetRunner();
-        setUserValues(initialTrendUserValues(detail.trend));
-        setTrend(detail.trend);
+        showTrend(detail.trend);
       } else if (detail.trendId) {
         void loadTrend(detail.trendId);
       }
     };
     window.addEventListener(TREND_RUNNER_EVENT, onOpen);
     return () => window.removeEventListener(TREND_RUNNER_EVENT, onOpen);
-  }, [loadTrend, resetRunner]);
+  }, [loadTrend, showTrend]);
 
-  const refreshCheckout = useCallback(async (trendId: number, quiet = false) => {
+  const refreshCheckout = useCallback(async (trendId: number, quiet = false, signal?: AbortSignal) => {
     const sequence = ++checkoutSequence.current;
     if (!quiet) setCheckoutBusy(true);
     try {
       const query = duration == null ? "" : `?duration=${duration}`;
-      const quote = await apiJson<TrendCheckoutQuote>(`/trends/${trendId}/checkout${query}`);
+      const quote = await apiJson<TrendCheckoutQuote>(`/trends/${trendId}/checkout${query}`, { signal });
       if (
         typeof quote?.can_run !== "boolean"
-        || !Number.isFinite(Number(quote?.cost_credits))
-        || !Number.isFinite(Number(quote?.balance_credits))
+        || typeof quote.cost_credits !== "number" || !Number.isFinite(quote.cost_credits) || quote.cost_credits < 0
+        || typeof quote.balance_credits !== "number" || !Number.isFinite(quote.balance_credits)
+        || typeof quote.deficit_credits !== "number" || !Number.isFinite(quote.deficit_credits) || quote.deficit_credits < 0
       ) {
         throw new Error("Стоимость временно недоступна");
       }
@@ -667,10 +695,41 @@ function TrendRunnerPortal() {
     }
   }, [duration]);
 
+  useLayoutEffect(() => {
+    const previous = previousBalance.current;
+    previousBalance.current = balance;
+    if (previous && (!balance || previous.actorId !== balance.actorId)) {
+      resetRunner(); setTrend(null); return;
+    }
+    if (!trend) return;
+    if (balance?.open) {
+      checkoutSequence.current++;
+      setCheckout(null);
+    } else if (previous?.open && balance) {
+      void refreshCheckout(trend.id);
+    }
+  }, [balance, trend?.id, refreshCheckout, resetRunner]);
+
   useEffect(() => {
     if (!trend?.id) return;
     void refreshCheckout(trend.id);
   }, [refreshCheckout, trend?.id]);
+
+  useEffect(() => {
+    if (!trend?.id) return;
+    const sequence = operationSequence.current;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 15_000);
+    void apiJson<{ id: number }>("/me", { signal: controller.signal }).then(viewer => {
+      if (sequence !== operationSequence.current || controller.signal.aborted || !Number.isSafeInteger(viewer.id)) return;
+      paymentOwner.current = viewer.id;
+      const saved = readPendingTopup(paymentStorage(), viewer.id);
+      // Preserve the current in-memory URL, but follow an acknowledged/settled shared guard.
+      if (!saved || !paymentRef.current || !sameTopupAttempt(saved, paymentRef.current)) { paymentRef.current = saved; setPaymentWaiting(Boolean(saved)); }
+    }).catch(() => { if (!controller.signal.aborted) setError("Не удалось подтвердить аккаунт для оплаты. Открой повтор ещё раз."); })
+      .finally(() => window.clearTimeout(timeout));
+    return () => { controller.abort(); window.clearTimeout(timeout); };
+  }, [trend?.id]);
 
   useEffect(() => {
     if (!trend?.id) return;
@@ -679,49 +738,99 @@ function TrendRunnerPortal() {
       .catch(() => setPaymentMethods([]));
   }, [trend?.id]);
 
+  const checkPayment = useCallback(async (quiet = false) => {
+    const payment = paymentRef.current;
+    const owner = paymentOwner.current;
+    const sequence = operationSequence.current;
+    if (!payment || !owner || !trend || paymentCheckInFlight.current) return;
+    paymentCheckInFlight.current = true; setPaymentChecking(true); setPaymentChecked(null);
+    const controller = new AbortController(); paymentAbort.current = controller;
+    const timeout = window.setTimeout(() => controller.abort(), 15_000);
+    try {
+      const history = await apiJson<{ transactions: unknown[] }>("/api/web/billing/transactions?limit=100", { signal: controller.signal });
+      if (sequence !== operationSequence.current || payment !== paymentRef.current || controller.signal.aborted) return;
+      if (!Array.isArray(history.transactions)) throw new Error("История недоступна");
+      const resolution = paymentResolution(payment, history.transactions);
+      setCheckout(null);
+      await refreshCheckout(trend.id, quiet, controller.signal);
+      if (sequence !== operationSequence.current || payment !== paymentRef.current || controller.signal.aborted) return;
+      if (resolution !== "pending") {
+        if (!clearPendingTopup(paymentStorage(), owner, payment)) throw new Error("Текущая оплата изменилась");
+        paymentRef.current = null; setPaymentWaiting(false);
+        setError(resolution === "paid" ? "Оплата подтверждена. Проверь стоимость и нажми «Создать»."
+          : resolution === "failed" ? "Платёж завершился ошибкой. Можно выбрать новое пополнение."
+          : "Платёж возвращён. Можно выбрать новое пополнение.");
+      } else if (!quiet) {
+        setPaymentChecked(payment);
+        setError("Платёж пока не подтверждён. Проверь его позже или обратись в поддержку. Достаточный баланс не подтверждает оплату этого счёта.");
+      }
+    } catch {
+      if (sequence === operationSequence.current && !quiet) setError("Не удалось проверить оплату. Повтори проверку позже; новая оплата не создаётся.");
+    } finally {
+      window.clearTimeout(timeout);
+      if (paymentAbort.current === controller) paymentAbort.current = null;
+      paymentCheckInFlight.current = false;
+      if (sequence === operationSequence.current) setPaymentChecking(false);
+    }
+  }, [trend, refreshCheckout]);
+
   useEffect(() => {
-    if (!paymentWaiting || !trend?.id) return;
+    if (!paymentWaiting || paymentBusy || !trend?.id) return;
     let attempts = 0;
     const timer = window.setInterval(() => {
-      attempts += 1;
-      void refreshCheckout(trend.id, true).then((quote) => {
-        if (quote?.can_run) {
-          window.clearInterval(timer);
-          setPaymentWaiting(false);
-          notifyHaptic("success");
-          toast.success("Оплата зачислена — можно запускать");
-        } else if (attempts >= 48) {
-          window.clearInterval(timer);
-          setPaymentWaiting(false);
-        }
-      });
+      if (++attempts > 48) { window.clearInterval(timer); return; }
+      void checkPayment(true);
     }, 2500);
-    return () => window.clearInterval(timer);
-  }, [paymentWaiting, refreshCheckout, trend?.id]);
+    const onReturn = () => { if (document.visibilityState === "visible") void checkPayment(true); };
+    window.addEventListener("focus", onReturn);
+    document.addEventListener("visibilitychange", onReturn);
+    return () => { window.clearInterval(timer); window.removeEventListener("focus", onReturn); document.removeEventListener("visibilitychange", onReturn); };
+  }, [paymentWaiting, paymentBusy, checkPayment, trend?.id]);
 
   const payInline = useCallback(async () => {
     const plan = checkout?.recommended_plan;
-    if (!plan || paymentBusy) return;
+    if (!plan || paymentBusy || paymentRef.current) return;
+    const owner = paymentOwner.current;
+    if (!owner) { setError("Дождись подтверждения аккаунта перед оплатой."); return; }
+    const saved = readPendingTopup(paymentStorage(), owner);
+    if (saved) { paymentRef.current = saved; setPaymentWaiting(true); return; }
     const provider = paymentMethods.find((method) => ["tbank", "crypto", "tribute", "lava"].includes(method));
     if (!provider) {
       toast.error("Сейчас нет доступного способа оплаты");
       return;
     }
     setPaymentBusy(true);
+    const sequence = operationSequence.current;
+    const pending: RepeatPayment = { startedAt: Date.now(), provider: provider as PaymentProvider, planKey: plan.key, transactionId: null, checkoutUrl: null };
+    if (!savePendingTopup(paymentStorage(), owner, pending)) { setPaymentBusy(false); setError("Не удалось сохранить защиту оплаты. Разреши хранилище браузера."); return; }
+    paymentRef.current = pending;
+    setPaymentWaiting(true);
+    const controller = new AbortController(); paymentAbort.current = controller;
+    const timeout = window.setTimeout(() => controller.abort(), 20_000);
     try {
       const payment = await apiJson<Record<string, unknown>>(`/topup/${provider}`, {
         method: "POST",
+        signal: controller.signal,
         body: JSON.stringify({ plan_key: plan.key }),
       });
-      const url = String(payment.pay_url || payment.invoice_url || payment.url || "");
+      if (sequence !== operationSequence.current || !paymentRef.current || controller.signal.aborted) return;
+      paymentRef.current = paymentFromResponse(paymentRef.current, payment);
+      if (!savePendingTopup(paymentStorage(), owner, paymentRef.current)) throw new Error("Не удалось сохранить номер оплаты");
+      const url = paymentRef.current.checkoutUrl;
       if (!url) throw new Error("Платёжная ссылка не получена");
       setPaymentWaiting(true);
       openExternalUrl(url);
-      toast.success("Оплата открыта — после зачисления вернём тебя сюда");
+      toast.info("Оплата открыта. После возвращения проверь её статус.");
     } catch (paymentError) {
-      toast.error(paymentError instanceof Error ? paymentError.message : "Не удалось открыть оплату");
+      if (sequence !== operationSequence.current) return;
+      if (paymentError instanceof TrendApiError && paymentError.status >= 400 && paymentError.status < 500 && paymentError.status !== 408) {
+        if (clearPendingTopup(paymentStorage(), owner, pending)) { paymentRef.current = null; setPaymentWaiting(false); }
+      }
+      setError("Результат создания оплаты не подтверждён. Проверь уже открытую оплату перед новой попыткой.");
     } finally {
-      setPaymentBusy(false);
+      window.clearTimeout(timeout);
+      if (paymentAbort.current === controller) paymentAbort.current = null;
+      if (sequence === operationSequence.current) setPaymentBusy(false);
     }
   }, [checkout?.recommended_plan, paymentBusy, paymentMethods]);
 
@@ -733,6 +842,7 @@ function TrendRunnerPortal() {
   }, [loadTrend]);
 
   useEffect(() => () => {
+    paymentAbort.current?.abort();
     setLocalPreview((current) => {
       if (current) URL.revokeObjectURL(current);
       return "";
@@ -740,12 +850,13 @@ function TrendRunnerPortal() {
   }, []);
 
   const startTrend = useCallback(async (assetId: string, values: Record<string, string>) => {
-    if (!trend || genericBusy) return;
-    if (!checkout) {
+    if (!trend || genericBusy || paymentBusy || balance?.open) return;
+    if (!checkout || checkoutBusy || !checkout.can_run) {
       toast.error("Сначала дождись расчёта стоимости тренда");
       return;
     }
     setError("");
+    const sequence = operationSequence.current;
     try {
       setPhase("generating");
       const fingerprint = JSON.stringify([trend.id, assetId, values, duration]);
@@ -763,7 +874,8 @@ function TrendRunnerPortal() {
           ...(duration == null ? {} : { duration }),
         }),
       });
-      if (!result.task?.id) throw new Error("Backend не вернул задачу");
+      if (sequence !== operationSequence.current) return;
+      if (!result.task?.id) throw new Error("Не удалось подтвердить создание задачи");
       setSelectedTask(result.task);
       setTaskOpen(true);
       notifyHaptic("success");
@@ -771,6 +883,7 @@ function TrendRunnerPortal() {
       setTrend(null);
       resetRunner();
     } catch (runError) {
+      if (sequence !== operationSequence.current) return;
       notifyHaptic("error");
       const message = runError instanceof Error ? runError.message : "Не удалось запустить тренд";
       setError(message);
@@ -782,11 +895,12 @@ function TrendRunnerPortal() {
       }
       toast.error(message);
     }
-  }, [checkout, duration, genericBusy, refreshCheckout, resetRunner, trend]);
+  }, [checkout, checkoutBusy, duration, genericBusy, paymentBusy, balance?.open, refreshCheckout, resetRunner, trend]);
 
   const runPhoto = useCallback(async (file: File | undefined | null) => {
     if (!trend || !file || genericBusy) return;
     setError("");
+    const sequence = operationSequence.current;
     setUploadedAsset(null);
     setLocalPreview((current) => {
       if (current) URL.revokeObjectURL(current);
@@ -797,22 +911,20 @@ function TrendRunnerPortal() {
       const form = new FormData();
       form.append("file", file);
       const uploaded = await apiJson<TrendUploadResponse>("/trends/upload", { method: "POST", body: form });
-      if (!uploaded.asset_id) throw new Error("Backend не вернул asset_id");
+      if (sequence !== operationSequence.current) return;
+      if (!uploaded.asset_id) throw new Error("Не удалось подтвердить загрузку фото");
       setUploadedAsset(uploaded);
-      if (trend.kind === "video" || (trend.user_fields || []).length || !checkout || !checkout.can_run) {
-        setPhase("idle");
-        toast.success(checkout && !checkout.can_run ? "Фото готово — пополни баланс прямо здесь" : "Фото готово");
-        return;
-      }
-      await startTrend(uploaded.asset_id, {});
+      setPhase("idle");
+      toast.success("Фото готово. Проверь стоимость и нажми «Создать».");
     } catch (runError) {
+      if (sequence !== operationSequence.current) return;
       notifyHaptic("error");
       const message = runError instanceof Error ? runError.message : "Не удалось загрузить фото";
       setError(message);
       setPhase("error");
       toast.error(message);
     }
-  }, [checkout, genericBusy, startTrend, trend]);
+  }, [genericBusy, trend]);
 
   const refreshTask = useCallback(async (task: GenerationTask) => {
     if (taskBusy) return;
@@ -868,8 +980,7 @@ function TrendRunnerPortal() {
     if (phase === "uploading") return "Загружаем фото…";
     if (phase === "generating") return "Запускаем генерацию…";
     if (phase === "error") return "Можно выбрать фото ещё раз";
-    if (personalized || trend?.kind === "video") return uploadedAsset ? "Заменить фото" : "Загрузить фото";
-    return "Выберите фото — запуск начнётся автоматически";
+    return uploadedAsset ? "Заменить фото" : "Загрузить фото";
   }, [personalized, phase, trend?.kind, uploadedAsset]);
 
   return (
@@ -949,6 +1060,20 @@ function TrendRunnerPortal() {
                     </div>
                   ) : null}
                 </div>
+                {paymentWaiting ? <div className="mt-3 grid gap-2">
+                  <p className="text-xs">Статус оплаты ещё не подтверждён. Фото и настройки сохранены.</p>
+                  <Button variant="outline" disabled={paymentBusy || paymentChecking} onClick={() => void checkPayment()}>Проверить оплату</Button>
+                  {paymentRef.current && canReopenPayment(paymentRef.current) ? <Button variant="outline" onClick={() => openExternalUrl(paymentRef.current!.checkoutUrl!)}>Открыть эту оплату</Button> : null}
+                  {paymentChecked === paymentRef.current && paymentChecked && !paymentChecked.transactionId ? <>
+                    <p className="text-xs">Статус этой попытки неизвестен. Проверь историю и платёжный сервис: новый счёт может привести к повторной оплате.</p>
+                    <Button variant="outline" className="whitespace-normal" disabled={paymentChecking} onClick={() => {
+                      if (paymentOwner.current && paymentChecked === paymentRef.current && clearPendingTopup(paymentStorage(), paymentOwner.current, paymentChecked)) {
+                        paymentRef.current = null; setPaymentWaiting(false); setPaymentChecked(null);
+                        setError("Статус прошлой оплаты остаётся неизвестным. Новая оплата — только по твоему нажатию.");
+                      }
+                    }}>Историю проверил — разрешить новое пополнение</Button>
+                  </> : null}
+                </div> : null}
                 {checkout && !checkout.can_run && checkout.recommended_plan ? (
                   <div className="mt-3 grid gap-1.5">
                     <Button
@@ -1032,7 +1157,7 @@ function TrendRunnerPortal() {
 
               {uploadedAsset ? (
                 <Button
-                  disabled={genericBusy || !userFieldsReady || !checkout || !checkout.can_run}
+                  disabled={genericBusy || paymentBusy || checkoutBusy || Boolean(balance?.open) || !userFieldsReady || !checkout || !checkout.can_run}
                   className="min-h-12 w-full"
                   onClick={() => {
                     if (uploadedAsset) void startTrend(uploadedAsset.asset_id, userValues);

@@ -7,12 +7,13 @@ import { Textarea } from "@/components/ui/textarea";
 import type { MiniAppApi } from "@/lib/api";
 import type { GenerationTask } from "@/lib/types";
 import { formatCredits } from "@/lib/utils";
+import { creditErrorToast } from "@/lib/credit-error-toast";
 
 type Operation = "cover" | "extend" | "add_vocals" | "add_instrumental";
 interface Source { url: string; duration_seconds?: number; filename?: string; }
 
 /** Source audio is uploaded once; retries reuse its server-issued URL. */
-export function LilacAudioTools({ api, onCreated, model }: { api: MiniAppApi; onCreated?: (task: GenerationTask) => void; model?: { key: string; credits: number } }) {
+export function LilacAudioTools({ api, onCreated, model, onBalanceOpen }: { api: MiniAppApi; onCreated?: (task: GenerationTask) => void; model?: { key: string; credits: number }; onBalanceOpen?: () => void }) {
   const [operation, setOperation] = useState<Operation>("cover");
   const [file, setFile] = useState<File | null>(null), [source, setSource] = useState<Source | null>(null);
   const [prompt, setPrompt] = useState(""), [title, setTitle] = useState(""), [style, setStyle] = useState(""), [continueAt, setContinueAt] = useState("");
@@ -33,7 +34,7 @@ export function LilacAudioTools({ api, onCreated, model }: { api: MiniAppApi; on
       if (operation === "extend" && uploaded.duration_seconds && position >= uploaded.duration_seconds) throw new Error("Точка продолжения должна быть раньше конца исходного аудио.");
       const task = await api.request<GenerationTask>("/music/from-audio", { method: "POST", body: JSON.stringify({ operation, model: model.key, upload_url: uploaded.url, prompt: prompt.trim(), title: title.trim() || undefined, style: style.trim() || undefined, instrumental, continue_at: operation === "extend" ? position : undefined, source_duration: uploaded.duration_seconds }) });
       onCreated?.(task); toast.success("Задача обработки аудио создана");
-    } catch (e) { setError(e instanceof Error ? e.message : "Не удалось обработать аудио"); }
+    } catch (e) { setError(e instanceof Error ? e.message : "Не удалось обработать аудио"); creditErrorToast(e, "Не удалось обработать аудио", onBalanceOpen); }
     finally { setBusy(false); }
   };
   return <section className="lilac-audio-tools"><h2>Из вашего аудио</h2><p className="lilac-note">Создайте кавер, продолжите запись или добавьте вокал. Используйте свои записи или аудио с разрешением правообладателя.</p>

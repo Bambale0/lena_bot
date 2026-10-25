@@ -36,6 +36,7 @@ export function checkoutProviderLabel(provider: PaymentProvider): string {
 }
 
 export type RepeatPayment = {
+  sharedGuard?: true;
   startedAt: number;
   provider: PaymentProvider | null;
   planKey: string | null;
@@ -82,6 +83,7 @@ function cleanDraft(value: unknown): RepeatDraft | null {
     ? saved.payment as Record<string, unknown> : null;
   // Old booleans and incomplete invoice responses must fail closed, never expire into a new invoice.
   const payment: RepeatPayment | null = raw || saved.paymentWaiting === true ? {
+    ...(raw?.sharedGuard === true ? { sharedGuard: true as const } : {}),
     startedAt: typeof raw?.startedAt === "number" && Number.isFinite(raw.startedAt) ? raw.startedAt : saved.savedAt,
     provider: PROVIDERS.includes(raw?.provider as PaymentProvider) ? raw!.provider as PaymentProvider : null,
     planKey: typeof raw?.planKey === "string" ? raw.planKey : null,
