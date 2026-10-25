@@ -31,5 +31,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # Actor provenance is immutable release evidence. Roll forward instead.
-    pass
+    raise RuntimeError(
+        "Kling 4 actor provenance is immutable release evidence; roll forward instead"
+    )

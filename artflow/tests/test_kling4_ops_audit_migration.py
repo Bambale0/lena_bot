@@ -67,3 +67,12 @@ def test_kling4_ops_actor_migration_preserves_admin_audit_and_enforces_actor_sha
                     source="ops",
                 )
             )
+
+
+def test_kling4_ops_actor_migration_refuses_a_version_only_downgrade():
+    migration = importlib.import_module(
+        "db.migrations.versions.050_kling4_ops_audit_actor"
+    )
+
+    with pytest.raises(RuntimeError, match="immutable release evidence"):
+        migration.downgrade()
