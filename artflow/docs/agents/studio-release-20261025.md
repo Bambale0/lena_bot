@@ -106,7 +106,7 @@ Admin: global generation queue/filter/search/pagination and safe manual fail/opt
 
 ## Release gate (controller)
 
-- [ ] Independent task review and fixes after each task; final broad standards/spec/security/financial review.
+- [x] Independent task review and fixes after each task; final broad standards/spec/security/financial review.
 - [ ] Full maintained checks in Linux CI; local targeted backend+frontend checks and actual mocked browser journeys. No payment/generation/config mutation on production. Update OpenAPI snapshot if response schema requires it using existing exporter.
-- [ ] Review whole diff, hygiene/secrets/parity, maintain execution ledger. Output report + real browser screenshots under task outputs.
+- [x] Review whole diff, hygiene/secrets/parity, maintain execution ledger. Output report + real browser screenshots under task outputs.
 - [ ] PR to main, attach to chat, native squash auto-merge only after required checks and resolved review conversations. Verify exact merge SHA main CI + Production Autodeploy + fresh public health, anonymous protected endpoints401, bundle marker and admin rollout guard. Report verified SHA; green PR CI alone is not deployment.
