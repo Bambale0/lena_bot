@@ -115,7 +115,9 @@ async function apiJson<T>(path: string, init: RequestInit = {}): Promise<T> {
     },
   });
   if (!response.ok) {
-    let message = `Ошибка API ${response.status}`;
+    let message = response.status >= 500
+      ? "Не удалось запустить тренд. Попробуйте ещё раз."
+      : `Ошибка API ${response.status}`;
     let code: string | undefined;
     try {
       const payload = await response.json();

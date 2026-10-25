@@ -149,6 +149,7 @@ from core.gemini_omni import (
 from core.image_recovery_policy import get_image_recovery_policy
 from core.kie_seedance_callback import callback_url_for_generation
 from core.kling4_access import require_kling4_access, visible_model_costs
+from core.model_pricing import split_pricing_variant_key
 from core.neironych_video_poll_gate import (
     NeironychVideoPollLeaseLost,
     neironych_video_poll_guard,
@@ -2937,7 +2938,10 @@ async def create_image_generation(
         if is_trend_prompt(prompt_source):
             if trend_kind(prompt_source) != "image":
                 raise HTTPException(status_code=422, detail="Selected trend is not an image trend")
-            if prompt_source.model and body.model != prompt_source.model:
+            configured_model, _pricing_options = split_pricing_variant_key(
+                str(prompt_source.model or "")
+            )
+            if configured_model and body.model != configured_model:
                 raise HTTPException(status_code=422, detail="Trend must use its configured model")
             try:
                 user_prompt = render_trend_prompt(
@@ -3223,7 +3227,10 @@ async def _video_prompt_and_source(body: VideoGenRequest, session: AsyncSession)
         if is_trend_prompt(prompt_source):
             if trend_kind(prompt_source) != "video":
                 raise HTTPException(status_code=422, detail="Selected trend is not a video trend")
-            if prompt_source.model and body.model != prompt_source.model:
+            configured_model, _pricing_options = split_pricing_variant_key(
+                str(prompt_source.model or "")
+            )
+            if configured_model and body.model != configured_model:
                 raise HTTPException(status_code=422, detail="Trend must use its configured model")
             try:
                 user_prompt = render_trend_prompt(

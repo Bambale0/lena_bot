@@ -21,6 +21,28 @@ RESOLUTION_LABELS: dict[str, str] = {
     "4k": "4K",
 }
 
+_PRICING_OPTION_NAMES = {"quality", "duration", "resolution"}
+
+
+def split_pricing_variant_key(model_key: str) -> tuple[str, dict[str, str]]:
+    """Separate a database pricing key from the provider runtime model id.
+
+    Pricing rows may add ``__quality=...``, ``__duration=...`` or
+    ``__resolution=...`` suffixes. Those suffixes are lookup metadata and must
+    never be sent to a provider as part of the model id.
+    """
+
+    base, separator, suffix = str(model_key or "").partition("__")
+    if not separator or not base or not suffix:
+        return model_key, {}
+    options: dict[str, str] = {}
+    for part in suffix.split("__"):
+        name, equals, value = part.partition("=")
+        if not equals or name not in _PRICING_OPTION_NAMES or not value:
+            return model_key, {}
+        options[name] = value
+    return base, options
+
 
 def pricing_variant_key(
     model_key: str,
