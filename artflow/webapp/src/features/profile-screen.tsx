@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Copy, Gift, Globe2, History, Play, RefreshCw, Share2, Sparkles, Users, Wallet } from "lucide-react";
 import { toast } from "sonner";
 
@@ -10,6 +10,7 @@ import type { GenerationTask, ReferralStats, UserProfile } from "@/lib/types";
 import { firstMedia, formatCredits, formatRelativeDate, generationStatusLabel } from "@/lib/utils";
 
 interface ProfileScreenProps {
+  worksSection?: ReactNode;
   user: UserProfile;
   tasks: GenerationTask[];
   referrals: ReferralStats | null;
@@ -25,6 +26,7 @@ interface ProfileScreenProps {
 type ProfileSection = "works" | "partner" | "history";
 
 function ProfileScreen({
+  worksSection,
   user,
   tasks,
   referrals,
@@ -88,7 +90,7 @@ function ProfileScreen({
       </div>
 
       {section === "works" ? (
-        <section className="grid gap-3">
+        worksSection ? <section className="studio-profile-works" aria-label="Работы и серии">{worksSection}</section> : <section className="grid gap-3">
           <WorkGrid title="Выложенные работы" empty="Ты ещё ничего не выложил в профиль" tasks={publishedTasks} onOpenTask={onOpenTask} />
           <WorkGrid title="Все работы" empty="История пока пустая" tasks={tasks} onOpenTask={onOpenTask} />
         </section>

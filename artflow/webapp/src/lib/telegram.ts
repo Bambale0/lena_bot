@@ -115,12 +115,60 @@ export function parseStartTarget(rawValue: string): StartTarget | null {
   return { kind, value: targetValue };
 }
 
-export function configureTelegramWebApp(): void {
+function bestEffort(action: () => void): void {
+  try { action(); } catch { /* Unsupported Telegram capabilities must not block the app. */ }
+}
+
+const fullscreenAttempted = new WeakSet<TelegramWebApp>();
+
+export function configureTelegramWebApp(): () => void {
   const app = webApp();
-  app?.ready?.();
-  app?.expand?.();
+  bestEffort(() => app?.ready?.());
+  bestEffort(() => app?.expand?.());
   const scheme = app?.colorScheme || "dark";
   document.documentElement.classList.toggle("dark", scheme !== "light");
+  if (!app) return () => {};
+  const style = document.documentElement.style;
+  const previous = new Map<string, string>();
+  const syncInsets = () => {
+    for (const [prefix, insets] of [["safe", app.safeAreaInset], ["content-safe", app.contentSafeAreaInset]] as const) {
+      for (const edge of ["top", "right", "bottom", "left"] as const) {
+        const key = `--tg-${prefix}-area-inset-${edge}`;
+        if (!previous.has(key)) previous.set(key, style.getPropertyValue(key));
+        const value = insets?.[edge];
+        style.setProperty(key, `${typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0}px`);
+      }
+    }
+  };
+  syncInsets();
+  const events: TelegramWebAppEvent[] = ["safeAreaChanged", "contentSafeAreaChanged", "viewportChanged", "fullscreenChanged", "fullscreenFailed"];
+  for (const event of events) bestEffort(() => app.onEvent?.(event, syncInsets));
+  bestEffort(() => {
+    const supported = app.isVersionAtLeast ? app.isVersionAtLeast("8.0") : Number(app.version?.split(".")[0]) >= 8;
+    if (supported && app.requestFullscreen && !fullscreenAttempted.has(app)) {
+      fullscreenAttempted.add(app);
+      if (!app.isFullscreen) app.requestFullscreen();
+    }
+  });
+  // Events only synchronize geometry. A user leaving fullscreen is never forced back.
+  return () => {
+    for (const event of events) bestEffort(() => app.offEvent?.(event, syncInsets));
+    for (const [key, value] of previous) {
+      if (value) style.setProperty(key, value); else style.removeProperty(key);
+    }
+  };
+}
+
+export function configureStudioChrome(): () => void {
+  const app = webApp();
+  if (!app) return () => {};
+  const previous = [app.headerColor, app.backgroundColor, app.bottomBarColor];
+  const setters = [app.setHeaderColor, app.setBackgroundColor, app.setBottomBarColor];
+  setters.forEach(set => bestEffort(() => set?.call(app, "#000000")));
+  return () => setters.forEach((set, index) => {
+    const color = previous[index];
+    if (color) bestEffort(() => set?.call(app, color));
+  });
 }
 
 export function telegramUserName(): string {

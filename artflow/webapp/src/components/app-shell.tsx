@@ -14,6 +14,7 @@ import {
   Home,
   Lightbulb,
   Sparkles,
+  Wallet,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -70,7 +71,7 @@ function readViewport(): ViewportState {
   if (typeof window === "undefined") return { mode: "wide", short: false, width: 1024, height: 768 };
   const viewport = window.visualViewport;
   const width = Math.max(320, Math.round(viewport?.width || window.innerWidth || document.documentElement.clientWidth || 1024));
-  const height = Math.max(360, Math.round(viewport?.height || window.innerHeight || document.documentElement.clientHeight || 768));
+  const height = Math.max(1, Math.round(viewport?.height || window.innerHeight || document.documentElement.clientHeight || 768));
   return { mode: classifyViewport(width), short: height <= 660, width, height };
 }
 
@@ -130,11 +131,11 @@ function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen, ux2 =
   const viewport = useViewportMode();
   const en = user.language === "en";
   const parent = lilac ? lilacParent(activeTab) : ux2 ? editorParent(activeTab) : null;
-  const navigation: Array<{ id: AppTab; label: string; icon: typeof GalleryVerticalEnd }> = lilac ? [
+  const navigation: Array<{ id: AppTab | "topup"; label: string; icon: typeof GalleryVerticalEnd }> = lilac ? [
     { id: "home", label: en ? "Home" : "Главная", icon: Home },
     { id: "ideas", label: en ? "Ideas" : "Идеи", icon: Lightbulb },
     { id: "create", label: en ? "Create" : "Создать", icon: Plus },
-    { id: "works", label: en ? "Projects" : "Проекты", icon: Images },
+    { id: "topup", label: en ? "Top up" : "Пополнить", icon: Wallet },
     { id: "profile", label: copy.nav.profile, icon: UserRound },
   ] : ux2 ? [
     { id: "feed", label: copy.nav.feed, icon: GalleryVerticalEnd },
@@ -188,8 +189,9 @@ function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen, ux2 =
         </button>
         )}
 
-        <Button variant="soft" size="sm" className="apix-balance-button min-w-fit shrink-0 justify-self-end px-2.5" onClick={onBalanceOpen} aria-label="Открыть баланс">
+        <Button variant="soft" size="sm" className="apix-balance-button min-w-fit shrink-0 justify-self-end px-2.5" onClick={onBalanceOpen} aria-label={lilac ? (en ? "Balance — Top up" : "Баланс — Пополнить") : "Открыть баланс"}>
           <span>{formatKisses(user.credits, { compact: true })}</span>
+          {lilac && <span className="studio-topup-label">{en ? "Top up" : "Пополнить"}</span>}
         </Button>
         {!lilac && user.miniapp_ux2_available === true && onNewStudio && <button type="button" className="lilac-launch apix-focus-ring" aria-label="Открыть новую студию APIX" disabled={previewBusy} onClick={onNewStudio}>
           <Sparkles size={20} /><span><strong>{previewBusy ? "Проверяем доступ…" : "Новая студия APIX"}</strong><small>Для администратора · полный функционал</small></span><Plus size={18} />
@@ -213,8 +215,8 @@ function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen, ux2 =
                 key={id}
                 data-destination={id}
                 type="button"
-                role="tab"
-                aria-selected={active}
+                role={id === "topup" ? undefined : "tab"}
+                aria-selected={id === "topup" ? undefined : active}
                 aria-current={active ? "page" : undefined}
                 aria-label={label}
                 className={cn(
@@ -223,7 +225,7 @@ function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen, ux2 =
                     ? "bg-primary/15 text-primary shadow-inner"
                     : "text-muted-foreground hover:bg-accent/70 hover:text-foreground",
                 )}
-                onClick={() => navigate(id)}
+                onClick={() => id === "topup" ? onBalanceOpen() : navigate(id)}
               >
                 {lilac && id === "create" ? <span className="lilac-create-action"><Icon aria-hidden="true" /></span> : <Icon className="size-[18px]" />}
                 <span className="apix-nav-label leading-none">{label}</span>

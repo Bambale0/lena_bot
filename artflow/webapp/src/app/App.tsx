@@ -1,5 +1,5 @@
 import { isKling4, kling4Body, kling4Intent } from "@/lib/kling4";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { LoaderCircle } from "lucide-react";
 import { Toaster, toast } from "sonner";
 
@@ -33,6 +33,7 @@ import { LilacAdminSystemPanel } from "@/features/lilac/admin/system-panel";
 import { LilacAccountEditor } from "@/features/lilac/account-editor";
 import { LilacImageSeries } from "@/features/lilac/image-series";
 import { lilacRequested } from "@/lib/lilac";
+import { publishStudioBalance } from "@/lib/studio-balance";
 import { SettingsScreen } from "@/features/settings-screen";
 import { TrendsScreen } from "@/features/trends-screen";
 import { openTrendRunner } from "@/features/trend-runner";
@@ -40,6 +41,7 @@ import { supportsPlan, checkoutPrice } from "@/lib/billing-methods";
 import { ApiError, FEED_PAGE_SIZE, MAX_HISTORY_ITEMS, MiniAppApi } from "@/lib/api";
 import {
   configureTelegramWebApp,
+  configureStudioChrome,
   haptic,
   notifyHaptic,
   openExternalUrl,
@@ -67,7 +69,7 @@ import type {
 import { firstMedia, isPendingTask, safeExternalUrl } from "@/lib/utils";
 import { saveDownload } from "@/lib/download";
 
-window.__APIX_MINIAPP_BUILD_ID__ = "20261025-studio-system-settings-r1";
+window.__APIX_MINIAPP_BUILD_ID__ = "20261025-studio-black-red-r1";
 
 type FeedSource = "recent" | "top_day" | "top";
 type VideoQuote = Awaited<ReturnType<MiniAppApi["quoteVideo"]>>;
@@ -207,6 +209,8 @@ function App() {
     else delete document.documentElement.dataset.apixStudio;
     return () => { delete document.documentElement.dataset.apixStudio; };
   }, [lilac]);
+  useEffect(() => lilac ? configureStudioChrome() : undefined, [lilac]);
+  useEffect(() => configureTelegramWebApp(), []);
   const [worksRefreshing, setWorksRefreshing] = useState(false);
   const [draftStorageUnavailable, setDraftStorageUnavailable] = useState(false);
   const draftOwner = useRef<number | null>(null);
@@ -218,6 +222,16 @@ function App() {
   const [taskOpen, setTaskOpen] = useState(false);
   const [taskBusy, setTaskBusy] = useState(false);
   const [balanceOpen, setBalanceOpen] = useState(false);
+  useLayoutEffect(() => {
+    if (mode !== "live" || !lilac || !data?.user.miniapp_ux2_available) {
+      publishStudioBalance(null);
+      return;
+    }
+    const actorId = data.user.id;
+    publishStudioBalance({ actorId, credits: data.user.credits, language: data.user.language || "ru", open: balanceOpen,
+      onOpen: () => { if (latestActor.current === actorId) setBalanceOpen(true); } });
+    return () => publishStudioBalance(null);
+  }, [mode, lilac, data?.user.id, data?.user.credits, data?.user.language, data?.user.miniapp_ux2_available, balanceOpen]);
   const [paymentBusy, setPaymentBusy] = useState(false);
   const paymentRequest = useRef(false);
   const [paymentError, setPaymentError] = useState("");
@@ -483,7 +497,6 @@ function App() {
     setRetrying(true);
     setMode("booting");
     setErrorMessage("");
-    configureTelegramWebApp();
 
     const authProbe = new MiniAppApi("");
     authProbe.getAuthConfig().then((config) => setBotUsername(config.bot_username || "")).catch(() => undefined);
@@ -1145,6 +1158,14 @@ function App() {
     }
     setActiveTab(tab);
   };
+  const studioWorks = <>{lilac && api && <LilacImageSeries key={data.user.id} api={api} models={data.imageModels} onContinue={series => {
+        if (photoQueue.hasPending()) { toast.info("Дождитесь завершения загрузки фото."); return; }
+        const model = data.imageModels.find(row => row.key === series.model);
+        if (!model) { toast.error("Модель серии недоступна. Исходный черновик сохранён."); return; }
+        const draft = { ...emptyDraft("image"), model: model.key, mode: series.mode, aspectRatio: series.aspect_ratio || imageDraft.aspectRatio, quality: series.quality, count: series.count, prompt: series.prompt_hidden || series.prompt_actions_allowed === false ? (imageDraft.promptId === null ? imageDraft.prompt : "") : series.last_prompt || series.base_prompt || "" };
+        setImageDraft(appendReferenceUrls(draft, Array.from(new Set([series.reference_url, ...(series.reference_urls || [])].filter((url): url is string => Boolean(url))))));
+        setActiveTab("photo");
+      }} />}<WorksScreen tasks={data.recentTasks} models={[...data.imageModels, ...data.videoModels]} language={data.user.language} unavailable={data.historyUnavailable} refreshing={worksRefreshing} onOpenTask={openTask} onCreate={() => setActiveTab("create")} onRefresh={() => void refreshWorks()} /></>;
   const screen = (() => {
     if (lilac && api) {
       if (activeTab === "home") return <LilacHome data={data} drafts={[imageDraft, videoDraft, motionDraft]} onNavigate={navigateStudio} onTask={openTask} />;
@@ -1189,16 +1210,7 @@ function App() {
     if (ux2 && activeTab === "create") {
       return <CreateScreen imageModels={data.imageModels} videoModels={data.videoModels} drafts={[imageDraft, videoDraft, motionDraft]} language={data.user.language} onNavigate={setActiveTab} />;
     }
-    if (ux2 && activeTab === "works") {
-      return <>{lilac && api && <LilacImageSeries key={data.user.id} api={api} models={data.imageModels} onContinue={series => {
-        if (photoQueue.hasPending()) { toast.info("Дождитесь завершения загрузки фото."); return; }
-        const model = data.imageModels.find(row => row.key === series.model);
-        if (!model) { toast.error("Модель серии недоступна. Исходный черновик сохранён."); return; }
-        const draft = { ...emptyDraft("image"), model: model.key, mode: series.mode, aspectRatio: series.aspect_ratio || imageDraft.aspectRatio, quality: series.quality, count: series.count, prompt: series.prompt_hidden || series.prompt_actions_allowed === false ? (imageDraft.promptId === null ? imageDraft.prompt : "") : series.last_prompt || series.base_prompt || "" };
-        setImageDraft(appendReferenceUrls(draft, Array.from(new Set([series.reference_url, ...(series.reference_urls || [])].filter((url): url is string => Boolean(url))))));
-        setActiveTab("photo");
-      }} />}<WorksScreen tasks={data.recentTasks} models={[...data.imageModels, ...data.videoModels]} language={data.user.language} unavailable={data.historyUnavailable} refreshing={worksRefreshing} onOpenTask={openTask} onCreate={() => setActiveTab("create")} onRefresh={() => void refreshWorks()} /></>;
-    }
+    if (ux2 && activeTab === "works") return studioWorks;
     if (showFeed) {
       return (
         <FeedScreen
@@ -1240,6 +1252,7 @@ function App() {
     }
     return (
       <ProfileScreen
+        worksSection={lilac ? studioWorks : undefined}
         user={data.user}
         tasks={data.recentTasks}
         referrals={referrals}

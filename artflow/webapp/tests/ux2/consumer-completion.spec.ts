@@ -79,7 +79,7 @@ test("Projects creates catalog-configured series with own references without gen
   await page.goto("/?ux=3");
   await page.getByRole("button", { name: "Создать фото", exact: true }).click();
   await page.getByRole("textbox", { name: /^Промпт/ }).fill("Мой существующий черновик");
-  await page.getByRole("tab", { name: "Проекты", exact: true }).click();
+  await page.getByRole("tab", { name: "Профиль", exact: true }).click();
   await page.getByRole("button", { name: "Создать серию фото", exact: true }).click();
   const form = page.getByRole("dialog");
   await expect(form).toContainText("Генерация не запускается");
@@ -96,7 +96,7 @@ test("Projects creates catalog-configured series with own references without gen
   await expect(page.getByText("Серия создана", { exact: true })).toBeVisible();
   expect(state.writes.filter(row => row.path === "/api/web/image-sessions").map(row => row.body)).toEqual([{ model: "fixture-photo", mode: "image", aspect_ratio: "9:16", quality: "high", count: 2, base_prompt: "Моё собственное описание", reference_urls: ["https://media.example.test/cover.png"] }]);
   expect(state.writes.some(row => /generate|generation|\/image$/.test(row.path))).toBe(false);
-  await expect(page.getByRole("tab", { name: "Проекты", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: "Профиль", exact: true })).toHaveAttribute("aria-selected", "true");
   await page.getByRole("tab", { name: "Создать", exact: true }).click();
   await page.getByRole("button", { name: /Создать фото/ }).click();
   await expect(page.getByRole("textbox", { name: /^Промпт/ })).toHaveValue("Мой существующий черновик");
@@ -104,7 +104,7 @@ test("Projects creates catalog-configured series with own references without gen
 
 test("replacing previous active series is explicit and never copies protected recipe", async ({ page }) => {
   const state = await prepare(page, active);
-  await page.goto("/?ux=3"); await page.getByRole("tab", { name: "Проекты", exact: true }).click();
+  await page.goto("/?ux=3"); await page.getByRole("tab", { name: "Профиль", exact: true }).click();
   await page.getByRole("button", { name: "Создать серию фото", exact: true }).click();
   await expect(page.getByLabel("Описание серии (необязательно)", { exact: true })).toHaveValue("");
   await page.getByRole("button", { name: "Сохранить серию", exact: true }).click();
@@ -177,7 +177,7 @@ test("publication duplicate DOM activation produces one write", async ({ page })
 test("replacement detects a changed active series and never overwrites it", async ({ page }) => {
   const state = await prepare(page, active); let latest = active;
   await page.route("**/api/web/image-sessions/active", route => route.fulfill({ json: { data: latest } }));
-  await page.goto("/?ux=3"); await page.getByRole("tab", { name: "Проекты", exact: true }).click();
+  await page.goto("/?ux=3"); await page.getByRole("tab", { name: "Профиль", exact: true }).click();
   await page.getByRole("button", { name: "Создать серию фото", exact: true }).click();
   await page.getByRole("button", { name: "Сохранить серию", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "Заменить активную серию?", exact: true })).toBeVisible();
@@ -193,7 +193,7 @@ test(`closing replacement confirmation via ${close} aborts its pending check bef
   let release!: () => void;
   const pending = new Promise<void>(resolve => { release = resolve; });
   await page.route("**/api/web/image-sessions/active", async route => { reads++; if (reads === 3) await pending; await route.fulfill({ json: { data: active } }).catch(() => {}); });
-  await page.goto("/?ux=3"); await page.getByRole("tab", { name: "Проекты", exact: true }).click();
+  await page.goto("/?ux=3"); await page.getByRole("tab", { name: "Профиль", exact: true }).click();
   await page.getByRole("button", { name: "Создать серию фото", exact: true }).click();
   await page.getByRole("button", { name: "Сохранить серию", exact: true }).click();
   await page.getByRole("button", { name: "Заменить серию", exact: true }).click();
@@ -220,7 +220,7 @@ test("publication authorization loss blocks repeat sends and never claims succes
 
 test("series preserves uploaded inputs when switching to an incompatible model and blocks save", async ({ page }) => {
   const state = await prepare(page);
-  await page.goto("/?ux=3"); await page.getByRole("tab", { name: "Проекты", exact: true }).click();
+  await page.goto("/?ux=3"); await page.getByRole("tab", { name: "Профиль", exact: true }).click();
   await page.getByRole("button", { name: "Создать серию фото", exact: true }).click();
   await page.getByLabel("Исходные фото серии", { exact: true }).setInputFiles({ name: "reference.png", mimeType: "image/png", buffer: png });
   await expect(page.getByText("Загружено фото: 1")).toBeVisible();
@@ -248,7 +248,7 @@ for (const form of ["publication", "series"] as const) {
       await publication(page);
       await expect(page.getByLabel("Модель публикации", { exact: true })).toBeEnabled();
     } else {
-      await page.goto("/?ux=3"); await page.getByRole("tab", { name: "Проекты", exact: true }).click();
+      await page.goto("/?ux=3"); await page.getByRole("tab", { name: "Профиль", exact: true }).click();
       await page.getByRole("button", { name: "Создать серию фото", exact: true }).click();
       await expect(page.getByLabel("Модель серии", { exact: true })).toBeEnabled();
     }

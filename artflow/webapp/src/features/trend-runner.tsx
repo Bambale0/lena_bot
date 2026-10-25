@@ -875,6 +875,7 @@ function TrendRunnerPortal() {
   return (
     <>
       <Sheet
+        balanceUnavailableReason={paymentWaiting || paymentBusy || busy ? "Завершите текущую операцию или проверьте уже открытую оплату ниже." : undefined}
         open={Boolean(trend)}
         title={isPinterest ? "Повтори фото с Pinterest" : trend?.title || "Повторить тренд"}
         description={isPinterest ? undefined : "Загрузи фото и подтверди стоимость. Сценарий тренда уже настроен."}

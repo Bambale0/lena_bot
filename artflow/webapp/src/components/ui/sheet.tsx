@@ -1,10 +1,13 @@
-import { useEffect, useId, useLayoutEffect, useRef, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
 import { X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { cn, formatKisses } from "@/lib/utils";
+import { readStudioBalance, subscribeStudioBalance } from "@/lib/studio-balance";
 
 interface SheetProps {
+  balanceSheet?: boolean;
+  balanceUnavailableReason?: string;
   role?: "dialog" | "alertdialog";
   open: boolean;
   title: string;
@@ -24,7 +27,15 @@ const FOCUSABLE = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(",");
 
-function Sheet({ open, title, description, children, footer, className, onOpenChange, role = "dialog" }: SheetProps) {
+const activeSheets: HTMLElement[] = [];
+let unlockedOverflow = "";
+
+function Sheet({ open, title, description, children, footer, className, onOpenChange, role = "dialog", balanceSheet = false, balanceUnavailableReason }: SheetProps) {
+  const balance = useSyncExternalStore(subscribeStudioBalance, readStudioBalance, () => null);
+  const suspended = !balanceSheet && Boolean(balance?.open);
+  const suspendedRef = useRef(suspended);
+  useLayoutEffect(() => { suspendedRef.current = suspended; }, [suspended]);
+  const resumeFocus = useRef<HTMLElement | null>(null);
   const dialogRef = useRef<HTMLElement | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const onOpenChangeRef = useRef(onOpenChange);
@@ -34,18 +45,23 @@ function Sheet({ open, title, description, children, footer, className, onOpenCh
   const descriptionId = `${instanceId}-description`;
 
   useEffect(() => {
-    if (!open) return undefined;
+    if (!open || suspended) return undefined;
+    const dialog = dialogRef.current!;
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const previousOverflow = document.body.style.overflow;
+    if (!activeSheets.length) unlockedOverflow = document.body.style.overflow;
+    activeSheets.push(dialog);
     document.body.style.overflow = "hidden";
 
     const focusFirst = () => {
-      const target = closeRef.current || dialogRef.current?.querySelector<HTMLElement>(FOCUSABLE) || dialogRef.current;
+      if (activeSheets[activeSheets.length - 1] !== dialog) return;
+      const target = resumeFocus.current && dialog.contains(resumeFocus.current) ? resumeFocus.current : closeRef.current || dialog.querySelector<HTMLElement>(FOCUSABLE) || dialog;
+      resumeFocus.current = null;
       target?.focus?.();
     };
     const focusFrame = window.requestAnimationFrame(focusFirst);
 
     const onKeyDown = (event: KeyboardEvent) => {
+      if (activeSheets[activeSheets.length - 1] !== dialog) return;
       if (event.key === "Escape") {
         event.preventDefault();
         onOpenChangeRef.current(false);
@@ -67,7 +83,7 @@ function Sheet({ open, title, description, children, footer, className, onOpenCh
       if (event.shiftKey && (active === first || !dialogRef.current.contains(active))) {
         event.preventDefault();
         last.focus();
-      } else if (!event.shiftKey && active === last) {
+      } else if (!event.shiftKey && (active === last || !dialogRef.current.contains(active))) {
         event.preventDefault();
         first.focus();
       }
@@ -76,16 +92,19 @@ function Sheet({ open, title, description, children, footer, className, onOpenCh
     window.addEventListener("keydown", onKeyDown);
     return () => {
       window.cancelAnimationFrame(focusFrame);
-      document.body.style.overflow = previousOverflow;
+      if (suspendedRef.current && document.activeElement instanceof HTMLElement && dialog.contains(document.activeElement)) resumeFocus.current = document.activeElement;
+      const index = activeSheets.indexOf(dialog);
+      if (index !== -1) activeSheets.splice(index, 1);
+      if (!activeSheets.length) document.body.style.overflow = unlockedOverflow;
       window.removeEventListener("keydown", onKeyDown);
-      previousFocus?.focus?.();
+      if (!suspendedRef.current && previousFocus?.isConnected) previousFocus.focus();
     };
-  }, [open]);
+  }, [open, suspended]);
 
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[1200] flex items-end justify-center sm:items-center" role="presentation">
+    <div hidden={suspended} inert={suspended} style={suspended ? { display: "none" } : undefined} className="fixed inset-0 z-[1200] flex items-end justify-center sm:items-center" role="presentation">
       <button
         type="button"
         aria-label="Закрыть"
@@ -116,6 +135,11 @@ function Sheet({ open, title, description, children, footer, className, onOpenCh
             <X />
           </Button>
         </header>
+        {balance && !balanceSheet && <div className="studio-overlay-balance">
+          <span>{balance.language === "en" ? "Balance" : "Баланс"}: {formatKisses(balance.credits)}</span>
+          <button type="button" className="apix-focus-ring" disabled={Boolean(balanceUnavailableReason)} onClick={balance.onOpen}>{balance.language === "en" ? "Top up" : "Пополнить"}</button>
+          {balanceUnavailableReason && <p role="status">{balanceUnavailableReason}</p>}
+        </div>}
         <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">{children}</div>
         {footer ? (
           <footer className="border-t border-border bg-popover/95 p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur-xl sm:p-4">

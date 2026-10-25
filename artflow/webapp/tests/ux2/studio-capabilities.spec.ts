@@ -31,7 +31,7 @@ async function prepare(page: Page) {
 
 test("checkout never offers an unsupported provider for the selected plan", async ({ page }) => {
   await prepare(page); await page.goto("/?ux=3");
-  await page.getByRole("button", { name: "Открыть баланс", exact: true }).click();
+  await page.getByRole("button", { name: "Баланс — Пополнить", exact: true }).click();
   await page.getByRole("button", { name: /Только карта/ }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("button", { name: /Оплата в долларах/ })).toHaveCount(0);
@@ -89,7 +89,7 @@ test("owned result downloads through signed backend attachment not the thumbnail
   await page.route("**/api/v1/history?**", route => route.fulfill({ json: [{ id: 81, model: "image-fixture", gen_type: "image", prompt: "Мой результат", status: "done", result_url: "https://media.example.test/original.png" }] }));
   let signed = false;
   await page.route("**/api/web/generations/81/download", route => { signed = route.request().headers()["x-telegram-init-data"] === "studio-capability-fixture"; return route.fulfill({ contentType: "image/png", headers: { "Content-Disposition": 'attachment; filename="result-81.png"' }, body: Buffer.from("fixture-image") }); });
-  await page.goto("/?ux=3"); await page.getByRole("tab", { name: "Проекты", exact: true }).click();
+  await page.goto("/?ux=3"); await page.getByRole("tab", { name: "Профиль", exact: true }).click();
   await page.getByRole("button", { name: "Мой результат — Готово", exact: true }).click();
   const download = page.waitForEvent("download");
   await page.getByRole("button", { name: "Скачать файл", exact: true }).click();
@@ -100,7 +100,7 @@ test("published result copies its real link without publishing again", async ({ 
   const writes = await prepare(page); await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await page.route("**/api/v1/history?**", route => route.fulfill({ json: [{ id: 82, model: "image-fixture", gen_type: "image", prompt: "Общая работа", status: "done", is_public_feed: true, result_url: "https://media.example.test/original.png" }] }));
   await page.route("**/api/v1/feed/82/link", route => route.fulfill({ json: { link: "https://t.me/fixture_bot?start=feed_82" } }));
-  await page.goto("/?ux=3"); await page.getByRole("tab", { name: "Проекты", exact: true }).click();
+  await page.goto("/?ux=3"); await page.getByRole("tab", { name: "Профиль", exact: true }).click();
   await page.getByRole("button", { name: "Общая работа — Готово", exact: true }).click();
   await page.getByRole("button", { name: "Скопировать ссылку на работу", exact: true }).click();
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe("https://t.me/fixture_bot?start=feed_82");
@@ -151,7 +151,7 @@ test("owner moderation requires explicit confirmation and reason", async ({ page
 test("checkout refreshes terms and never creates invoice after price change", async ({ page }) => {
   const writes = await prepare(page); let requests = 0;
   await page.route("**/api/v1/plans", route => route.fulfill({ json: [{ key: "covered", title: "Пакет", credits: 100, price_rub: ++requests === 1 ? 200 : 250 }] }));
-  await page.goto("/?ux=3"); await page.getByRole("button", { name: "Открыть баланс", exact: true }).click();
+  await page.goto("/?ux=3"); await page.getByRole("button", { name: "Баланс — Пополнить", exact: true }).click();
   await page.getByRole("button", { name: "Оплатить через Карта | СБП", exact: true }).click();
   await expect(page.getByRole("dialog").getByRole("alert")).toContainText("Условия пакета изменились");
   expect(writes.filter(row => row.path.includes("/topup/"))).toHaveLength(0);
@@ -171,7 +171,7 @@ test("failed attachment stays inline and cannot download a login page", async ({
   await page.route("**/api/v1/history?**", route => route.fulfill({ json: [{ id: 81, model: "image-fixture", gen_type: "image", prompt: "Мой результат", status: "done", result_url: "https://media.example.test/original.png" }] }));
   await page.route("**/api/web/generations/81/download", route => route.fulfill({ contentType: "text/html", body: "<html>Login</html>" }));
   let downloaded = false; page.on("download", () => { downloaded = true; });
-  await page.goto("/?ux=3"); await page.getByRole("tab", { name: "Проекты", exact: true }).click(); await page.getByRole("button", { name: "Мой результат — Готово", exact: true }).click();
+  await page.goto("/?ux=3"); await page.getByRole("tab", { name: "Профиль", exact: true }).click(); await page.getByRole("button", { name: "Мой результат — Готово", exact: true }).click();
   await page.getByRole("button", { name: "Скачать файл", exact: true }).click();
   await expect(page.getByRole("dialog").getByRole("alert")).toBeVisible(); expect(downloaded).toBe(false);
 });

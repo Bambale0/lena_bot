@@ -771,6 +771,7 @@ function FeedRemixRunnerPortal() {
 
   return (
     <Sheet
+      balanceUnavailableReason={paymentWaiting || paymentBusy || busy ? "Завершите текущую операцию или проверьте уже открытую оплату ниже." : undefined}
       open={Boolean(item)}
       title="Повторить работу"
       description="Скрытый промпт останется на backend. Вы выбираете референсы, модель и параметры."

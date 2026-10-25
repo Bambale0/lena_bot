@@ -76,6 +76,7 @@ function BalanceSheet({ open, user, plans, availableProviders, lavaPlanKeys = []
 
   return (
     <Sheet
+      balanceSheet
       open={open}
       onOpenChange={onOpenChange}
       title={copy.balance.title}
