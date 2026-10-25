@@ -20,10 +20,14 @@ const tasks = [
   { tab: "assistant", title: "AI-помощник", text: "Идеи, тексты и помощь с заданием", Icon: Bot },
 ] as const;
 
-function HomeThumbnail({ url, fallback = null }: { url?: string | null; fallback?: ReactNode }) {
+function HomeThumbnail({ url, kind, fallback = null }: { url?: string | null; kind: "image" | "video"; fallback?: ReactNode }) {
   const src = safeExternalUrl(url);
   const [failed, setFailed] = useState("");
-  return src && failed !== src ? <img src={src} alt="" loading="lazy" onError={() => setFailed(src)} /> : <>{fallback}</>;
+  if (!src || failed === src) return <>{fallback}</>;
+  return kind === "video"
+    ? <video src={src} muted loop playsInline autoPlay preload="metadata" aria-hidden="true"
+        onCanPlay={event => { void event.currentTarget.play().catch(() => undefined); }} onError={() => setFailed(src)} />
+    : <img src={src} alt="" loading="lazy" onError={() => setFailed(src)} />;
 }
 
 export function LilacHome({ data, drafts, onNavigate, onTask }: HomeProps) {
@@ -36,7 +40,7 @@ export function LilacHome({ data, drafts, onNavigate, onTask }: HomeProps) {
     <div className="lilac-task-grid">
       {tasks.map(({ tab, title, text, Icon }, index) => <button type="button" key={tab} aria-label={title}
         className={`lilac-task lilac-task-${index}`} onClick={() => onNavigate(tab)}>
-        {index < 2 && <HomeThumbnail url={index === 0 ? photoPreview : trendPreview} />}
+        {index < 2 && <HomeThumbnail url={index === 0 ? photoPreview : trendPreview} kind={index === 0 ? "image" : "video"} />}
         <span className="lilac-task-icon"><Icon size={25} aria-hidden="true" /></span>
         <span className="lilac-task-copy"><strong>{title}</strong><span>{text}</span></span><ArrowRight className="lilac-task-arrow" size={19} />
       </button>)}
@@ -52,13 +56,13 @@ export function LilacHome({ data, drafts, onNavigate, onTask }: HomeProps) {
       </button>)}<p className="lilac-note">Черновики сохраняются в этой вкладке браузера.</p></section>}
     <section><div className="lilac-section-title"><h2>Повторить готовый пример</h2><button onClick={() => onNavigate("trends")}>Все шаблоны <ArrowRight size={15} /></button></div><p className="lilac-note">Выберите пример, добавьте свои материалы и подтвердите стоимость.</p>
       {data.trends.length ? <div className="lilac-preview-rail">{data.trends.slice(0, 8).map(trend => <button key={trend.id} onClick={() => openTrendRunner(trend)}>
-        <HomeThumbnail url={trend.preview_url} fallback={<Sparkles size={32} />} />
+        <HomeThumbnail url={trend.preview_url} kind={trend.kind} fallback={<Sparkles size={32} />} />
         <strong>{trend.title}</strong><small>{trend.kind === "video" ? "Видео" : "Фото"}</small>
       </button>)}</div> : <div className="lilac-empty"><Sparkles /><p>Готовых сценариев пока нет. Можно начать со своей идеи.</p><button className="lilac-primary" onClick={() => onNavigate("photo")}>Создать первое фото</button></div>}
     </section>
     <section><div className="lilac-section-title"><h2>Последние работы</h2><button onClick={() => onNavigate("works")}>Все проекты <ArrowRight size={15} /></button></div>
       {data.recentTasks.length ? data.recentTasks.slice(0, 3).map(task => <button key={task.id} className="lilac-row" onClick={() => onTask(task)}>
-        <span className="lilac-mini-preview"><HomeThumbnail url={task.gen_type === "image" ? firstMedia(task) : undefined} fallback={task.gen_type === "image" ? <ImageIcon /> : <Film />} /></span>
+        <span className="lilac-mini-preview"><HomeThumbnail url={task.gen_type === "image" ? firstMedia(task) : undefined} kind={task.gen_type === "image" ? "image" : "video"} fallback={task.gen_type === "image" ? <ImageIcon /> : <Film />} /></span>
         <span><strong>{task.prompt_hidden || task.prompt_actions_allowed === false ? "Работа по шаблону" : task.prompt || task.model}</strong><small>{generationStatusLabel(task.status)} · {formatRelativeDate(task.created_at)}</small></span><ArrowRight size={18} />
       </button>) : <p className="lilac-note">Здесь появятся ваши фото, видео и песни после первого запуска.</p>}
     </section>
