@@ -14,11 +14,15 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 
 
-def test_trend_runtime_model_repair_is_the_single_migration_head() -> None:
+def test_trend_runtime_model_repair_precedes_the_single_migration_head() -> None:
     config = Config()
     config.set_main_option("script_location", "db/migrations")
     scripts = ScriptDirectory.from_config(config)
-    assert scripts.get_heads() == ["049_trend_runtime_model_repair"]
+    assert scripts.get_heads() == ["050_kling4_ops_audit_actor"]
+    assert (
+        scripts.get_revision("050_kling4_ops_audit_actor").down_revision
+        == "049_trend_runtime_model_repair"
+    )
     assert scripts.get_revision("049_trend_runtime_model_repair").down_revision == "048_wan_routing"
 
 
