@@ -187,7 +187,8 @@ test("replacement detects a changed active series and never overwrites it", asyn
   expect(state.writes.filter(row => row.path === "/api/web/image-sessions")).toHaveLength(0);
 });
 
-test("closing replacement confirmation aborts its pending check before any create write", async ({ page }) => {
+for (const close of ["button", "Escape"] as const) {
+test(`closing replacement confirmation via ${close} aborts its pending check before any create write`, async ({ page }) => {
   const state = await prepare(page, active); let reads = 0;
   let release!: () => void;
   const pending = new Promise<void>(resolve => { release = resolve; });
@@ -197,12 +198,14 @@ test("closing replacement confirmation aborts its pending check before any creat
   await page.getByRole("button", { name: "Сохранить серию", exact: true }).click();
   await page.getByRole("button", { name: "Заменить серию", exact: true }).click();
   await expect.poll(() => reads).toBe(3);
-  await page.getByRole("dialog").getByRole("button", { name: "Закрыть", exact: true }).click();
+  if (close === "Escape") await page.keyboard.press("Escape");
+  else await page.getByRole("dialog").getByRole("button", { name: "Закрыть", exact: true }).click();
   release();
   await expect(page.getByRole("dialog", { name: "Создать серию фото", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Сохранить серию", exact: true })).toBeEnabled();
   expect(state.writes.filter(row => row.path === "/api/web/image-sessions")).toHaveLength(0);
 });
+}
 
 test("publication authorization loss blocks repeat sends and never claims success", async ({ page }) => {
   const state = await prepare(page);
@@ -236,4 +239,71 @@ test("consumer forms fit 320px and keep controls at least 44px", async ({ page }
   for (const control of await page.locator('.lilac-consumer-form button, .lilac-consumer-form select, .lilac-consumer-form input:not([type="checkbox"])').all()) {
     expect((await control.boundingBox())?.height).toBeGreaterThanOrEqual(44);
   }
+});
+
+for (const form of ["publication", "series"] as const) {
+  test(`${form} retains textarea focus and complete sequential typing across controlled rerenders`, async ({ page }) => {
+    await prepare(page);
+    if (form === "publication") {
+      await publication(page);
+      await expect(page.getByLabel("Модель публикации", { exact: true })).toBeEnabled();
+    } else {
+      await page.goto("/?ux=3"); await page.getByRole("tab", { name: "Проекты", exact: true }).click();
+      await page.getByRole("button", { name: "Создать серию фото", exact: true }).click();
+      await expect(page.getByLabel("Модель серии", { exact: true })).toBeEnabled();
+    }
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    const description = page.getByRole("textbox", { name: form === "publication" ? "Краткое описание" : "Описание серии (необязательно)", exact: true });
+    await description.click();
+    await description.pressSequentially("AcompleteTypedDescription", { delay: 40 });
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    await expect(description).toBeFocused();
+    await expect(description).toHaveValue("AcompleteTypedDescription");
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: form === "publication" ? "Добавить промпт" : "Создать серию фото", exact: true })).toBeFocused();
+  });
+}
+
+test("existing library Sheet traps Tab in both directions and restores its opener after Escape", async ({ page }) => {
+  await prepare(page);
+  await page.route("**/api/v1/prompts?**", route => route.fulfill({ json: { total: 1, items: [{ id: 64, title: "Идея для проверки фокуса", description: "Описание", model: "fixture-photo", prompt_text: "Мой текст для кадра", status: "approved" }] } }));
+  await page.goto("/?ux=3"); await page.getByRole("button", { name: "Библиотека промптов", exact: true }).click();
+  const opener = page.getByRole("button", { name: /Идея для проверки фокуса/ });
+  await opener.click();
+  const dialog = page.getByRole("dialog");
+  const close = dialog.getByRole("button", { name: "Закрыть", exact: true });
+  await expect(close).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(dialog.getByRole("button", { name: "Использовать задание", exact: true })).toBeFocused();
+  await page.keyboard.press("Tab"); await expect(close).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0); await expect(opener).toBeFocused();
+});
+
+test("existing owner Sheet Escape uses latest busy close guard while its mutation is pending", async ({ page }) => {
+  await prepare(page); let posts = 0;
+  let release!: () => void;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  await page.route("**/api/v1/admin/overview", route => route.fulfill({ json: { summary: { users_total: 1 } } }));
+  await page.route("**/api/v1/admin/users?**", route => route.fulfill({ json: { items: [{ id: 9, full_name: "Тестовый клиент", credits: 30 }] } }));
+  await page.route("**/api/v1/admin/withdrawals?**", route => route.fulfill({ json: { items: [] } }));
+  await page.route("**/api/v1/admin/users/9", route => route.fulfill({ json: { user: { id: 9, full_name: "Тестовый клиент", tg_id: 789, credits: 30, is_banned: false }, stats: {}, ledger: [] } }));
+  await page.route("**/api/v1/admin/users/9/credits", async route => { posts++; await pending; await route.fulfill({ json: { ok: true } }); });
+  await page.goto("/?ux=3"); await page.getByRole("tab", { name: "Профиль", exact: true }).click();
+  await page.getByRole("button", { name: "Управление APIX", exact: true }).click();
+  await page.getByRole("button", { name: /Тестовый клиент/ }).click();
+  await page.getByLabel("Корректировка кредитов", { exact: true }).fill("10");
+  await page.getByLabel("Комментарий", { exact: true }).fill("Тестовая корректировка");
+  await page.getByRole("button", { name: "Проверить изменение баланса", exact: true }).click();
+  await page.getByRole("button", { name: "Подтвердить действие", exact: true }).click();
+  await expect.poll(() => posts).toBe(1);
+  const confirmation = page.getByRole("dialog", { name: "Подтверждение действия", exact: true });
+  await expect(confirmation.getByRole("button", { name: "Сохраняем…", exact: true })).toBeDisabled();
+  await page.keyboard.press("Escape");
+  await expect(confirmation).toBeVisible();
+  await confirmation.getByRole("button", { name: "Закрыть", exact: true }).click();
+  await expect(confirmation).toBeVisible();
+  release(); await expect(confirmation).toHaveCount(0);
+  expect(posts).toBe(1);
 });

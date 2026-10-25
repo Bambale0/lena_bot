@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, type ReactNode } from "react";
 import { X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,8 @@ const FOCUSABLE = [
 function Sheet({ open, title, description, children, footer, className, onOpenChange }: SheetProps) {
   const dialogRef = useRef<HTMLElement | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
+  const onOpenChangeRef = useRef(onOpenChange);
+  useLayoutEffect(() => { onOpenChangeRef.current = onOpenChange; }, [onOpenChange]);
   const instanceId = useId();
   const titleId = `${instanceId}-title`;
   const descriptionId = `${instanceId}-description`;
@@ -40,12 +42,12 @@ function Sheet({ open, title, description, children, footer, className, onOpenCh
       const target = closeRef.current || dialogRef.current?.querySelector<HTMLElement>(FOCUSABLE) || dialogRef.current;
       target?.focus?.();
     };
-    window.requestAnimationFrame(focusFirst);
+    const focusFrame = window.requestAnimationFrame(focusFirst);
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        onOpenChange(false);
+        onOpenChangeRef.current(false);
         return;
       }
       if (event.key !== "Tab" || !dialogRef.current) return;
@@ -72,11 +74,12 @@ function Sheet({ open, title, description, children, footer, className, onOpenCh
 
     window.addEventListener("keydown", onKeyDown);
     return () => {
+      window.cancelAnimationFrame(focusFrame);
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", onKeyDown);
       previousFocus?.focus?.();
     };
-  }, [open, onOpenChange]);
+  }, [open]);
 
   if (!open) return null;
 
