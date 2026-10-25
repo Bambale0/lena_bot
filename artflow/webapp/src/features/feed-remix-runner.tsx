@@ -39,6 +39,7 @@ type FeedCheckoutQuote = {
   reference_seconds?: number;
   billable_seconds?: number;
   duration_options?: number[];
+  default_duration?: number;
   effective_duration?: number;
   duration_lock_reason?: string | null;
 };
@@ -202,6 +203,12 @@ function FeedRemixRunnerPortal() {
   const [references, setReferences] = useState<string[]>([]);
   const [changeRequest, setChangeRequest] = useState("");
   const [quote, setQuote] = useState<FeedCheckoutQuote | null>(null);
+  // Capabilities survive a rejected price request so readers can correct it.
+  // This is not a payable offer; launch still requires the exact current quote.
+  const [durationOffer, setDurationOffer] = useState<{
+    sourceId: number; model: string;
+    options?: number[]; locked: boolean; reason?: string | null; effective?: number; defaultDuration?: number;
+  } | null>(null);
   const [quotedBody, setQuotedBody] = useState("");
   const [quoteBusy, setQuoteBusy] = useState(false);
   const [payment, setPayment] = useState<RepeatPayment | null>(null);
@@ -261,10 +268,11 @@ function FeedRemixRunnerPortal() {
           ? `Исходная работа занимает один слот. Можно добавить своих фото: ${userReferenceLimit}.`
           : `Повтор по промпту автора и твоему фото недоступен для этой модели или публикации.`;
   const aspectRatios = modelAspectRatios(selectedModel);
-  const durationLocked = Boolean(selectedModel?.duration_from_source || quote?.source_video_edit || quote?.duration_lock_reason);
-  const durations = quote?.duration_options ?? modelDurations(selectedModel);
+  const currentDurationOffer = durationOffer?.sourceId === item?.id && durationOffer?.model === modelKey ? durationOffer : null;
+  const durationLocked = Boolean(selectedModel?.duration_from_source || currentDurationOffer?.locked);
+  const durations = currentDurationOffer?.options ?? modelDurations(selectedModel);
   const durationIndex = Math.max(0, durations.indexOf(duration));
-  const selectedDuration = durationLocked ? quote?.effective_duration_seconds ?? quote?.effective_duration ?? duration : duration;
+  const selectedDuration = durationLocked ? currentDurationOffer?.effective ?? duration : duration;
   const resolutions = modelResolutions(selectedModel);
   const modeOptions = selectedModel?.modes?.length ? selectedModel.modes : [bucket === "video" ? "image" : "image"];
   const qualityOptions = selectedModel?.quality_options?.length ? selectedModel.quality_options : [{ value: "basic", label: "Базовое" }];
@@ -310,6 +318,8 @@ function FeedRemixRunnerPortal() {
   const paymentOption = paymentOptions.find((option) => option.provider === selectedPaymentProvider) || paymentOptions[0];
 
   const resetForm = useCallback((nextItem: FeedItem | null = null, draft: RepeatDraft | null = null, selectedSource?: string) => {
+    quoteRequestSequence.current++;
+    setDurationOffer(null);
     setLaunchUncertain(false);
     setHistoryChecked(false);
     setHistorySummary("");
@@ -466,6 +476,9 @@ function FeedRemixRunnerPortal() {
       }
       if (requestSequence === quoteRequestSequence.current) {
         setQuote(latest);
+        setDurationOffer({ sourceId: id, model: String(body.model), options: latest.duration_options,
+          locked: Boolean(latest.source_video_edit || latest.duration_lock_reason), reason: latest.duration_lock_reason,
+          effective: latest.effective_duration_seconds ?? latest.effective_duration, defaultDuration: latest.default_duration });
         setQuotedBody(key);
       }
       return latest;
@@ -482,8 +495,8 @@ function FeedRemixRunnerPortal() {
   }, [sourceSelectionMissing]);
 
   useEffect(() => {
+    quoteRequestSequence.current++;
     if (!item || !requestBody || !requestBodyKey || sourceSelectionMissing || opening) {
-      quoteRequestSequence.current++;
       setQuote(null);
       setQuotedBody("");
       return;
@@ -973,7 +986,7 @@ function FeedRemixRunnerPortal() {
                   max={Math.max(0, durations.length - 1)}
                   step={1}
                   value={durationIndex}
-                  disabled={busy || durationLocked || durations.length <= 1 || !quote}
+                  disabled={busy || durationLocked || durations.length <= 1}
                   aria-label="Длительность видео в повторе"
                   aria-valuetext={`${selectedDuration} секунд`}
                   className="apix-focus-ring h-8 w-full cursor-pointer accent-primary disabled:cursor-default disabled:opacity-60"
@@ -982,8 +995,21 @@ function FeedRemixRunnerPortal() {
                     if (nextDuration != null) { setDuration(nextDuration); setDurationOverride(nextDuration); }
                   }}
                 />
-                {durationLocked ? <p className="text-xs text-muted-foreground">{quote?.duration_lock_reason || "Длительность определяется исходным видео."}</p> : null}
+                {durationLocked ? <p className="text-xs text-muted-foreground">{currentDurationOffer?.reason || "Длительность определяется исходным видео."}</p> : null}
                 <div className="flex flex-wrap items-center gap-1 text-[10px] text-muted-foreground">
+                  {creatorRecipeReplay && durationOverride != null ? (
+                    <button
+                      type="button"
+                      className="apix-focus-ring min-h-11 rounded px-2 py-1 text-primary"
+                      disabled={busy}
+                      onClick={() => {
+                        setDuration(currentDurationOffer?.defaultDuration ?? item?.original_duration ?? modelDurations(selectedModel)[0] ?? duration);
+                        setDurationOverride(undefined);
+                      }}
+                    >
+                      Длительность автора
+                    </button>
+                  ) : null}
                   {durations.map((value) => (
                     <button
                       key={value}
@@ -992,7 +1018,7 @@ function FeedRemixRunnerPortal() {
                         "apix-focus-ring min-h-11 min-w-11 rounded px-2 py-1 transition",
                         value === selectedDuration ? "font-semibold text-primary" : "hover:text-foreground",
                       )}
-                      disabled={busy || durationLocked || !quote}
+                      disabled={busy || durationLocked}
                       onClick={() => { setDuration(value); setDurationOverride(value); }}
                     >
                       {value} сек

@@ -1171,6 +1171,80 @@ test("gallery portal closes with Escape and native Back dismisses the repeat she
   expect(submissions).toBe(0);
 });
 
+for (const { reloadRejected, sourceEdit } of [
+  { reloadRejected: false, sourceEdit: false }, { reloadRejected: true, sourceEdit: false },
+  { reloadRejected: true, sourceEdit: true },
+]) {
+  test(`${sourceEdit ? "Seedance source-edit" : "Wan"} rejected duration remains correctable${reloadRejected ? " after reload" : ""}`, async ({ page }) => {
+    await mockMiniAppApi(page);
+    const model = { key: sourceEdit ? "bytedance/seedance-2-5" : "wan/3-0-video", display_name: sourceEdit ? "Seedance 2.5" : "Wan 3.0", credits: 4,
+      modes: ["text", "image", "video"], aspect_ratios: ["9:16"], durations: [5, 10, 15, 30],
+      resolutions: ["480p"], max_refs: 10, supports_video_input: true };
+    const source = { id: 201, model: model.key, gen_type: "video", prompt: "", prompt_hidden: true,
+      source_has_video_reference: true, source_required_photo_count: 1, original_duration: 10,
+      original_aspect_ratio: "9:16", original_resolution: "480p",
+      result_url: "https://example.test/rendered.mp4", result_urls: ["https://example.test/rendered.mp4"],
+      author: "Wan Creator", likes_count: 0, shares_count: 0, remixes: 0, is_mine: false };
+    await page.route("**/api/v1/feed?**", r => r.fulfill({ json: [source] }));
+    await page.route("**/api/v1/feed/201", r => r.fulfill({ json: source }));
+    await page.route("**/api/v1/models/video", r => r.fulfill({ json: [model] }));
+    await page.route("**/api/web/upload-media", r => r.fulfill({ json: { data: { url: "https://example.test/reader.png", kind: "image" } } }));
+    const quotes: Record<string, unknown>[] = [];
+    const rejectedMessage = sourceEdit ? "Длительность определяется исходным видео" : "Видео и результат вместе превышают 30 секунд";
+    let initialUnavailable = sourceEdit;
+    let launches = 0;
+    await page.route("**/api/v1/feed/201/remix", r => { launches++; return r.fulfill({ status: 500 }); });
+    await page.route("**/api/v1/feed/201/remix/quote", r => {
+      const body = r.request().postDataJSON(); quotes.push(body);
+      if (initialUnavailable) {
+        initialUnavailable = false;
+        return r.fulfill({ status: 503, json: { detail: "Проверка длительности временно недоступна" } });
+      }
+      if (sourceEdit ? body.duration_override != null : (body.duration_override ?? 10) + 16 > 30) return r.fulfill({ status: 422, json: { detail: rejectedMessage } });
+      if (sourceEdit) return r.fulfill({ json: { cost_credits: 28, balance_credits: 100, can_run: true,
+        duration_options: [], source_video_edit: true, effective_duration_seconds: 7, effective_duration: 7,
+        duration_lock_reason: rejectedMessage } });
+      return r.fulfill({ json: { cost_credits: 104, balance_credits: 200, can_run: true, deficit_credits: 0,
+        duration_options: [5, 10, 15], effective_duration: 10, output_seconds: 10, reference_seconds: 16, billable_seconds: 26 } });
+    });
+    await page.goto("/?tgWebAppData=test&feed=201");
+    const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+    await expect(dialog.getByRole("button", { name: "Добавить", exact: true })).toBeEnabled();
+    await dialog.locator("input[type=file]").setInputFiles({ name: "reader.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) });
+    await expect(dialog.getByText(sourceEdit ? "Проверка длительности временно недоступна" : "Стоимость: 104 💋").first()).toBeVisible();
+    await dialog.getByRole("button", { name: "15 сек", exact: true }).click();
+    await expect(dialog.getByText(rejectedMessage, { exact: true }).first()).toBeVisible();
+    if (reloadRejected) {
+      await page.reload();
+      await expect(dialog.getByText(rejectedMessage, { exact: true }).first()).toBeVisible();
+    }
+    await expect(dialog.getByRole("button", { name: /Запустить повтор/ })).toBeDisabled();
+    await expect(dialog.getByRole("slider")).toBeEnabled();
+    if (!reloadRejected) await expect(dialog.getByRole("button", { name: "30 сек", exact: true })).toHaveCount(0);
+    if (!sourceEdit) {
+      const shorter = dialog.getByRole("button", { name: "10 сек", exact: true });
+      await expect(shorter).toBeEnabled();
+      await shorter.click();
+      await expect(dialog.getByRole("button", { name: /Запустить повтор/ })).toBeEnabled();
+      expect(quotes.at(-1)).toMatchObject({ duration: 10, duration_override: 10 });
+      await dialog.getByRole("button", { name: "15 сек", exact: true }).click();
+      await expect(dialog.getByText(rejectedMessage, { exact: true }).first()).toBeVisible();
+    }
+    await dialog.getByRole("button", { name: "Длительность автора", exact: true }).click();
+    await expect(dialog.getByRole("button", { name: /Запустить повтор/ })).toBeEnabled();
+    expect(quotes.at(-1)).not.toHaveProperty("duration_override");
+    expect(quotes.at(-1)?.duration).toBe(10);
+    expect(quotes.at(-1)?.image_url).toBe("https://example.test/reader.png");
+    await expect(dialog.getByText("Реф #1", { exact: true })).toBeVisible();
+    if (sourceEdit) {
+      await expect(dialog.getByRole("slider")).toBeDisabled();
+      await expect(dialog.getByRole("slider")).toHaveAttribute("aria-valuetext", "7 секунд");
+      await expect(dialog.getByText("Стоимость: 28 💋").first()).toBeVisible();
+    }
+    expect(launches).toBe(0);
+  });
+}
+
 for (const modelKey of ["wan/3-0-video", "wan/3-0-video-prime"]) {
   test(`Wan public repeat confirms server quote before launch: ${modelKey}`, async ({ page }) => {
     await mockMiniAppApi(page);

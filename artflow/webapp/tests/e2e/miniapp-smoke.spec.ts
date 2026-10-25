@@ -440,6 +440,13 @@ for (const trend of trends) {
     await dialog.locator("input[type=file]").setInputFiles({
       name: "own-face.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
     });
+    if (trend.kind === "video") {
+      const confirm = dialog.getByRole("button", { name: "Создать · 1.5 💋", exact: true });
+      await expect(confirm).toBeEnabled();
+      await expect(confirm).toContainText("1.5");
+      expect(runs).toHaveLength(0);
+      await confirm.click();
+    }
     await expect(page.getByRole("dialog", { name: `Задача #${9500 + trend.id}` })).toBeVisible();
     expect(runs).toHaveLength(1);
     expect(runs[0]).toMatchObject({ asset_id: "apixasset.bot-entry.signature", quoted_credits: 1.5 });

@@ -9,6 +9,7 @@ def test_studio_loads_generation_parity_layer():
     html = (ROOT / "landing/studio.html").read_text()
     assert "js/prototype-premium.js" in html
     assert "js/generation-parity.js" in html
+    assert "seedance25-studio.js?v=20261025_exact_repeat" in html
 
 
 def test_web_parity_layer_exposes_advanced_video_contract():
