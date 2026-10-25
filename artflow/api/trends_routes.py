@@ -13,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.miniapp_auth import get_miniapp_user
 from api.miniapp_routes import (
+    _MJ_IMAGE_CAPS,
+    _MJ_VIDEO_CAPS,
     GenerationOut,
     ImageGenRequest,
     PreSubmitRejection,
@@ -137,7 +139,8 @@ def _looks_like_video(data: bytes, content_type: str) -> bool:
 async def _validated_model(session: AsyncSession, model_key: str, kind: str):
     runtime_model, _options = split_pricing_variant_key(model_key)
     caps = VIDEO_CAPS if kind == "video" else IMAGE_CAPS
-    if runtime_model not in caps:
+    midjourney_caps = _MJ_VIDEO_CAPS if kind == "video" else _MJ_IMAGE_CAPS
+    if runtime_model not in caps and runtime_model not in midjourney_caps:
         raise HTTPException(status_code=422, detail="Selected model is not available")
     model = await repo.get_model_cost(session, runtime_model)
     if not model or not getattr(model, "is_active", True):
@@ -302,7 +305,9 @@ async def _find_idempotent_trend_run(
     marker = marker.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     result = await session.execute(
         select(Generation)
-        .where(Generation.user_id == user_id, Generation.input_params.like(f"%{marker}%", escape="\\"))
+        .where(
+            Generation.user_id == user_id, Generation.input_params.like(f"%{marker}%", escape="\\")
+        )
         .order_by(desc(Generation.created_at), desc(Generation.id))
         .limit(1)
     )
@@ -526,7 +531,9 @@ async def run_trend(
     except PreSubmitRejection:
         await session.rollback()
         await release_pre_submit_claim(
-            session, user_id=user_id, request_key=body.idempotency_key,
+            session,
+            user_id=user_id,
+            request_key=body.idempotency_key,
             request_hash=request_hash,
         )
         logger.info("Trend run rejected before submit trend=%s user=%s", trend_id, user_id)
