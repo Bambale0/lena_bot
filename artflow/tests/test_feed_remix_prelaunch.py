@@ -13,6 +13,82 @@ from main import app
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("override", [None, 15])
+async def test_genjutsu_repeat_uses_measured_source_duration(monkeypatch, override):
+    from fastapi import HTTPException
+
+    from api import genjutsu_adapter
+
+    probe = AsyncMock(return_value=7)
+    monkeypatch.setattr(genjutsu_adapter, "resolve_source_duration_seconds", probe)
+    body = miniapp_routes.FeedRemixRequest(model=genjutsu_adapter.MOTION_MODEL, mode="image",
+        duration=10, duration_override=override, video_url="https://example.test/source.mp4")
+    if override is not None:
+        with pytest.raises(HTTPException) as error:
+            await miniapp_routes._normalize_feed_video_inputs(body, "replace subject", ["https://example.test/reader.jpg"])
+        assert error.value.status_code == 422
+        probe.assert_not_awaited()
+    else:
+        result = await miniapp_routes._normalize_feed_video_inputs(body, "replace subject", ["https://example.test/reader.jpg"])
+        assert result["duration"] == result["billing_duration"] == 7
+        assert result["seedance_video_edit"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model", ["nano-banana-2", "midjourney-video"])
+async def test_duration_override_cannot_be_silently_ignored_by_nonselectable_model(model):
+    from fastapi import HTTPException
+
+    source = SimpleNamespace(id=88, user_id=99, model=model, gen_type="image", prompt="private",
+        result_url="https://example.test/source.png", result_urls=None)
+    with pytest.raises(HTTPException) as error:
+        miniapp_routes._prepare_feed_remix_inputs(source,
+            miniapp_routes.FeedRemixRequest(model=model, duration_override=15), user_id=42)
+    assert error.value.status_code == 422
+    assert "длительност" in error.value.detail.lower()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("override", [None, 15])
+async def test_source_length_edit_is_measured_and_rejects_output_override(monkeypatch, override):
+    from fastapi import HTTPException
+    body = miniapp_routes.FeedRemixRequest(model="bytedance/seedance-2-5", mode="multimodal", duration=7,
+        video_url="https://example.test/source.mp4", duration_override=override)
+    probe = AsyncMock(return_value=7)
+    monkeypatch.setattr(miniapp_routes, "seedance25_edit_billing_duration", probe)
+    if override is not None:
+        with pytest.raises(HTTPException) as error:
+            await miniapp_routes._normalize_feed_video_inputs(body, "edit the source video", ["https://example.test/photo.jpg"])
+        assert error.value.status_code == 422
+    else:
+        result = await miniapp_routes._normalize_feed_video_inputs(body, "edit the source video", ["https://example.test/photo.jpg"])
+        assert result["duration"] == result["billing_duration"] == 7
+        assert result["provider_duration"] == -1
+
+
+@pytest.mark.asyncio
+async def test_non_wan_feed_override_prices_actual_choice_and_rejects_old_quote(client, monkeypatch):
+    source = SimpleNamespace(id=88, user_id=99, model="bytedance/seedance-2-5", gen_type="video", prompt="private recipe",
+        result_url="https://example.test/output.mp4", result_urls=None,
+        input_params={"reference_video_url": None, "duration": 10, "resolution": "720p", "aspect_ratio": "9:16"})
+    monkeypatch.setattr(miniapp_routes.repo, "get_public_feed_generation", AsyncMock(return_value=source))
+    monkeypatch.setattr(miniapp_routes.repo, "resolve_video_model_cost", AsyncMock(return_value=SimpleNamespace(credits=2, is_active=True)))
+    monkeypatch.setattr(miniapp_routes.repo, "get_active_price_plans", AsyncMock(return_value=[]))
+    charge = AsyncMock()
+    monkeypatch.setattr(miniapp_routes.repo, "spend_credits", charge)
+    body = {"model": source.model, "image_url": "https://example.test/photo.jpg", "duration_override": 15}
+    quote = await client.post("/api/v1/feed/88/remix/quote", json=body)
+    assert quote.status_code == 200, quote.text
+    assert quote.json()["cost_credits"] == 30
+    assert quote.json()["effective_duration"] == 15
+    assert quote.json()["default_duration"] == 10
+    response = await client.post("/api/v1/feed/88/remix", json={**body, "quoted_credits": 20})
+    assert response.status_code == 409, response.text
+    charge.assert_not_awaited()
+    assert source.input_params["duration"] == 10
+
+
+@pytest.mark.asyncio
 async def test_deep_link_feed_lookup_uses_list_representation_for_quote(client, monkeypatch):
     source = SimpleNamespace(
         id=88, user_id=99, model="nano-banana-2", gen_type="image",

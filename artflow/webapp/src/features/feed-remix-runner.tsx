@@ -38,10 +38,33 @@ type FeedCheckoutQuote = {
   output_seconds?: number;
   reference_seconds?: number;
   billable_seconds?: number;
+  duration_options?: number[];
+  effective_duration?: number;
+  duration_lock_reason?: string | null;
 };
 
 function draftStorage(): Storage | null {
   try { return window.sessionStorage; } catch { return null; }
+}
+
+type LaunchScope = { actorId: number; sourceId: number };
+const launchMarkerKey = (scope: LaunchScope) => `apix:feed-launch:v1:${scope.actorId}:${scope.sourceId}:remix`;
+function launchIsUncertain(scope: LaunchScope): boolean {
+  try { const storage = draftStorage(); return !storage || storage.getItem(launchMarkerKey(scope)) !== null; }
+  catch { return true; }
+}
+function writeLaunchMarker(scope: LaunchScope, pending: boolean): boolean {
+  try {
+    const storage = draftStorage();
+    if (!storage) return false;
+    if (pending) storage.setItem(launchMarkerKey(scope), "pending");
+    else storage.removeItem(launchMarkerKey(scope));
+    return (storage.getItem(launchMarkerKey(scope)) !== null) === pending;
+  } catch { return false; }
+}
+
+class FeedApiError extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
 }
 
 let runnerRoot: Root | null = null;
@@ -92,7 +115,7 @@ async function apiJson<T>(path: string, init: RequestInit = {}): Promise<T> {
     } catch {
       // Keep fallback message.
     }
-    throw new Error(message);
+    throw new FeedApiError(message, response.status);
   }
   if (response.status === 204) return undefined as T;
   const payload = await response.json();
@@ -133,7 +156,7 @@ function openFeedRemixRunner(item: FeedItem, sourceMediaUrl?: string): Promise<G
 function modelDurations(model?: ModelInfo): number[] {
   if (model?.duration_options?.length) return model.duration_options;
   if (model?.durations?.length) return model.durations;
-  return [5, 10];
+  return [];
 }
 
 function modelResolutions(model?: ModelInfo): string[] {
@@ -173,6 +196,7 @@ function FeedRemixRunnerPortal() {
   const [quality, setQuality] = useState("basic");
   const [count, setCount] = useState(1);
   const [duration, setDuration] = useState(5);
+  const [durationOverride, setDurationOverride] = useState<number | undefined>();
   const [resolution, setResolution] = useState("720p");
   const [grokMode, setGrokMode] = useState("normal");
   const [references, setReferences] = useState<string[]>([]);
@@ -192,6 +216,9 @@ function FeedRemixRunnerPortal() {
   const [selectedPaymentProvider, setSelectedPaymentProvider] = useState<PaymentProvider | null>(null);
   const quoteRequestSequence = useRef(0);
   const launchInFlight = useRef(false);
+  const [launchUncertain, setLaunchUncertain] = useState(false);
+  const [historyChecked, setHistoryChecked] = useState(false);
+  const [historySummary, setHistorySummary] = useState("");
   const paymentInFlight = useRef(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -234,9 +261,10 @@ function FeedRemixRunnerPortal() {
           ? `Исходная работа занимает один слот. Можно добавить своих фото: ${userReferenceLimit}.`
           : `Повтор по промпту автора и твоему фото недоступен для этой модели или публикации.`;
   const aspectRatios = modelAspectRatios(selectedModel);
-  const durations = modelDurations(selectedModel);
+  const durationLocked = Boolean(selectedModel?.duration_from_source || quote?.source_video_edit || quote?.duration_lock_reason);
+  const durations = quote?.duration_options ?? modelDurations(selectedModel);
   const durationIndex = Math.max(0, durations.indexOf(duration));
-  const selectedDuration = durations[durationIndex] ?? duration;
+  const selectedDuration = durationLocked ? quote?.effective_duration_seconds ?? quote?.effective_duration ?? duration : duration;
   const resolutions = modelResolutions(selectedModel);
   const modeOptions = selectedModel?.modes?.length ? selectedModel.modes : [bucket === "video" ? "image" : "image"];
   const qualityOptions = selectedModel?.quality_options?.length ? selectedModel.quality_options : [{ value: "basic", label: "Базовое" }];
@@ -254,6 +282,7 @@ function FeedRemixRunnerPortal() {
       change_request: creatorRecipeReplay ? "" : changeRequest.trim(),
       mode: chosenMode,
       duration: creatorRecipeReplay ? item.original_duration ?? duration : duration,
+      ...(bucket !== "video" || durationOverride == null ? {} : { duration_override: durationOverride }),
       aspect_ratio: creatorRecipeReplay ? item.original_aspect_ratio ?? aspectRatio : aspectRatio,
       resolution: creatorRecipeReplay ? item.original_resolution ?? resolution : resolution,
       image_url: primaryUserReference || (!sourceIsVideo ? sourceMedia || null : null),
@@ -271,16 +300,19 @@ function FeedRemixRunnerPortal() {
       quality,
       count,
     };
-  }, [aspectRatio, bucket, changeRequest, count, creatorRecipeReplay, creatorTextOnly, duration, grokMode, item, mode, originalImageRecipe, quality, references, referencesMissing, referencesOverLimit, resolution, selectedModel, sourceIsVideo, sourcePreview]);
+  }, [aspectRatio, bucket, changeRequest, count, creatorRecipeReplay, creatorTextOnly, duration, durationOverride, grokMode, item, mode, originalImageRecipe, quality, references, referencesMissing, referencesOverLimit, resolution, selectedModel, sourceIsVideo, sourcePreview]);
   const requestBodyKey = requestBody ? JSON.stringify(requestBody) : "";
   const liveQuoteRequest = useRef<{ id: number; body: Record<string, unknown>; key: string } | null>(null);
   liveQuoteRequest.current = item && requestBody && !sourceSelectionMissing ? { id: item.id, body: requestBody, key: requestBodyKey } : null;
   const quoteReady = Boolean(quote && quotedBody === requestBodyKey && !quoteBusy && !sourceSelectionMissing);
-  const canLaunch = quoteReady && quote?.can_run === true;
+  const canLaunch = quoteReady && quote?.can_run === true && !launchUncertain && Boolean(activeScope.current);
   const paymentOptions = checkoutOptions(quote?.recommended_plan);
   const paymentOption = paymentOptions.find((option) => option.provider === selectedPaymentProvider) || paymentOptions[0];
 
   const resetForm = useCallback((nextItem: FeedItem | null = null, draft: RepeatDraft | null = null, selectedSource?: string) => {
+    setLaunchUncertain(false);
+    setHistoryChecked(false);
+    setHistorySummary("");
     setItem(nextItem);
     // A fresh gallery click wins over an older saved result. A plain deep-link
     // reopen restores the selection made before an interrupted checkout.
@@ -309,7 +341,8 @@ function FeedRemixRunnerPortal() {
       || nextItem?.aspect_ratio || "1:1");
     setQuality(draft?.quality || (nextItem?.source_image_recipe_available ? nextItem.original_image_quality : null) || "basic");
     setCount(draft?.count || 1);
-    setDuration(sourceHasRecipe ? nextItem.original_duration || 5 : draft?.duration || 5);
+    setDuration(draft?.durationOverride ?? (sourceHasRecipe ? nextItem.original_duration || 5 : draft?.duration || 5));
+    setDurationOverride(draft?.durationOverride);
     setResolution(sourceHasRecipe ? nextItem.original_resolution || "720p" : draft?.resolution || "720p");
     setGrokMode(sourceHasRecipe ? nextItem.original_grok_mode || "normal" : draft?.grokMode || "normal");
     setGrokMode(draft?.grokMode || "normal");
@@ -319,7 +352,7 @@ function FeedRemixRunnerPortal() {
   const draftSnapshot = useRef<RepeatDraft | null>(null);
   draftSnapshot.current = item ? {
     savedAt: Date.now(), sourceMediaUrl, references, changeRequest, modelKey, mode,
-    aspectRatio, quality, count, duration, resolution, grokMode, payment: paymentRef.current,
+    aspectRatio, quality, count, duration, durationOverride, resolution, grokMode, payment: paymentRef.current,
   } : null;
   const persistDraft = useCallback((nextPayment = paymentRef.current) => {
     const scope = activeScope.current;
@@ -330,7 +363,7 @@ function FeedRemixRunnerPortal() {
   }, [item?.id]);
   useEffect(() => {
     if (!opening) persistDraft();
-  }, [opening, persistDraft, sourceMediaUrl, references, changeRequest, modelKey, mode, aspectRatio, quality, count, duration, resolution, grokMode, payment]);
+  }, [opening, persistDraft, sourceMediaUrl, references, changeRequest, modelKey, mode, aspectRatio, quality, count, duration, durationOverride, resolution, grokMode, payment]);
 
   const cancelPending = useCallback((message = "Повтор отменён") => {
     if (pendingRemix) pendingRemix.reject(new Error(message));
@@ -369,6 +402,7 @@ function FeedRemixRunnerPortal() {
         const telegramId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id;
         const legacyId = telegramId && viewer.tg_id === telegramId ? telegramId : undefined;
         resetForm(detail.item, readRepeatDraft(draftStorage(), viewer.id, detail.item.id, Date.now(), legacyId), detail.sourceMediaUrl);
+        setLaunchUncertain(launchIsUncertain(activeScope.current));
       }).catch(() => {
         if (sequence === openSequence.current) setError("Не удалось подтвердить аккаунт. Откройте повтор ещё раз перед оплатой.");
       }).finally(() => {
@@ -407,7 +441,7 @@ function FeedRemixRunnerPortal() {
     const nextRatios = modelAspectRatios(selectedModel);
     if (!nextRatios.includes(aspectRatio)) setAspectRatio(nextRatios[0] || "1:1");
     const nextDurations = modelDurations(selectedModel);
-    if (!nextDurations.includes(duration)) setDuration(nextDurations[0] || 5);
+    if (!nextDurations.includes(duration)) { setDuration(nextDurations[0] || 5); setDurationOverride(undefined); }
     const nextResolutions = modelResolutions(selectedModel);
     if (!nextResolutions.includes(resolution)) setResolution(nextResolutions[0] || "720p");
     const nextQuality = selectedModel.quality_options?.map((option) => option.value) || ["basic"];
@@ -613,7 +647,8 @@ function FeedRemixRunnerPortal() {
   }, [busy, paymentBusy, cancelPending, persistDraft, resetForm]);
 
   const addReferenceFiles = useCallback(async (files: File[]) => {
-    if (!files.length || busy) return;
+    if (!files.length || busy || opening || !activeScope.current) return;
+    const sequence = openSequence.current;
     const maximum = userReferenceLimit;
     if (references.length + files.length > maximum) {
       setError(referenceLimitMessage);
@@ -625,6 +660,7 @@ function FeedRemixRunnerPortal() {
       const uploaded: string[] = [];
       for (const file of files) {
         const result = await uploadReferenceImage(file);
+        if (sequence !== openSequence.current) return;
         if (result.url) uploaded.push(result.url);
       }
       if (!uploaded.length) throw new Error("Backend не вернул ссылки на референсы");
@@ -634,50 +670,84 @@ function FeedRemixRunnerPortal() {
       toast.success(uploaded.length === 1 ? "Референс добавлен" : `Добавлено референсов: ${uploaded.length}`);
       setPhase("idle");
     } catch (uploadError) {
+      if (sequence !== openSequence.current) return;
       notifyHaptic("error");
       const message = uploadError instanceof Error ? uploadError.message : "Не удалось загрузить референс";
       setError(message);
       setPhase("error");
       toast.error(message);
     } finally {
-      if (fileInputRef.current) fileInputRef.current.value = "";
+      if (sequence === openSequence.current && fileInputRef.current) fileInputRef.current.value = "";
     }
-  }, [bucket, busy, modeOptions, referenceLimitMessage, references.length, userReferenceLimit]);
+  }, [bucket, busy, opening, modeOptions, referenceLimitMessage, references.length, userReferenceLimit]);
 
   const submit = useCallback(async () => {
     if (!item || !selectedModel || !requestBody || !canLaunch || busy || launchInFlight.current) return;
+    const scope = activeScope.current;
+    if (!scope || launchIsUncertain(scope)) { setLaunchUncertain(true); return; }
+    if (!writeLaunchMarker(scope, true)) {
+      setError("Не удалось сохранить защиту запуска. Разреши хранилище браузера и открой повтор заново.");
+      setLaunchUncertain(true);
+      return;
+    }
+    const sequence = openSequence.current;
     launchInFlight.current = true;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 25_000);
     setPhase("generating");
     setError("");
     try {
       const task = await apiJson<GenerationTask>(`/feed/${item.id}/remix`, {
         method: "POST",
+        signal: controller.signal,
         body: JSON.stringify({
           ...requestBody,
           ...(item && itemLooksVideo(item) ? { quoted_credits: quote?.cost_credits } : {}),
         }),
       });
+      if (!Number.isSafeInteger(task?.id) || task.id <= 0) throw new Error("Ответ запуска не подтверждён");
+      writeLaunchMarker(scope, false);
+      if (activeScope.current !== scope || sequence !== openSequence.current) return;
       pendingRemix?.resolve(task);
       pendingRemix = null;
       notifyHaptic("success");
       toast.success("Повтор запущен");
       persistDraft();
-      const scope = activeScope.current;
       if (scope) clearRepeatDraft(draftStorage(), scope.actorId, scope.sourceId);
       activeScope.current = null;
       openSequence.current++;
       resetForm(null);
     } catch (runError) {
+      const rejected = runError instanceof FeedApiError && runError.status >= 400 && runError.status < 500 && runError.status !== 408;
+      if (rejected) writeLaunchMarker(scope, false);
+      if (activeScope.current !== scope || sequence !== openSequence.current) return;
+      setLaunchUncertain(!rejected);
+      if (rejected) { setQuote(null); setQuotedBody(""); }
+      if (runError instanceof FeedApiError && [401, 403].includes(runError.status)) activeScope.current = null;
       notifyHaptic("error");
       const message = runError instanceof Error ? runError.message : "Не удалось запустить повтор";
       setError(message);
       setPhase("error");
       toast.error(message);
-      if (requestBody) void refreshQuote(item.id, requestBody, requestBodyKey, true);
+      if (rejected && activeScope.current) void refreshQuote(item.id, requestBody, requestBodyKey, true);
     } finally {
+      window.clearTimeout(timeout);
       launchInFlight.current = false;
     }
   }, [busy, canLaunch, item, persistDraft, quote, refreshQuote, requestBody, requestBodyKey, resetForm, selectedModel]);
+
+  const checkLaunchHistory = async () => {
+    const scope = activeScope.current;
+    if (!scope) return;
+    setHistoryChecked(false);
+    try {
+      const history = await apiJson<GenerationTask[]>("/history?limit=20");
+      if (scope !== activeScope.current) return;
+      if (!Array.isArray(history)) throw new Error("История недоступна");
+      setHistorySummary(history.length ? history.slice(0, 5).map(task => `#${task.id}: ${task.status}`).join(" · ") : "В последних задачах пока нет записей. Задача может появиться позднее.");
+      setHistoryChecked(true);
+    } catch { if (scope === activeScope.current) setError("Не удалось проверить историю. Попробуй позже."); }
+  };
 
   const phaseLabel = useMemo(() => {
     if (phase === "uploading") return "Загружаем референсы…";
@@ -753,6 +823,18 @@ function FeedRemixRunnerPortal() {
     >
       {item ? (
         <div className="grid gap-3 text-sm">
+          {launchUncertain ? <div className="grid gap-2 rounded-xl border border-amber-500/40 p-3" role="status">
+            <p>Результат запуска неизвестен. Проверь историю задач перед новым запуском, чтобы избежать повторного списания.</p>
+            <p className="text-xs text-muted-foreground">Проверка действует в этой вкладке. Повтор с другого устройства может создать отдельную платную задачу.</p>
+            <Button variant="outline" onClick={() => void checkLaunchHistory()}>Проверить историю</Button>
+            {historySummary ? <p className="text-xs">{historySummary}</p> : null}
+            <Button variant="outline" disabled={!historyChecked} onClick={() => {
+              const scope = activeScope.current;
+              if (scope && writeLaunchMarker(scope, false)) {
+                setLaunchUncertain(false); setHistoryChecked(false); setHistorySummary(""); setError("");
+              }
+            }}>Я проверил историю — разрешить новый запуск</Button>
+          </div> : null}
           <div className="grid grid-cols-[88px_1fr] gap-3 rounded-xl border border-border bg-card/65 p-2">
             <div className="overflow-hidden rounded-lg bg-muted">
               {sourcePreview ? (
@@ -814,10 +896,10 @@ function FeedRemixRunnerPortal() {
                 className="hidden"
                 accept={`${ACCEPTED_REFERENCE_IMAGES},${ACCEPTED_REFERENCE_EXTENSIONS}`}
                 multiple
-                disabled={busy || references.length >= userReferenceLimit}
+                disabled={busy || opening || !activeScope.current || references.length >= userReferenceLimit}
                 onChange={(event) => void addReferenceFiles(Array.from(event.target.files || []))}
               />
-              <Button type="button" variant="outline" size="sm" disabled={busy || references.length >= userReferenceLimit} onClick={() => fileInputRef.current?.click()}>
+              <Button type="button" variant="outline" size="sm" disabled={busy || opening || !activeScope.current || references.length >= userReferenceLimit} onClick={() => fileInputRef.current?.click()}>
                 {phase === "uploading" ? <LoaderCircle className="size-4 animate-spin" /> : <UploadCloud className="size-4" />}
                 Добавить
               </Button>
@@ -891,26 +973,27 @@ function FeedRemixRunnerPortal() {
                   max={Math.max(0, durations.length - 1)}
                   step={1}
                   value={durationIndex}
-                  disabled={busy || creatorRecipeReplay || durations.length <= 1}
+                  disabled={busy || durationLocked || durations.length <= 1 || !quote}
                   aria-label="Длительность видео в повторе"
                   aria-valuetext={`${selectedDuration} секунд`}
                   className="apix-focus-ring h-8 w-full cursor-pointer accent-primary disabled:cursor-default disabled:opacity-60"
                   onChange={(event) => {
                     const nextDuration = durations[Number(event.target.value)];
-                    if (nextDuration != null) setDuration(nextDuration);
+                    if (nextDuration != null) { setDuration(nextDuration); setDurationOverride(nextDuration); }
                   }}
                 />
-                <div className="flex items-center justify-between gap-1 text-[10px] text-muted-foreground">
+                {durationLocked ? <p className="text-xs text-muted-foreground">{quote?.duration_lock_reason || "Длительность определяется исходным видео."}</p> : null}
+                <div className="flex flex-wrap items-center gap-1 text-[10px] text-muted-foreground">
                   {durations.map((value) => (
                     <button
                       key={value}
                       type="button"
                       className={cn(
-                        "apix-focus-ring rounded px-1 py-0.5 transition",
+                        "apix-focus-ring min-h-11 min-w-11 rounded px-2 py-1 transition",
                         value === selectedDuration ? "font-semibold text-primary" : "hover:text-foreground",
                       )}
-                      disabled={busy || creatorRecipeReplay}
-                      onClick={() => setDuration(value)}
+                      disabled={busy || durationLocked || !quote}
+                      onClick={() => { setDuration(value); setDurationOverride(value); }}
                     >
                       {value} сек
                     </button>

@@ -29,6 +29,144 @@ from main import app
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("seconds", [15, 30])
+async def test_selectable_trend_duration_quote_launch_and_identity(trend_client, seconds):
+    client, monkeypatch, _, create = trend_client
+    trend = SimpleNamespace(id=12, model="wan/3-0-video", tags=["trend", "trend-video", "trend-duration:10"])
+    monkeypatch.setattr("api.trends_routes._get_public_trend", AsyncMock(return_value=trend))
+    monkeypatch.setattr("api.wan30_launch.repo.get_model_cost", AsyncMock(return_value=SimpleNamespace(is_active=True, credits=4)))
+    quote = await client.get(f"/api/v1/trends/12/checkout?duration={seconds}")
+    assert quote.status_code == 200, quote.text
+    assert quote.json()["cost_credits"] == seconds * 4
+    assert quote.json()["default_duration"] == 10
+    assert quote.json()["effective_duration"] == seconds
+    assert seconds in quote.json()["duration_options"]
+    monkeypatch.setattr("api.trends_routes.quote_video_generation", AsyncMock(return_value={"cost_credits": seconds * 4}))
+    payload = {"asset_id": "signed-photo-asset-id", "idempotency_key": "duration-request", "duration": seconds, "quoted_credits": seconds * 4}
+    response = await client.post("/api/v1/trends/12/run", json=payload)
+    assert response.status_code == 202, response.text
+    assert create.await_args.kwargs["body"].duration == seconds
+    assert _trend_request_hash(12, TrendRunRequest(**payload)) != _trend_request_hash(12, TrendRunRequest(**{**payload, "duration": 10}))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("seconds", [True, 15.5, "15", 0, 31])
+async def test_trend_duration_strict_before_launch(trend_client, seconds):
+    client, monkeypatch, reserve, create = trend_client
+    monkeypatch.setattr("api.trends_routes._get_public_trend", AsyncMock(return_value=SimpleNamespace(
+        id=12, model="wan/3-0-video", tags=["trend", "trend-video", "trend-duration:10"],
+    )))
+    monkeypatch.setattr("api.trends_routes.quote_video_generation", AsyncMock(return_value={"cost_credits": 40}))
+    response = await client.post("/api/v1/trends/12/run", json={
+        "asset_id": "signed-photo-asset-id", "idempotency_key": "duration-invalid", "duration": seconds,
+    })
+    assert response.status_code == 422
+    reserve.assert_not_awaited()
+    create.assert_not_awaited()
+
+
+def test_absent_duration_preserves_legacy_claim_hash():
+    import hashlib
+    import json
+
+    body = TrendRunRequest(asset_id="signed-photo-asset-id", idempotency_key="legacy-request", quoted_credits=40)
+    encoded = json.dumps([12, body.asset_id, {}, 40.0], sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    assert _trend_request_hash(12, body) == hashlib.sha256(encoded).hexdigest()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model,expected", [("bytedance/seedance-2-5__resolution=720p", 15), ("wan/3-0-video", 30), ("veo3_fast", 8)])
+async def test_admin_duration_uses_installed_caps_and_short_rows(monkeypatch, model, expected):
+    from bot.handlers import trends as bot_trends
+    state = AsyncMock()
+    state.get_data.return_value = {"model": model}
+    call = SimpleNamespace(data="trends:scenario:image", message=SimpleNamespace(answer=AsyncMock()), answer=AsyncMock())
+    monkeypatch.setattr(bot_trends, "safe_answer_callback", AsyncMock())
+    await bot_trends.trend_scenario(call, state)
+    rows = call.message.answer.await_args.kwargs["reply_markup"].inline_keyboard
+    assert f"trends:duration:{expected}" in {b.callback_data for row in rows for b in row}
+    assert all(len(row) <= 4 for row in rows)
+    call.data = "trends:duration:garbage"
+    await bot_trends.trend_duration(call, state)
+    call.answer.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_non_wan_explicit_duration_requires_fresh_price(trend_client):
+    client, monkeypatch, reserve, create = trend_client
+    trend = SimpleNamespace(id=12, model="bytedance/seedance-2-5", tags=["trend", "trend-video", "trend-duration:10"])
+    monkeypatch.setattr("api.trends_routes._get_public_trend", AsyncMock(return_value=trend))
+    monkeypatch.setattr("api.trends_routes.quote_video_generation", AsyncMock(return_value={"cost_credits": 105}))
+    response = await client.post("/api/v1/trends/12/run", json={"asset_id": "signed-photo-asset-id", "idempotency_key": "new-duration", "duration": 15, "quoted_credits": 70})
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "trend_quote_stale"
+    create.assert_not_awaited()
+    reserve.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value", ["true", "15.0", "15.5", "0", "31", "-1"])
+async def test_checkout_duration_rejects_non_integer_or_out_of_catalog(trend_client, value):
+    client, monkeypatch, _, _ = trend_client
+    monkeypatch.setattr("api.trends_routes._get_public_trend", AsyncMock(return_value=SimpleNamespace(
+        id=12, model="wan/3-0-video", tags=["trend", "trend-video", "trend-duration:10"],
+    )))
+    response = await client.get(f"/api/v1/trends/12/checkout?duration={value}")
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_changed_duration_with_existing_claim_key_conflicts(trend_client):
+    client, monkeypatch, reserve, create = trend_client
+    original = TrendRunRequest(asset_id="signed-photo-asset-id", idempotency_key="same-key", duration=10, quoted_credits=40)
+    monkeypatch.setattr("api.trends_routes.get_claim", AsyncMock(return_value=SimpleNamespace(
+        trend_id=12, request_hash=_trend_request_hash(12, original), generation_id=None,
+    )))
+    response = await client.post("/api/v1/trends/12/run", json={**original.model_dump(), "duration": 15})
+    assert response.status_code == 409
+    assert "different" in response.json()["detail"]
+    reserve.assert_not_awaited()
+    create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_legacy_snapshot_cannot_accept_new_duration(trend_client):
+    import json
+    client, monkeypatch, reserve, create = trend_client
+    monkeypatch.setattr("api.trends_routes._find_idempotent_trend_run", AsyncMock(return_value=SimpleNamespace(input_params=json.dumps({
+        "trend_id": 12, "user_asset_id": "signed-photo-asset-id", "trend_user_values": {},
+    }))))
+    response = await client.post("/api/v1/trends/12/run", json={"asset_id": "signed-photo-asset-id", "idempotency_key": "legacy-key", "duration": 15})
+    assert response.status_code == 409
+    reserve.assert_not_awaited()
+    create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("saved", [8, 10])
+async def test_fixed_runtime_veo_does_not_offer_fake_fifteen_seconds(trend_client, saved):
+    client, monkeypatch, _, create = trend_client
+    monkeypatch.setattr("api.trends_routes._get_public_trend", AsyncMock(return_value=SimpleNamespace(
+        id=12, model="veo3_fast", tags=["trend", "trend-video", f"trend-duration:{saved}"],
+    )))
+    monkeypatch.setattr("api.trends_routes.repo.resolve_video_model_cost", AsyncMock(return_value=SimpleNamespace(credits=4, is_active=True)))
+    response = await client.get("/api/v1/trends/12/checkout")
+    assert response.json()["duration_options"] == [8]
+    assert response.json()["effective_duration"] == 8
+    assert response.json()["duration_lock_reason"]
+    assert (await client.get("/api/v1/trends/12/checkout?duration=15")).status_code == 422
+    run = await client.post("/api/v1/trends/12/run", json={"asset_id": "signed-photo-asset-id", "idempotency_key": "fixed-veo-default"})
+    assert run.status_code == 202, run.text
+    assert create.await_args.kwargs["body"].duration == 8
+
+
+def test_checkout_openapi_exposes_integer_duration():
+    parameters = app.openapi()["paths"]["/api/v1/trends/{trend_id}/checkout"]["get"]["parameters"]
+    duration = next(param for param in parameters if param["name"] == "duration")
+    assert {"type": "integer"} in duration["schema"]["anyOf"]
+
+
+@pytest.mark.asyncio
 async def test_bot_admin_gemini_duration_buttons_and_forged_duration(monkeypatch):
     from bot.handlers import trends as bot_trends
 

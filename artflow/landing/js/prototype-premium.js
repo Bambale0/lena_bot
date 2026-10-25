@@ -68,6 +68,8 @@ const state = {
   routeReferenceUrls: [],
   routeSourceReferenceUrl: "",
   routeFeedRemixId: "",
+  feedRepeat: null,
+  generationSubmitting: false,
   mediaViewerItems: [],
   mediaViewerIndex: 0,
 };
@@ -2180,6 +2182,86 @@ function isFeedRemixMode() {
   return Boolean(state.routeFeedRemixId || params.get("feed_remix"));
 }
 
+function feedRepeatScope() {
+  return state.user?.id && state.routeFeedRemixId
+    ? `apix:feed-launch:v1:${state.user.id}:${state.routeFeedRemixId}:remix` : "";
+}
+
+function feedRepeatPending(scope = feedRepeatScope()) {
+  if (!scope) return true;
+  try { return sessionStorage.getItem(scope) !== null; } catch { return true; }
+}
+
+async function loadFeedRepeat() {
+  if (!state.routeFeedRemixId || !state.user) return;
+  const scope = feedRepeatScope();
+  const authEpoch = state.authEpoch;
+  if (state.feedRepeat?.scope === scope && state.feedRepeat.authEpoch === authEpoch) return;
+  const source = await request(`/feed/${encodeURIComponent(state.routeFeedRemixId)}`);
+  if (scope !== feedRepeatScope() || authEpoch !== state.authEpoch) return;
+  if ((source.type || source.gen_type) !== "video") return;
+  state.feedRepeat = { scope, authEpoch, source, override: null, offer: null, historyChecked: false, historyText: "" };
+  state.generationKind = "video";
+  state.routeModelKey = source.model;
+  state.routeSourceReferenceUrl = "";
+}
+
+function syncFeedRepeatControls() {
+  const form = document.querySelector(".account-composer");
+  if (!form) return;
+  const active = isFeedRemixMode() && state.generationKind === "video";
+  let panel = form.querySelector("[data-feed-repeat-controls]");
+  if (!active) { if (panel) panel.hidden = true; return; }
+  if (!panel) {
+    panel = document.createElement("section");
+    panel.dataset.feedRepeatControls = "true";
+    panel.innerHTML = '<p data-repeat-duration-note></p><button class="button ghost" type="button" data-repeat-quote>Проверить цену и длительность</button><div data-repeat-uncertain><p>Результат запуска неизвестен. Проверьте историю: повторный запуск может списать кредиты ещё раз. На другом устройстве этот запрет не сохраняется.</p><button class="button ghost" type="button" data-repeat-history>Проверить историю</button><p data-repeat-history-result></p><button class="button ghost" type="button" data-repeat-ack>Историю проверил — разрешить новый запуск</button></div>';
+    form.querySelector(".composer-actions")?.before(panel);
+    panel.querySelector("[data-repeat-quote]").addEventListener("click", () => void submitGeneration(form, { quoteOnly: true }));
+    panel.querySelector("[data-repeat-history]").addEventListener("click", async () => {
+      const repeat = state.feedRepeat;
+      if (!repeat || repeat.scope !== feedRepeatScope()) return;
+      try {
+        const history = await request("/history?limit=20");
+        if (repeat !== state.feedRepeat || repeat.scope !== feedRepeatScope()) return;
+        if (!Array.isArray(history)) throw new Error("История недоступна");
+        repeat.historyChecked = true;
+        repeat.historyText = history.length ? history.slice(0, 5).map(item => `#${item.id}: ${item.status}`).join(" · ") : "Пока нет записей. Задача может появиться позже; отсутствие записи не доказывает, что запуск не состоялся.";
+      } catch { repeat.historyText = "Не удалось проверить историю. Новый запуск остаётся заблокирован."; }
+      syncFeedRepeatControls();
+    });
+    panel.querySelector("[data-repeat-ack]").addEventListener("click", () => {
+      const repeat = state.feedRepeat;
+      if (!repeat?.historyChecked || repeat.scope !== feedRepeatScope()) return;
+      try { sessionStorage.removeItem(repeat.scope); } catch { return; }
+      repeat.historyChecked = false;
+      syncFeedRepeatControls();
+    });
+  }
+  panel.hidden = false;
+  const repeat = state.feedRepeat?.scope === feedRepeatScope() && state.feedRepeat.authEpoch === state.authEpoch ? state.feedRepeat : null;
+  const pending = Boolean(feedRepeatScope()) && feedRepeatPending();
+  const duration = form.querySelector("[name=duration]");
+  if (duration) {
+    const options = repeat?.offer?.duration_options || [];
+    const effective = repeat?.override ?? repeat?.offer?.effective_duration ?? repeat?.source?.original_duration;
+    duration.innerHTML = optionTags((options.length ? options : (effective ? [effective] : [])).map(value => ({ value, label: `${value} сек` })), effective);
+    duration.disabled = !repeat?.offer || options.length <= 1 || Boolean(repeat?.offer?.duration_lock_reason) || state.generationSubmitting || pending;
+  }
+  for (const selector of ["[data-account-model-select]", "[name=aspect_ratio]", "[name=resolution]", "[name=grok_mode]"]) {
+    const field = form.querySelector(selector);
+    if (field) field.disabled = true;
+  }
+  panel.querySelector("[data-repeat-duration-note]").textContent = repeat?.offer?.duration_lock_reason || (repeat?.quoteChanged ? `Выбрано ${repeat.override} сек. Требуется новая проверка цены.` : repeat?.offer ? `Результат: ${repeat.offer.effective_duration} сек. К оплате: ${repeat.offer.cost_credits} 💋. При изменении длительности цена будет проверена заново.` : "Настройки автора сохранены. Сначала проверьте цену: сервер покажет допустимую длительность.");
+  panel.querySelector("[data-repeat-quote]").disabled = !repeat || state.generationSubmitting || pending;
+  panel.querySelector("[data-repeat-uncertain]").hidden = !pending;
+  panel.querySelector("[data-repeat-history-result]").textContent = repeat?.historyText || "";
+  panel.querySelector("[data-repeat-ack]").disabled = !repeat?.historyChecked;
+  const launch = form.querySelector("[data-generate-button]");
+  if (launch) launch.disabled = !repeat || state.generationSubmitting || pending;
+  syncMirrorSelectsFor("duration");
+}
+
 function updateStudioSearch(updates) {
   const currentFile = window.location.pathname.split("/").pop() || "index.html";
   if (currentFile !== "studio.html") return;
@@ -2870,6 +2952,7 @@ function syncGenerationControls() {
   if (state.generationStatus) syncStudioResultStage();
   else setModelPreview(currentModelGroup());
   renderActiveImageSession();
+  syncFeedRepeatControls();
   refreshCustomSelects();
 }
 
@@ -4594,7 +4677,8 @@ async function uploadReferences(files = []) {
   return urls;
 }
 
-async function submitGeneration(form) {
+async function submitGeneration(form, { quoteOnly = false } = {}) {
+  if (state.generationSubmitting) return;
   if (!state.user) {
     openLogin();
     toast("Сначала войдите.", "info");
@@ -4607,6 +4691,16 @@ async function submitGeneration(form) {
   const feedRemixId = state.routeFeedRemixId || params.get("feed_remix") || "";
   const feedSourceRef = state.routeSourceReferenceUrl || params.get("source_ref") || "";
   const feedRemixMode = isFeedRemixMode();
+  const repeatScope = feedRepeatScope();
+  const repeatAuthEpoch = state.authEpoch;
+  const repeatIsCurrent = () => repeatScope === feedRepeatScope() && repeatAuthEpoch === state.authEpoch;
+  const repeatVideo = feedRemixMode && state.generationKind === "video";
+  const repeat = repeatVideo && state.feedRepeat?.scope === repeatScope && state.feedRepeat.authEpoch === repeatAuthEpoch ? state.feedRepeat : null;
+  if (repeatVideo && (!repeat || feedRepeatPending(repeatScope))) {
+    syncFeedRepeatControls();
+    toast("Проверьте историю или дождитесь загрузки настроек повтора.", "info");
+    return;
+  }
   const injectedPrompt = promptWithInjections(form, basePrompt);
   const prompt = feedRemixMode ? basePrompt : injectedPrompt.prompt;
   if (!basePrompt && !feedRemixMode) {
@@ -4614,7 +4708,11 @@ async function submitGeneration(form) {
     return;
   }
   const button = form.querySelector("[data-generate-button]") || $("[data-generate-button]");
+  state.generationSubmitting = true;
+  let launchSent = false;
+  let launchTimer;
   if (button) button.disabled = true;
+  syncFeedRepeatControls();
   setGenerationStatus({
     id: "",
     status: "created",
@@ -4648,14 +4746,15 @@ async function submitGeneration(form) {
     } else if (state.generationKind === "video") {
       path = feedRemixMode ? `/feed/${feedRemixId}/remix` : "/generate/video";
       body = {
-        model: requestModel?.key,
+        model: repeat?.source.model || requestModel?.key,
         ...(feedRemixMode ? {} : { prompt }),
         mode: videoUrl ? "video" : "image",
-        duration: Number(data.get("duration") || model?.durations?.[0] || 5),
-        aspect_ratio: String(data.get("aspect_ratio") || "") || null,
-        resolution: String(data.get("resolution") || "") || null,
+        duration: Number(repeat?.source.original_duration || data.get("duration") || model?.durations?.[0] || 5),
+        ...(repeat?.override != null ? { duration_override: repeat.override } : {}),
+        aspect_ratio: repeat?.source.original_aspect_ratio || String(data.get("aspect_ratio") || "") || null,
+        resolution: repeat?.source.original_resolution || String(data.get("resolution") || "") || null,
         image_url: referenceUrl || null,
-        source_image_url: feedRemixMode ? (feedSourceRef || null) : null,
+        source_image_url: repeatVideo ? null : (feedRemixMode ? (feedSourceRef || null) : null),
         reference_urls: extraReferenceUrls,
         video_url: videoUrl || null,
         seed: data.get("seed") ? Number(data.get("seed")) : null,
@@ -4688,11 +4787,22 @@ async function submitGeneration(form) {
     if (state.generationKind === "video") {
       const quotePath = feedRemixMode ? `/feed/${feedRemixId}/remix/quote` : "/generate/video/quote";
       const quote = await request(quotePath, { method: "POST", body: JSON.stringify(body) });
+      if (repeatVideo && !repeatIsCurrent()) return;
       const cost = Number(quote.cost_credits);
       if (!Number.isFinite(cost) || cost < 0) throw new Error("Стоимость видео недоступна. Повторите попытку.");
-      if (!quote.can_run) throw new Error(`Недостаточно кредитов: нужно ${cost} 💋.`);
       const referenceSeconds = Number(quote.reference_seconds || 0);
       const outputSeconds = Number(quote.output_seconds || body.duration);
+      if (repeat) {
+        repeat.offer = quote;
+        repeat.quoteChanged = false;
+        if (quote.duration_lock_reason) repeat.override = null;
+        syncFeedRepeatControls();
+      }
+      if (!quote.can_run) throw new Error(`Недостаточно кредитов: нужно ${cost} 💋.`);
+      if (quoteOnly) {
+        setGenerationStatus({ status: "idle", progress: 0 });
+        return;
+      }
       const confirmed = window.confirm(
         `Видеореференсы: ${referenceSeconds} сек\nРезультат: ${outputSeconds} сек\nК оплате: ${cost} 💋\n\nЗапустить генерацию?`
       );
@@ -4708,7 +4818,20 @@ async function submitGeneration(form) {
       model: body.model || "suno/v4.5",
       progress: 24,
     });
-    const result = await request(path, { method: "POST", body: JSON.stringify(body) });
+    const controller = new AbortController();
+    if (repeatVideo) {
+      if (!repeatIsCurrent() || feedRepeatPending(repeatScope)) return;
+      // Minimum tab marker only: never persist the private recipe or request body.
+      sessionStorage.setItem(repeatScope, "pending");
+      launchSent = true;
+      launchTimer = setTimeout(() => controller.abort(), 25000);
+    }
+    const result = await request(path, { method: "POST", body: JSON.stringify(body), ...(repeatVideo ? { signal: controller.signal } : {}) });
+    if (repeatVideo) {
+      if (!repeatIsCurrent()) return;
+      if (!Number(result?.id || result?.generation_id)) throw new Error("Ответ запуска не подтверждён. Проверьте историю.");
+      sessionStorage.removeItem(repeatScope);
+    }
     mergeGeneration({ ...result, prompt: feedRemixMode ? "" : basePrompt, model: body.model || "suno/v4.5", image: fallbackImage(0), title: `Работа #${result.id || result.generation_id || ""}` });
     renderQueue();
     renderLibrary();
@@ -4718,10 +4841,21 @@ async function submitGeneration(form) {
     await loadPrivate({ quiet: true });
     pollQueue();
   } catch (error) {
+    if (repeatVideo && !repeatIsCurrent()) return;
+    if (repeatVideo && launchSent && error instanceof ApiRequestError && error.status >= 400 && error.status < 500 && error.status !== 408) {
+      try { sessionStorage.removeItem(repeatScope); } catch {}
+    }
+    if (repeat && error?.status === 409) {
+      repeat.offer = null;
+      error.message = "Цена изменилась. Проверьте стоимость и явно подтвердите новый запуск.";
+    }
     setGenerationStatus({ status: "failed", error: error.message, progress: 100 });
     toast(`Ошибка генерации: ${error.message}`, "danger");
   } finally {
+    clearTimeout(launchTimer);
+    state.generationSubmitting = false;
     if (button && !button._contactCooldownTimer) button.disabled = false;
+    syncFeedRepeatControls();
   }
 }
 
@@ -4999,10 +5133,11 @@ async function remixFeed(feedId) {
   const item = state.examples.find((entry) => String(entry.id) === String(feedId));
   const ref = primaryMediaUrl(item || {});
   const url = new URL('studio.html', window.location.href);
-  url.searchParams.set('type', 'image');
+  url.searchParams.set('type', item?.type === "video" ? 'video' : 'image');
+  if (item?.type === "video" && item.model) url.searchParams.set('model', item.model);
   url.searchParams.set('flow', 'reference');
   url.searchParams.set('feed_remix', String(feedId));
-  if (ref) url.searchParams.set('source_ref', ref);
+  if (ref && item?.type !== "video") url.searchParams.set('source_ref', ref);
   url.searchParams.delete('ref');
   url.searchParams.delete('prompt');
   window.location.href = `${url.pathname}${url.search}`;
@@ -5561,6 +5696,8 @@ async function loadPrivate({ quiet = false } = {}) {
   }
   state.models = Object.values(state.modelsByKind).flat();
   state.history = (history || []).map(normalizeExample);
+  await loadFeedRepeat().catch(() => toast("Настройки повтора недоступны. Обновите страницу.", "danger"));
+  if (authEpoch !== state.authEpoch || state.user?.id !== me.id) return;
   state.queue = (active || []).map(normalizeExample);
   state.activeImageSession = imageSession || null;
   state.plans = Array.isArray(plans) ? plans : state.plans;
@@ -5727,6 +5864,14 @@ function bindUi() {
       if (target.matches("[data-account-model-select]")) return;
       if (target.matches("[name='reference_file']")) updatePhotoPromptStatus(form);
       if (target.matches("[name='prompt_preset']")) updatePromptInjectionStatus(form);
+      if (target.matches("[name='duration']") && state.feedRepeat?.scope === feedRepeatScope()) {
+        const value = Number(target.value);
+        if (!target.disabled && state.feedRepeat.offer?.duration_options?.includes(value)) {
+          state.feedRepeat.override = value;
+          state.feedRepeat.quoteChanged = true;
+          syncFeedRepeatControls();
+        }
+      }
       if (["quality", "count", "duration"].includes(target.getAttribute("name") || "")) {
         syncMirrorSelectsFor(target.getAttribute("name") || "");
       }
@@ -6092,6 +6237,7 @@ async function boot() {
   renderAccount();
   renderAuth();
   await privateLoad;
+  await loadFeedRepeat().catch(() => toast("Настройки повтора недоступны. Обновите страницу.", "danger"));
   if (state.user) clearPendingReferralCode();
   renderHeroStack();
   renderModels();

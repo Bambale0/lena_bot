@@ -56,6 +56,10 @@ type TrendRunResponse = {
 };
 
 type TrendCheckoutQuote = {
+  duration_options?: number[];
+  default_duration?: number;
+  effective_duration?: number;
+  duration_lock_reason?: string | null;
   cost_credits: number;
   balance_credits: number;
   can_run: boolean;
@@ -564,6 +568,8 @@ function TrendRunnerPortal() {
   const [pinterestBusy, setPinterestBusy] = useState(false);
   const [checkout, setCheckout] = useState<TrendCheckoutQuote | null>(null);
   const [checkoutBusy, setCheckoutBusy] = useState(false);
+  const [duration, setDuration] = useState<number | null>(null);
+  const checkoutSequence = useRef(0);
   const [paymentBusy, setPaymentBusy] = useState(false);
   const [paymentWaiting, setPaymentWaiting] = useState(false);
   const [paymentMethods, setPaymentMethods] = useState<string[]>([]);
@@ -582,6 +588,8 @@ function TrendRunnerPortal() {
   const personalized = userFields.length > 0;
 
   const resetRunner = useCallback(() => {
+    checkoutSequence.current++;
+    setDuration(null);
     runKeyRef.current = null;
     setPhase("idle");
     setError("");
@@ -632,9 +640,11 @@ function TrendRunnerPortal() {
   }, [loadTrend, resetRunner]);
 
   const refreshCheckout = useCallback(async (trendId: number, quiet = false) => {
+    const sequence = ++checkoutSequence.current;
     if (!quiet) setCheckoutBusy(true);
     try {
-      const quote = await apiJson<TrendCheckoutQuote>(`/trends/${trendId}/checkout`);
+      const query = duration == null ? "" : `?duration=${duration}`;
+      const quote = await apiJson<TrendCheckoutQuote>(`/trends/${trendId}/checkout${query}`);
       if (
         typeof quote?.can_run !== "boolean"
         || !Number.isFinite(Number(quote?.cost_credits))
@@ -642,18 +652,20 @@ function TrendRunnerPortal() {
       ) {
         throw new Error("Стоимость временно недоступна");
       }
+      if (sequence !== checkoutSequence.current) return null;
       setCheckout(quote);
       return quote;
     } catch (checkoutError) {
+      if (sequence !== checkoutSequence.current) return null;
       setCheckout(null);
       if (!quiet) {
         toast.error(checkoutError instanceof Error ? checkoutError.message : "Не удалось получить стоимость");
       }
       return null;
     } finally {
-      if (!quiet) setCheckoutBusy(false);
+      if (!quiet && sequence === checkoutSequence.current) setCheckoutBusy(false);
     }
-  }, []);
+  }, [duration]);
 
   useEffect(() => {
     if (!trend?.id) return;
@@ -736,7 +748,7 @@ function TrendRunnerPortal() {
     setError("");
     try {
       setPhase("generating");
-      const fingerprint = JSON.stringify([trend.id, assetId, values]);
+      const fingerprint = JSON.stringify([trend.id, assetId, values, duration]);
       const requestKey = runKeyRef.current?.fingerprint === fingerprint
         ? runKeyRef.current.key
         : buildIdempotencyKey(trend.id);
@@ -748,6 +760,7 @@ function TrendRunnerPortal() {
           idempotency_key: requestKey,
           user_values: values,
           quoted_credits: checkout.cost_credits,
+          ...(duration == null ? {} : { duration }),
         }),
       });
       if (!result.task?.id) throw new Error("Backend не вернул задачу");
@@ -769,7 +782,7 @@ function TrendRunnerPortal() {
       }
       toast.error(message);
     }
-  }, [checkout, genericBusy, refreshCheckout, resetRunner, trend]);
+  }, [checkout, duration, genericBusy, refreshCheckout, resetRunner, trend]);
 
   const runPhoto = useCallback(async (file: File | undefined | null) => {
     if (!trend || !file || genericBusy) return;
@@ -786,7 +799,7 @@ function TrendRunnerPortal() {
       const uploaded = await apiJson<TrendUploadResponse>("/trends/upload", { method: "POST", body: form });
       if (!uploaded.asset_id) throw new Error("Backend не вернул asset_id");
       setUploadedAsset(uploaded);
-      if ((trend.user_fields || []).length || !checkout || !checkout.can_run) {
+      if (trend.kind === "video" || (trend.user_fields || []).length || !checkout || !checkout.can_run) {
         setPhase("idle");
         toast.success(checkout && !checkout.can_run ? "Фото готово — пополни баланс прямо здесь" : "Фото готово");
         return;
@@ -855,16 +868,16 @@ function TrendRunnerPortal() {
     if (phase === "uploading") return "Загружаем фото…";
     if (phase === "generating") return "Запускаем генерацию…";
     if (phase === "error") return "Можно выбрать фото ещё раз";
-    if (personalized) return uploadedAsset ? "Заменить фото" : "Загрузить фото";
+    if (personalized || trend?.kind === "video") return uploadedAsset ? "Заменить фото" : "Загрузить фото";
     return "Выберите фото — запуск начнётся автоматически";
-  }, [personalized, phase, uploadedAsset]);
+  }, [personalized, phase, trend?.kind, uploadedAsset]);
 
   return (
     <>
       <Sheet
         open={Boolean(trend)}
         title={isPinterest ? "Повтори фото с Pinterest" : trend?.title || "Повторить тренд"}
-        description={isPinterest ? undefined : personalized ? "Фото + разрешённые параметры. Скрытый сценарий остаётся на backend." : "Один снимок. Без настроек. Всё остальное применит backend."}
+        description={isPinterest ? undefined : "Загрузи фото и подтверди стоимость. Сценарий тренда уже настроен."}
         onOpenChange={(open) => {
           if (!open) closeRunner();
         }}
@@ -902,6 +915,24 @@ function TrendRunnerPortal() {
                 <p>{hint}</p>
               </div>
 
+              {trend.kind === "video" && checkout?.effective_duration != null ? (
+                <label className="grid gap-2 text-sm">
+                  Длительность видео
+                  <select aria-label="Длительность видео" className="min-h-11 rounded-lg border border-border bg-background px-3"
+                    value={duration ?? checkout.effective_duration}
+                    disabled={genericBusy || Boolean(checkout.duration_lock_reason) || (checkout.duration_options?.length ?? 0) <= 1}
+                    onChange={event => {
+                      checkoutSequence.current++;
+                      setCheckout(null);
+                      setDuration(Number(event.target.value));
+                      runKeyRef.current = null;
+                      setError("");
+                    }}>
+                    {(checkout.duration_options?.length ? checkout.duration_options : [checkout.effective_duration]).map(seconds => <option key={seconds} value={seconds}>{seconds} сек</option>)}
+                  </select>
+                  {checkout.duration_lock_reason ? <span className="text-xs text-muted-foreground">{checkout.duration_lock_reason}</span> : null}
+                </label>
+              ) : null}
               <div className="rounded-xl border border-primary/20 bg-primary/5 p-3">
                 <div className="flex items-center justify-between gap-3">
                   <div>
@@ -1019,7 +1050,7 @@ function TrendRunnerPortal() {
 
               <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/30 p-2 text-[11px] text-muted-foreground">
                 <X className="mt-0.5 size-3.5 shrink-0" />
-                <p>В этом сценарии нельзя менять модель, промпт, формат, качество, duration, seed или provider-параметры. Они применяются только на backend.</p>
+                <p>Модель, скрытый промпт, формат и качество сохраняются из рецепта автора. Для видео можно выбрать доступную длительность.</p>
               </div>
             </div>
           )

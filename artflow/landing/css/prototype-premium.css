@@ -7645,7 +7645,8 @@ html.auth-checking [data-guest-only] {
   }
 
   .result-stage-clean {
-    position: static;
+    position: relative;
+    top: auto;
   }
 }
 

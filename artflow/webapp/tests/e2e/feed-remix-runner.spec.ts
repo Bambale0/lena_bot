@@ -118,6 +118,28 @@ async function mockMiniAppApi(page: Page, withTelegram = true, nativeBack = fals
   }));
 }
 
+test("unknown repeat launch survives reload without replay and requires history acknowledgement", async ({ page }) => {
+  await mockMiniAppApi(page);
+  let launches = 0;
+  await page.route("**/api/v1/feed/201/remix", route => {
+    launches++;
+    return route.fulfill({ status: 503, json: { detail: "Ответ запуска потерян" } });
+  });
+  await page.goto("/?tgWebAppData=test&feed=201");
+  const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+  await expect(dialog.getByRole("button", { name: /Запустить повтор/ })).toBeEnabled();
+  await dialog.getByRole("button", { name: /Запустить повтор/ }).click();
+  await expect(dialog.getByText(/Результат запуска неизвестен/)).toBeVisible();
+  await expect(dialog.getByRole("button", { name: /Запустить повтор/ })).toBeDisabled();
+  await page.reload();
+  await expect(dialog.getByText(/Результат запуска неизвестен/)).toBeVisible();
+  await expect(dialog.getByRole("button", { name: /Запустить повтор/ })).toBeDisabled();
+  expect(launches).toBe(1);
+  await dialog.getByRole("button", { name: "Проверить историю" }).click();
+  await expect(dialog.getByRole("button", { name: "Я проверил историю — разрешить новый запуск" })).toBeEnabled();
+  expect(launches).toBe(1);
+});
+
 test("feed work repeat asks for settings and preserves source media payload", async ({ page }) => {
   await mockMiniAppApi(page, true, false, true);
   let remixPayload: Record<string, unknown> | null = null;
@@ -544,6 +566,8 @@ test("Seedance source-video edit discloses measured billing without starting gen
   const dialog = page.getByRole("dialog", { name: "Повторить работу" });
   await dialog.getByLabel("Что изменить в образе").fill("Сделай одежду синей");
   await expect(dialog.getByText("Редактирование исходного ролика: длительность и кадр берутся из источника. Для оплаты: 7 сек.")).toBeVisible();
+  await expect(dialog.getByLabel("Длительность видео в повторе")).toBeDisabled();
+  await expect(dialog.getByLabel("Длительность видео в повторе")).toHaveAttribute("aria-valuetext", "7 секунд");
   await expect(dialog.getByRole("contentinfo").getByText("Стоимость: 28 💋", { exact: true })).toBeVisible();
   expect(paidRequests).toBe(0);
 });
@@ -725,12 +749,12 @@ test("payment notification leaves underlying controls clickable while visible", 
   expect(state.topups).toBe(1);
 });
 
-test("creator photo-to-video replay never sends rendered MP4 and keeps creator recipe", async ({ page }) => {
+test("creator photo-to-video replay selects duration, restores draft and reconfirms stale price", async ({ page }, testInfo) => {
   await mockMiniAppApi(page);
   const model = {
-    key: "veo-3.1-fast", display_name: "Veo 3.1 Fast",
+    key: "bytedance/seedance-2-5", display_name: "Seedance 2.5",
     credits: 20, modes: ["text", "image", "video"],
-    aspect_ratios: ["16:9", "9:16"], durations: [5, 10],
+    aspect_ratios: ["16:9", "9:16"], durations: [5, 10, 15],
     resolutions: ["720p", "1080p"],
     max_refs: 1, supports_video_input: true,
   };
@@ -746,13 +770,23 @@ test("creator photo-to-video replay never sends rendered MP4 and keeps creator r
     likes_count: 0, shares_count: 0, remixes: 0, aspect_ratio: "9:16",
   }] }));
   await page.route("**/api/v1/models/video", (route) => route.fulfill({ json: [model] }));
-  await page.route("**/api/v1/feed/57213/remix/quote", (route) => route.fulfill({ json: {
-    cost_credits: 20, balance_credits: 100,
+  let quoted: Record<string, unknown> | null = null;
+  let price = 30;
+  let launches = 0;
+  await page.route("**/api/v1/feed/57213/remix/quote", (route) => {
+    quoted = route.request().postDataJSON();
+    return route.fulfill({ json: {
+    cost_credits: quoted?.duration_override === 15 ? price : 20, balance_credits: 100,
     can_run: true, deficit_credits: 0, recommended_plan: null,
-  } }));
+  } }); });
   let sent: Record<string, unknown> | null = null;
   await page.route("**/api/v1/feed/57213/remix", (route) => {
+    launches++;
     sent = route.request().postDataJSON() as Record<string, unknown>;
+    if (launches === 1) {
+      price = 35;
+      return route.fulfill({ status: 409, json: { detail: "Цена изменилась. Подтверди запуск ещё раз." } });
+    }
     return route.fulfill({ status: 202, json: {
       id: 9205, model: model.key, gen_type: "video",
       prompt: "", prompt_hidden: true,
@@ -773,13 +807,29 @@ test("creator photo-to-video replay never sends rendered MP4 and keeps creator r
   });
   await expect(dialog.getByText("Реф #1")).toBeVisible();
   await expect(dialog.getByText("Стоимость: 20 💋").first()).toBeVisible();
+  await expect(dialog.getByLabel("Длительность видео в повторе")).toHaveAttribute("aria-valuetext", "10 секунд");
+  await dialog.getByRole("button", { name: "15 сек", exact: true }).click();
+  await expect(dialog.getByText("Стоимость: 30 💋").first()).toBeVisible();
+  expect(sent).toBeNull();
+  expect(quoted?.duration_override).toBe(15);
+  await page.reload();
+  await expect(dialog.getByLabel("Длительность видео в повторе")).toHaveAttribute("aria-valuetext", "15 секунд");
+  await expect(dialog.getByText("Стоимость: 30 💋").first()).toBeVisible();
+  if (testInfo.project.name === "iPhone SE") {
+    await dialog.getByLabel("Длительность видео в повторе").scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath("duration-selection.png") });
+  }
+  await dialog.getByRole("button", { name: /Запустить повтор/ }).click();
+  await expect(dialog.getByRole("button", { name: "Запустить повтор · 35 💋" })).toBeEnabled();
+  expect(launches).toBe(1);
+  expect(sent).toMatchObject({ duration_override: 15, quoted_credits: 30 });
   await dialog.getByRole("button", { name: /Запустить повтор/ }).click();
   await expect(page.getByRole("dialog", { name: /Задача #9205/ })).toBeVisible();
   expect(sent).toMatchObject({
     model: model.key, change_request: "",
     image_url: "https://example.test/uploaded-ref.png",
     reference_urls: ["https://example.test/uploaded-ref.png"],
-    video_url: null, duration: 10, aspect_ratio: "9:16", resolution: "720p",
+    video_url: null, duration: 10, duration_override: 15, quoted_credits: 35, aspect_ratio: "9:16", resolution: "720p",
   });
 });
 
@@ -1165,6 +1215,7 @@ for (const modelKey of ["wan/3-0-video", "wan/3-0-video-prime"]) {
     await expect(dialog).toBeVisible();
     await expect(dialog.getByLabel("Модель")).toBeDisabled();
     expect(launches).toHaveLength(0);
+    await expect(dialog.getByRole("button", { name: "Добавить", exact: true })).toBeEnabled();
     await dialog.locator("input[type=file]").setInputFiles({
       name: "reader.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
     });

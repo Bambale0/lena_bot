@@ -62,6 +62,9 @@ from api.seedance25_adapter import (
 from api.seedance25_adapter import (
     _control_payload as seedance25_control_payload,
 )
+from api.seedance25_adapter import (
+    is_explicit_video_edit_prompt,
+)
 from api.video_prompt_limits import (
     append_telegram_seedance_prompt_chunk,
     seedance_prompt_max_chars,
@@ -116,6 +119,7 @@ from core.gemini_omni import (
 )
 from core.kie_seedance_callback import callback_url_for_generation
 from core.kling4_access import is_kling4_key, visible_model_costs
+from core.repeat_duration import resolve_repeat_duration
 from core.seedance_reconciliation import (
     handle_submission_not_sent,
     handle_submission_unknown,
@@ -454,7 +458,7 @@ def _video_params_next_label(data: dict) -> str:
 
 
 def _video_params_reply_markup(model_key: str, data: dict):
-    return video_params_kb(
+    markup = video_params_kb(
         model_key,
         data.get("duration"),
         data.get("aspect_ratio"),
@@ -469,6 +473,24 @@ def _video_params_reply_markup(model_key: str, data: dict):
         wan_advanced_open=bool(data.get("wan_advanced_open")),
         wan_seed=data.get("seed"),
     )
+    if _is_feed_video_use(data) and data.get("feed_use_has_original_recipe"):
+        allowed = {"vpar_next", "vpar_back", "menu:main", "vid_nav:back"}
+        markup.inline_keyboard = [
+            [button for button in row if button.callback_data in allowed or str(button.callback_data).startswith("vpar_dur:")]
+            for row in markup.inline_keyboard
+        ]
+    if _feed_source_duration_locked(model_key, data):
+        markup.inline_keyboard = [
+            [button for button in row if not str(button.callback_data).startswith("vpar_dur:")]
+            for row in markup.inline_keyboard
+        ]
+    markup.inline_keyboard = [row for row in markup.inline_keyboard if row]
+    return markup
+
+
+def _feed_source_duration_locked(model_key: str, data: dict) -> bool:
+    return bool(model_key == SEEDANCE25_MODEL_KEY and data.get("feed_use_needs_video_reference")
+                and is_explicit_video_edit_prompt(str(data.get("feed_use_prompt") or "")))
 
 
 # Advanced Wan controls are hidden in the normal wizard, but editable for
@@ -572,6 +594,8 @@ def _params_summary(data: dict) -> str:
 
 
 def _video_params_hint(model_key: str, data: dict) -> str:
+    if _feed_source_duration_locked(model_key, data):
+        return "Длительность определяется по измеренной длине исходного видео. Проверь стоимость перед запуском."
     if model_key == SEEDANCE25_MODEL_KEY and data.get("seedance_identity_transfer"):
         return (
             "🎭 Фото задают внешность персонажа, исходное видео — только движение и сцену. "
@@ -763,6 +787,8 @@ async def _prepare_feed_video_inputs(
                 "Исходные параметры Wan не сохранены. Готовое видео не заменяет оригинал; кредиты не списаны."
             )
         if original_videos is not None:
+            if model_key != getattr(source, "model", None):
+                raise FeedRemixUnavailable("Для точного повтора выбери модель автора.")
             restored = {}
             if model_key in WAN30_MODELS:
                 if model_key != getattr(source, "model", None):
@@ -818,6 +844,18 @@ async def _prepare_feed_video_inputs(
                 FEED_REMIX_CONTEXT_KEY: feed_remix_context(source_feed_gen_id, source.prompt),
             }
             data.update(restored)
+            creator_inputs = original_feed_video_inputs(source) or {}
+            for field, choices in (("resolution", "resolutions"), ("aspect_ratio", "aspect_ratios")):
+                if creator_inputs.get(field) in caps.get(choices, []):
+                    data[field] = creator_inputs[field]
+            default_duration = restored.get("duration", creator_inputs.get("duration", data.get("duration", 5)))
+            try:
+                data["duration"] = resolve_repeat_duration(
+                    model_key, default_duration, data.get("duration_override"),
+                    source_edit=bool(original_videos and model_key == SEEDANCE25_MODEL_KEY and is_explicit_video_edit_prompt(source.prompt)),
+                )
+            except ValueError as exc:
+                raise FeedRemixUnavailable(str(exc)) from exc
             logger.info(
                 "feed_creator_replay source_gen=%s model=%s photo_refs=%s original_video_refs=%s",
                 source_feed_gen_id, model_key, len(refs), len(original_videos),
@@ -2020,7 +2058,7 @@ async def cb_vpar_dur(call: CallbackQuery, state: FSMContext) -> None:
     if not await _accept_video_parameter(call, state):
         return
     dur = int(call.data.split(":")[1])  # type: ignore[union-attr]
-    await state.update_data(duration=dur)
+    await state.update_data(duration=dur, duration_override=dur)
     data = await state.get_data()
     await call.message.edit_reply_markup(  # type: ignore[union-attr]
         reply_markup=_video_params_reply_markup(data["model_key"], data)
@@ -2092,7 +2130,7 @@ async def handle_wan_duration_text(message: Message, state: FSMContext) -> None:
         await message.answer("Введи целое число от 2 до 30.")
         return
     duration = int(text)
-    await state.update_data(duration=duration, wan_duration_waiting=False)
+    await state.update_data(duration=duration, duration_override=duration, wan_duration_waiting=False)
     updated = await state.get_data()
     await message.answer(
         f"✅ Выбрано {duration} сек. Теперь можно продолжить.",
@@ -2665,7 +2703,7 @@ async def _launch_video_generation_from_state(
 
     # Source reconstruction happens after reading the UI draft. Quote/submit
     # the restored Wan settings, not stale local defaults from that draft.
-    if model_key in {VideoModel.WAN_30.value, VideoModel.WAN_30_PRIME.value}:
+    if source_feed_gen_id or model_key in {VideoModel.WAN_30.value, VideoModel.WAN_30_PRIME.value}:
         duration = data.get("duration", duration)
         resolution = data.get("resolution", resolution)
         aspect_ratio = data.get("aspect_ratio", aspect_ratio)
@@ -2965,7 +3003,7 @@ async def _launch_video_generation_from_state(
             billing_total_seconds=billing_seconds.billable,
             billing_rate=float(rate_or_flat),
         )
-        if (billing_seconds.reference_count or price_confirmation_token is not None) and preconfirmed_credits != credits:
+        if (billing_seconds.reference_count or price_confirmation_token is not None or (source_feed_gen_id and data.get("duration_override") is not None)) and preconfirmed_credits != credits:
             # Every feed-source edit needs a measured quote, even after a previous
             # preflight updated FSM duration. Pressing Next again is not consent.
             fingerprint = hashlib.sha256(json.dumps({

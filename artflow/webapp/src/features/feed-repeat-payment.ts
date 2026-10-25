@@ -53,6 +53,7 @@ export type RepeatDraft = {
   quality: string;
   count: number;
   duration: number;
+  durationOverride?: number;
   resolution: string;
   grokMode: string;
   payment: RepeatPayment | null;
@@ -96,6 +97,7 @@ function cleanDraft(value: unknown): RepeatDraft | null {
     modelKey: String(saved.modelKey || ""), mode: String(saved.mode || "image"),
     aspectRatio: String(saved.aspectRatio || "1:1"), quality: String(saved.quality || "basic"),
     count: Number(saved.count) || 1, duration: Number(saved.duration) || 5,
+    ...(Number.isSafeInteger(saved.durationOverride) && Number(saved.durationOverride) > 0 && Number(saved.durationOverride) <= 30 ? { durationOverride: Number(saved.durationOverride) } : {}),
     resolution: String(saved.resolution || "720p"), grokMode: String(saved.grokMode || "normal"), payment,
   };
 }
