@@ -1,5 +1,27 @@
 # Execution ledger — Studio capability completion (2026-10-24)
 
+## Active 2026-10-26 — Trend category shelves
+
+Baseline `179d7a01e5a6328d9cb0642fa8fe9523e12fbafe`; branch
+`feat/admin-trend-categories-20261026`. The user approved database-backed trend
+category folders with 3–5 live tiles, full-folder browsing, and administrator
+create/rename/reorder/hide/publish/reassign controls. Existing hardcoded backend,
+web, and Telegram category lists must converge on one source of truth without
+losing legacy trends or changing pricing/provider/payment behavior. Mobile
+Telegram WebView is primary; site, Mini App, and text bot parity is required.
+
+Approved design and decision log:
+[trend category shelves](trend-category-shelves-20261026.md). Implementation has
+not started. Structured design review disposition is APPROVED after resolving
+visibility, rollback, bounded-query, migration, concurrency, audit, navigation,
+and novice-state objections. Binding implementation plan:
+[trend category shelves plan](../plans/2026-10-26-trend-category-shelves.md).
+Next gates: RED tests,
+incremental backend/migration/API/UI/bot slices, responsive and network/console
+verification, independent review, protected PR, exact-head CI, native auto-merge,
+production autodeploy, and exact-SHA live smoke. No paid generation or live
+configuration mutation is needed for verification.
+
 ## Active 2026-10-25 — Release remaining audited backend capabilities
 
 PR302 merged through protected native auto-merge at f8779fb6c377479c456c512568982ccd3f20b94b, but exact-main CI40211783118 stopped deployment:392smoke passed,274/275Studio passed; held-preflight test read the intentional pre-response transactionId:null before response identity55. Backend/PostgreSQL,bot,provider and300journeys passed; Production Autodeploy was SKIPPED, not released. Separate test-only follow-up c534da5 deterministically reproduces the race with a held invoice response, then waits for persisted55 before releasing global preflight. Original exact identity, raw marker preservation, one POST and pending UI assertions remain; explicit zero-generation assertion added. Focused1/1 and full44fastrepeat/build/diff checks pass. No product, timeout, retry or backend change. Independent scoped review APPROVED with no findings (postmerge-ci-review.md); protected follow-up CI/main autodeploy/live verification remain mandatory. This is a new CI maintenance task, not a second final product fix wave; no blind rerun or manual deploy bypass. Cost if diagnosis is wrong: further investigation before any product change, never accepting null as a finished invoice.
