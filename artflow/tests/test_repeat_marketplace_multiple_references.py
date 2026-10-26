@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 
 import pytest
 
@@ -220,6 +220,75 @@ async def test_run_feed_repeat_passes_all_reference_urls(monkeypatch, stale_stat
         "https://example.test/2.jpg",
         "https://example.test/3.jpg",
     ]
+
+
+@pytest.mark.asyncio
+async def test_stale_hidden_marketplace_prompt_never_launches_multi_reference(monkeypatch) -> None:
+    state = FakeState(
+        {
+            "use_prompt_id": 91,
+            "use_model_key": "nano-banana-pro",
+            "prompt_multi_ref_file_ids": ["ref-1"],
+            "prompt_multi_ref_max": 2,
+        }
+    )
+    call = SimpleNamespace(message=SimpleNamespace(answer=AsyncMock()), answer=AsyncMock())
+    prompt = SimpleNamespace(id=91)
+    use_prompt = AsyncMock()
+    create_session = AsyncMock()
+    launch = AsyncMock()
+
+    monkeypatch.setattr(
+        repeat_reference_marketplace,
+        "mirror_telegram_file",
+        AsyncMock(return_value="https://example.test/ref.jpg"),
+    )
+    monkeypatch.setattr(
+        repeat_reference_marketplace,
+        "_reference_candidate",
+        AsyncMock(
+            return_value=(
+                {"reference_urls": ["https://example.test/ref.jpg"]},
+                2,
+                [],
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        repeat_reference_marketplace,
+        "public_url_is_available",
+        lambda _url: True,
+    )
+    monkeypatch.setattr(
+        image_gen,
+        "_accept_reference_candidate",
+        AsyncMock(return_value={"accepted": True}),
+    )
+    monkeypatch.setattr(
+        repeat_reference_marketplace.repo,
+        "resolve_image_model_cost",
+        AsyncMock(return_value=SimpleNamespace(credits=2)),
+    )
+    monkeypatch.setattr(marketplace, "get_prompt_by_id", AsyncMock(return_value=prompt))
+    visibility = AsyncMock(return_value=False)
+    monkeypatch.setattr(marketplace, "_public_prompt_is_available", visibility)
+    monkeypatch.setattr(marketplace, "use_prompt", use_prompt)
+    monkeypatch.setattr(repeat_reference_marketplace.repo, "create_image_session", create_session)
+    monkeypatch.setattr(image_gen, "_launch_session_generation", launch)
+
+    await repeat_reference_marketplace._run(
+        call,
+        AsyncMock(),
+        SimpleNamespace(id=42, credits=100),
+        state,
+        AsyncMock(),
+    )
+
+    visibility.assert_awaited_once_with(ANY, prompt, lock=True)
+    use_prompt.assert_not_awaited()
+    create_session.assert_not_awaited()
+    launch.assert_not_awaited()
+    assert call.answer.await_args.kwargs["show_alert"] is True
 
 
 @pytest.mark.asyncio

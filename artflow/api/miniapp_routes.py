@@ -188,7 +188,6 @@ from db.models import (
 from db.payment_reporting import net_paid_amount_expr
 from db.session import get_session
 from db.trend_category_repository import (
-    filter_public_prompt_library_items,
     get_visible_trend_category_for_prompt,
     public_prompt_library_item_is_visible,
 )
@@ -5236,10 +5235,6 @@ async def list_prompts(
     else:
         prompts = await get_approved_prompts(session, category=cat, limit=limit, offset=(page - 1) * limit)
         total = await count_approved_prompts(session, category=cat)
-
-    before_filter = len(prompts)
-    prompts = await filter_public_prompt_library_items(session, prompts)
-    total = max(0, total - (before_filter - len(prompts)))
 
     return {
         "total": total,

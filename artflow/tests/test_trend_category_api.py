@@ -131,6 +131,11 @@ async def test_shelves_use_two_bounded_queries_not_one_query_per_category():
     assert page.has_more is False
     assert page.next_cursor is None
 
+    preview_sql = str(
+        session.statements[1].compile(dialect=postgresql.dialect())
+    ).upper()
+    assert "CREATED_AT DESC NULLS LAST" in preview_sql
+
 
 @pytest.mark.asyncio
 async def test_legacy_trend_query_filters_visible_categories_before_limit():

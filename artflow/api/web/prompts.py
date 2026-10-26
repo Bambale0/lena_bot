@@ -35,7 +35,6 @@ from db.prompt_repository import (
 )
 from db.session import get_session
 from db.trend_category_repository import (
-    filter_public_prompt_library_items,
     public_prompt_library_item_is_visible,
 )
 
@@ -193,10 +192,6 @@ async def prompts(
         offset = (page - 1) * limit
         items = await get_approved_prompts(session, category=prompt_category, offset=offset, limit=limit)
         total = await count_approved_prompts(session, category=prompt_category)
-
-    before_filter = len(items)
-    items = await filter_public_prompt_library_items(session, items)
-    total = max(0, total - (before_filter - len(items)))
 
     return ok(
         {

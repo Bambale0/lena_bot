@@ -12,6 +12,26 @@ from api.web import prompts as web_prompts
 from db.models import PromptCategory, PromptStatus
 
 
+class _EmptyQueryResult:
+    def scalars(self):
+        return self
+
+    def all(self):
+        return []
+
+    def scalar_one(self):
+        return 0
+
+
+class _CaptureSession:
+    def __init__(self):
+        self.statements = []
+
+    async def execute(self, statement):
+        self.statements.append(statement)
+        return _EmptyQueryResult()
+
+
 def _library_prompt(prompt_id: int, *, trend: bool) -> SimpleNamespace:
     return SimpleNamespace(
         id=prompt_id,
@@ -149,18 +169,11 @@ async def test_bot_admin_accepts_dynamic_visible_category(monkeypatch):
 @pytest.mark.asyncio
 async def test_miniapp_prompt_list_excludes_hidden_category_trends(monkeypatch):
     ordinary = _library_prompt(1, trend=False)
-    hidden = _library_prompt(2, trend=True)
     monkeypatch.setattr(
         "db.prompt_repository.get_approved_prompts",
-        AsyncMock(return_value=[ordinary, hidden]),
-    )
-    monkeypatch.setattr("db.prompt_repository.count_approved_prompts", AsyncMock(return_value=2))
-    monkeypatch.setattr(
-        miniapp_routes,
-        "filter_public_prompt_library_items",
         AsyncMock(return_value=[ordinary]),
-        raising=False,
     )
+    monkeypatch.setattr("db.prompt_repository.count_approved_prompts", AsyncMock(return_value=1))
 
     payload = await miniapp_routes.list_prompts(
         category=None,
@@ -173,21 +186,15 @@ async def test_miniapp_prompt_list_excludes_hidden_category_trends(monkeypatch):
     )
 
     assert [item["id"] for item in payload["items"]] == [ordinary.id]
+    assert payload["total"] == 1
     assert "secret recipe 2" not in str(payload)
 
 
 @pytest.mark.asyncio
 async def test_web_prompt_list_excludes_hidden_category_trends(monkeypatch):
     ordinary = _library_prompt(1, trend=False)
-    hidden = _library_prompt(2, trend=True)
-    monkeypatch.setattr(web_prompts, "get_approved_prompts", AsyncMock(return_value=[ordinary, hidden]))
-    monkeypatch.setattr(web_prompts, "count_approved_prompts", AsyncMock(return_value=2))
-    monkeypatch.setattr(
-        web_prompts,
-        "filter_public_prompt_library_items",
-        AsyncMock(return_value=[ordinary]),
-        raising=False,
-    )
+    monkeypatch.setattr(web_prompts, "get_approved_prompts", AsyncMock(return_value=[ordinary]))
+    monkeypatch.setattr(web_prompts, "count_approved_prompts", AsyncMock(return_value=1))
     monkeypatch.setattr(
         web_prompts,
         "_prompt_cards",
@@ -207,7 +214,109 @@ async def test_web_prompt_list_excludes_hidden_category_trends(monkeypatch):
     )
 
     assert [item["id"] for item in payload["data"]["items"]] == [ordinary.id]
+    assert payload["data"]["total"] == 1
     assert "secret recipe 2" not in str(payload)
+
+
+@pytest.mark.asyncio
+async def test_public_prompt_repository_filters_hidden_trends_before_pagination():
+    from sqlalchemy.dialects import postgresql
+
+    from db.prompt_repository import (
+        count_approved_prompts,
+        get_approved_prompts,
+        get_popular_prompts,
+        get_prompts_by_tag,
+        get_top_prompts,
+    )
+
+    session = _CaptureSession()
+    await get_approved_prompts(session, offset=40, limit=20)
+    await count_approved_prompts(session)
+    await get_top_prompts(session, limit=20)
+    await get_popular_prompts(session, limit=20)
+    await get_prompts_by_tag(session, "best", limit=20)
+
+    assert len(session.statements) == 5
+    for statement in session.statements:
+        sql = str(
+            statement.compile(
+                dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+            )
+        ).upper()
+        assert "TREND_CATEGORIES" in sql
+        assert "IS_VISIBLE IS TRUE" in sql
+        assert "EXISTS" in sql
+        assert "TREND-CATEGORY:" in sql
+
+    paged_sql = str(
+        session.statements[0].compile(
+            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+        )
+    ).upper()
+    assert "LIMIT 20 OFFSET 40" in paged_sql
+
+
+@pytest.mark.asyncio
+async def test_marketplace_direct_use_rejects_hidden_category_trend(monkeypatch):
+    from bot.handlers import marketplace
+
+    hidden = _library_prompt(2, trend=True)
+    monkeypatch.setattr(marketplace, "get_prompt_by_id", AsyncMock(return_value=hidden))
+    monkeypatch.setattr(
+        marketplace,
+        "public_prompt_library_item_is_visible",
+        AsyncMock(return_value=False),
+        raising=False,
+    )
+    call = SimpleNamespace(
+        data="prompt_use:2",
+        message=SimpleNamespace(),
+        answer=AsyncMock(),
+    )
+    state = AsyncMock()
+
+    await marketplace.cb_prompt_use(
+        call,
+        SimpleNamespace(),
+        SimpleNamespace(id=1),
+        state,
+    )
+
+    state.set_state.assert_not_awaited()
+    assert call.answer.await_args.kwargs["show_alert"] is True
+
+
+@pytest.mark.asyncio
+async def test_marketplace_direct_use_rejects_private_ordinary_prompt(monkeypatch):
+    from bot.handlers import marketplace
+
+    private = _library_prompt(3, trend=False)
+    private.is_public = False
+    monkeypatch.setattr(marketplace, "get_prompt_by_id", AsyncMock(return_value=private))
+    visibility = AsyncMock(return_value=True)
+    monkeypatch.setattr(
+        marketplace,
+        "public_prompt_library_item_is_visible",
+        visibility,
+    )
+    call = SimpleNamespace(
+        data="prompt_use:3",
+        message=SimpleNamespace(),
+        answer=AsyncMock(),
+    )
+    state = AsyncMock()
+
+    await marketplace.cb_prompt_use(
+        call,
+        SimpleNamespace(),
+        SimpleNamespace(id=1),
+        state,
+    )
+
+    state.set_state.assert_not_awaited()
+    visibility.assert_not_awaited()
+    assert call.answer.await_args.kwargs["show_alert"] is True
 
 
 @pytest.mark.asyncio

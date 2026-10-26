@@ -337,7 +337,10 @@ async def get_public_category_shelves(
                 func.row_number()
                 .over(
                     partition_by=UserPrompt.trend_category_id,
-                    order_by=(desc(UserPrompt.created_at), desc(UserPrompt.id)),
+                    order_by=(
+                        desc(UserPrompt.created_at).nulls_last(),
+                        desc(UserPrompt.id),
+                    ),
                 )
                 .label("preview_rank"),
             )
