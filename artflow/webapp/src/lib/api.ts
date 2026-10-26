@@ -13,6 +13,8 @@ import type {
   ReferralStats,
   ReferralWithdrawal,
   TrendItem,
+  TrendCategoryItemsPage,
+  TrendCategoryPage,
   UserProfile,
 } from "@/lib/types";
 import { parseStartTarget, readStartParam } from "@/lib/telegram";
@@ -429,6 +431,26 @@ export class MiniAppApi {
   getTrends(kind?: "image" | "video", signal?: AbortSignal): Promise<TrendItem[]> {
     const query = kind ? `?kind=${kind}&limit=64` : "?limit=64";
     return this.request<unknown>(`/trends${query}`, {}, signal).then((value) => asArray<TrendItem>(value));
+  }
+
+  getTrendCategories(cursor?: string, signal?: AbortSignal): Promise<TrendCategoryPage> {
+    const query = new URLSearchParams({ limit: "24" });
+    if (cursor) query.set("cursor", cursor);
+    return this.request<TrendCategoryPage>(`/trend-categories?${query}`, {}, signal);
+  }
+
+  getTrendCategoryItems(
+    key: string,
+    cursor?: string,
+    signal?: AbortSignal,
+  ): Promise<TrendCategoryItemsPage> {
+    const query = new URLSearchParams({ limit: "48" });
+    if (cursor) query.set("cursor", cursor);
+    return this.request<TrendCategoryItemsPage>(
+      `/trend-categories/${encodeURIComponent(key)}/trends?${query}`,
+      {},
+      signal,
+    );
   }
 
   prepareTrend(id: number): Promise<PreparedTrend> {

@@ -28,7 +28,6 @@ from core.config import settings
 from core.kling4_access import visible_model_costs
 from core.repeat_duration import duration_options
 from core.trends import (
-    TREND_CATEGORIES,
     TREND_TAG,
     build_trend_tags,
     is_trend_prompt,
@@ -44,7 +43,11 @@ from db.prompt_repository import (
     get_prompt_by_id,
     get_prompts_by_tag,
 )
-from db.trend_category_repository import require_existing_trend_category
+from db.trend_category_repository import (
+    get_visible_trend_category,
+    list_visible_trend_categories,
+    require_existing_trend_category,
+)
 
 router = Router(name="trends")
 MAX_BOT_PREVIEW_BYTES = 20 * 1024 * 1024
@@ -247,7 +250,9 @@ async def trend_title(message: Message, state: FSMContext) -> None:
 
 
 @router.message(TrendAdminFSM.description, IsAdmin())
-async def trend_description(message: Message, state: FSMContext) -> None:
+async def trend_description(
+    message: Message, state: FSMContext, session: AsyncSession
+) -> None:
     value = (message.text or "").strip()
     if len(value) > 200:
         await message.answer("Описание длиннее 200 символов.")
@@ -255,11 +260,11 @@ async def trend_description(message: Message, state: FSMContext) -> None:
     await state.update_data(description=value)
     await state.set_state(TrendAdminFSM.category)
     builder = InlineKeyboardBuilder()
-    for key, meta in TREND_CATEGORIES.items():
+    for category in await list_visible_trend_categories(session):
         builder.row(
             InlineKeyboardButton(
-                text=f"{meta['emoji']} {meta['title']}",
-                callback_data=f"trends:category:{key}",
+                text=str(category.title)[:64],
+                callback_data=f"trends:category:{category.key}",
             )
         )
     builder.row(InlineKeyboardButton(text="Отмена", callback_data="trends:cancel"))
@@ -269,9 +274,11 @@ async def trend_description(message: Message, state: FSMContext) -> None:
 @router.callback_query(TrendAdminFSM.category, F.data.startswith("trends:category:"), IsAdmin())
 async def trend_category_pick(call: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
     category = call.data.split(":", 2)[2]  # type: ignore[union-attr]
-    if category not in TREND_CATEGORIES:
+    visible_category = await get_visible_trend_category(session, category)
+    if visible_category is None:
         await call.answer("Категория не найдена", show_alert=True)
         return
+    category = str(visible_category.key)
     data = await state.get_data()
     kind = data.get("kind", "image")
     models = [

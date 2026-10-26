@@ -165,6 +165,27 @@ export interface TrendItem {
   user_fields?: TrendUserField[];
 }
 
+export interface TrendCategoryShelf {
+  key: string;
+  title: string;
+  sort_order: number;
+  trend_count: number;
+  preview_items: TrendItem[];
+}
+
+export interface TrendCategoryPage {
+  items: TrendCategoryShelf[];
+  has_more: boolean;
+  next_cursor?: string | null;
+}
+
+export interface TrendCategoryItemsPage {
+  category: Pick<TrendCategoryShelf, "key" | "title" | "sort_order">;
+  items: TrendItem[];
+  has_more: boolean;
+  next_cursor?: string | null;
+}
+
 export interface PreparedTrend extends TrendItem {
   prompt_id: number;
   model: string;

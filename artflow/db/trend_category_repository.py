@@ -135,6 +135,76 @@ async def require_existing_trend_category(
     return category
 
 
+def _legacy_category_key(prompt: UserPrompt) -> str | None:
+    for item in getattr(prompt, "tags", None) or []:
+        tag = str(item or "").strip().lower()
+        if tag.startswith("trend-category:"):
+            key = tag.removeprefix("trend-category:").strip()
+            return key or None
+    return None
+
+
+async def get_visible_trend_category(
+    session: AsyncSession,
+    category_key: Any,
+) -> TrendCategory | None:
+    try:
+        key = normalize_category_key(category_key)
+    except ValueError:
+        return None
+    result = await session.execute(
+        select(TrendCategory).where(
+            TrendCategory.key == key,
+            TrendCategory.is_visible.is_(True),
+        )
+    )
+    row = result.first()
+    return row[0] if row is not None else None
+
+
+async def list_visible_trend_categories(
+    session: AsyncSession,
+    *,
+    limit: int = 100,
+) -> list[TrendCategory]:
+    if not 1 <= limit <= 100:
+        raise ValueError("Category limit is out of range")
+    result = await session.execute(
+        select(TrendCategory)
+        .where(TrendCategory.is_visible.is_(True))
+        .order_by(TrendCategory.sort_order, TrendCategory.id)
+        .limit(limit)
+    )
+    return [row[0] for row in result.all()]
+
+
+async def get_visible_trend_category_for_prompt(
+    session: AsyncSession,
+    prompt: UserPrompt,
+    *,
+    lock: bool = False,
+) -> TrendCategory | None:
+    category_id = getattr(prompt, "trend_category_id", None)
+    statement = select(TrendCategory).where(TrendCategory.is_visible.is_(True))
+    if category_id is not None:
+        statement = statement.where(TrendCategory.id == int(category_id))
+    else:
+        key = _legacy_category_key(prompt)
+        if key is None or not CATEGORY_KEY_PATTERN.fullmatch(key):
+            return None
+        statement = statement.where(TrendCategory.key == key)
+    if lock:
+        # PostgreSQL FOR SHARE serializes the final admission decision with a
+        # concurrent category hide. SQLite ignores this in local unit tests.
+        statement = statement.with_for_update(read=True)
+    row = (await session.execute(statement)).first()
+    if row is None:
+        return None
+    category = row[0]
+    attributes.set_committed_value(prompt, "trend_category_record", category)
+    return category
+
+
 async def get_public_category_shelves(
     session: AsyncSession,
     *,
@@ -295,3 +365,46 @@ async def hydrate_trend_categories(
             categories.get(int(category_id)) if category_id is not None else None,
         )
     return list(prompts)
+
+
+async def hydrate_visible_trend_categories(
+    session: AsyncSession, prompts: Sequence[UserPrompt]
+) -> list[UserPrompt]:
+    prompts = list(prompts)
+    category_ids = {
+        int(prompt.trend_category_id)
+        for prompt in prompts
+        if getattr(prompt, "trend_category_id", None) is not None
+    }
+    legacy_keys = {
+        key
+        for prompt in prompts
+        if getattr(prompt, "trend_category_id", None) is None
+        for key in [_legacy_category_key(prompt)]
+        if key is not None and CATEGORY_KEY_PATTERN.fullmatch(key)
+    }
+    if not category_ids and not legacy_keys:
+        return []
+    statement = select(TrendCategory).where(TrendCategory.is_visible.is_(True))
+    filters = []
+    if category_ids:
+        filters.append(TrendCategory.id.in_(category_ids))
+    if legacy_keys:
+        filters.append(TrendCategory.key.in_(legacy_keys))
+    result = await session.execute(statement.where(or_(*filters)))
+    categories = [row[0] for row in result.all()]
+    by_id = {int(category.id): category for category in categories}
+    by_key = {str(category.key): category for category in categories}
+    visible: list[UserPrompt] = []
+    for prompt in prompts:
+        category_id = getattr(prompt, "trend_category_id", None)
+        category = (
+            by_id.get(int(category_id))
+            if category_id is not None
+            else by_key.get(_legacy_category_key(prompt) or "")
+        )
+        if category is None:
+            continue
+        attributes.set_committed_value(prompt, "trend_category_record", category)
+        visible.append(prompt)
+    return visible

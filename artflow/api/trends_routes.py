@@ -63,7 +63,8 @@ from db.trend_category_repository import (
     get_existing_trend_category,
     get_public_category_shelves,
     get_public_category_trends,
-    hydrate_trend_categories,
+    get_visible_trend_category_for_prompt,
+    hydrate_visible_trend_categories,
     require_existing_trend_category,
 )
 from db.trend_run_claims import get_claim, release_pre_submit_claim, reserve_claim
@@ -191,7 +192,16 @@ async def _get_public_trend(session: AsyncSession, trend_id: int) -> UserPrompt:
     prompt = await get_prompt_by_id(session, trend_id)
     if not trend_is_public(prompt):
         raise HTTPException(status_code=404, detail="Trend not found")
+    category = await get_visible_trend_category_for_prompt(session, prompt)
+    if category is None:
+        raise HTTPException(status_code=404, detail="Trend not found")
     return prompt
+
+
+async def _lock_public_trend_category(session: AsyncSession, prompt: UserPrompt) -> None:
+    category = await get_visible_trend_category_for_prompt(session, prompt, lock=True)
+    if category is None:
+        raise HTTPException(status_code=404, detail="Trend not found")
 
 
 async def _trend_cost_credits(session: AsyncSession, trend: UserPrompt, duration_override: int | None = None) -> float:
@@ -468,7 +478,7 @@ async def list_trends(
 ) -> list[dict[str, Any]]:
     del user
     prompts = await get_prompts_by_tag(session, TREND_TAG, limit=limit)
-    prompts = await hydrate_trend_categories(session, prompts)
+    prompts = await hydrate_visible_trend_categories(session, prompts)
     if kind:
         prompts = [item for item in prompts if trend_kind(item) == kind]
     return [trend_public_payload(item) for item in prompts]
@@ -625,6 +635,9 @@ async def run_trend(
             trend_user_values=body.user_values,
         )
 
+    # Hold a shared category-row lock through durable claim reservation. A hide
+    # committed first blocks this run; a run admitted first is allowed to finish.
+    await _lock_public_trend_category(session, trend)
     claim, created = await reserve_claim(
         session,
         user_id=user_id,
