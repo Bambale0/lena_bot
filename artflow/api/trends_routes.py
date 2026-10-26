@@ -56,6 +56,11 @@ from db.prompt_repository import (
     get_prompts_by_tag,
 )
 from db.session import get_session
+from db.trend_category_repository import (
+    get_public_category_shelves,
+    get_public_category_trends,
+    hydrate_trend_categories,
+)
 from db.trend_run_claims import get_claim, release_pre_submit_claim, reserve_claim
 
 router = APIRouter(prefix="/api/v1", tags=["trends"])
@@ -367,6 +372,88 @@ async def _patch_trend_snapshot(
     await session.commit()
 
 
+def _public_trend_in_category(prompt: UserPrompt, category: Any) -> dict[str, Any]:
+    payload = trend_public_payload(prompt)
+    payload.update(
+        {
+            "category": str(category.key),
+            "category_title": str(category.title),
+            "category_emoji": "",
+        }
+    )
+    return payload
+
+
+@router.get("/trend-categories")
+async def list_trend_categories(
+    limit: int = Query(default=24, ge=1, le=24),
+    cursor: str | None = Query(default=None, max_length=512),
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> dict[str, Any]:
+    del user
+    try:
+        page = await get_public_category_shelves(
+            session,
+            limit=limit,
+            cursor=cursor,
+            preview_limit=5,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "items": [
+            {
+                "key": str(item.category.key),
+                "title": str(item.category.title),
+                "sort_order": int(item.category.sort_order),
+                "trend_count": int(item.trend_count),
+                "preview_items": [
+                    _public_trend_in_category(prompt, item.category)
+                    for prompt in item.previews
+                ],
+            }
+            for item in page.items
+        ],
+        "has_more": page.has_more,
+        "next_cursor": page.next_cursor,
+    }
+
+
+@router.get("/trend-categories/{key}/trends")
+async def list_trend_category_items(
+    key: str,
+    limit: int = Query(default=48, ge=1, le=48),
+    cursor: str | None = Query(default=None, max_length=512),
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> dict[str, Any]:
+    del user
+    try:
+        page = await get_public_category_trends(
+            session,
+            key=key,
+            limit=limit,
+            cursor=cursor,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if page is None:
+        raise HTTPException(status_code=404, detail="Trend category not found")
+    return {
+        "category": {
+            "key": str(page.category.key),
+            "title": str(page.category.title),
+            "sort_order": int(page.category.sort_order),
+        },
+        "items": [
+            _public_trend_in_category(prompt, page.category) for prompt in page.items
+        ],
+        "has_more": page.has_more,
+        "next_cursor": page.next_cursor,
+    }
+
+
 @router.get("/trends")
 async def list_trends(
     kind: str | None = Query(default=None, pattern="^(image|video)$"),
@@ -376,6 +463,7 @@ async def list_trends(
 ) -> list[dict[str, Any]]:
     del user
     prompts = await get_prompts_by_tag(session, TREND_TAG, limit=limit)
+    prompts = await hydrate_trend_categories(session, prompts)
     if kind:
         prompts = [item for item in prompts if trend_kind(item) == kind]
     return [trend_public_payload(item) for item in prompts]
