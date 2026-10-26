@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import ANY, AsyncMock
 
 import pytest
 from fastapi import HTTPException
@@ -63,7 +63,7 @@ async def test_hidden_category_blocks_direct_public_trend(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_legacy_list_excludes_trends_from_hidden_categories(monkeypatch):
+async def test_legacy_list_applies_visibility_before_limit(monkeypatch):
     visible = SimpleNamespace(
         id=1,
         title="Visible",
@@ -80,12 +80,18 @@ async def test_legacy_list_excludes_trends_from_hidden_categories(monkeypatch):
         created_at=None,
     )
     hidden = SimpleNamespace(id=2, trend_category_id=2)
+    prelimited = AsyncMock(return_value=[hidden])
     monkeypatch.setattr(
-        "api.trends_routes.get_prompts_by_tag", AsyncMock(return_value=[visible, hidden])
+        "api.trends_routes.get_prompts_by_tag", prelimited, raising=False
     )
-    hydrate = AsyncMock(return_value=[visible])
+    visible_query = AsyncMock(return_value=[visible])
     monkeypatch.setattr(
-        "api.trends_routes.hydrate_visible_trend_categories", hydrate, raising=False
+        "api.trends_routes.get_visible_trends", visible_query, raising=False
+    )
+    monkeypatch.setattr(
+        "api.trends_routes.hydrate_visible_trend_categories",
+        AsyncMock(return_value=[]),
+        raising=False,
     )
 
     payload = await list_trends(
@@ -96,7 +102,8 @@ async def test_legacy_list_excludes_trends_from_hidden_categories(monkeypatch):
     )
 
     assert [item["id"] for item in payload] == [1]
-    hydrate.assert_awaited_once()
+    visible_query.assert_awaited_once_with(ANY, limit=80)
+    prelimited.assert_not_awaited()
 
 
 @pytest.mark.asyncio

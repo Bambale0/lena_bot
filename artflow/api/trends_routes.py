@@ -56,7 +56,6 @@ from db.prompt_repository import (
     create_prompt,
     deactivate_prompt,
     get_prompt_by_id,
-    get_prompts_by_tag,
 )
 from db.session import get_session
 from db.trend_category_repository import (
@@ -64,7 +63,7 @@ from db.trend_category_repository import (
     get_public_category_shelves,
     get_public_category_trends,
     get_visible_trend_category_for_prompt,
-    hydrate_visible_trend_categories,
+    get_visible_trends,
     require_existing_trend_category,
 )
 from db.trend_run_claims import get_claim, release_pre_submit_claim, reserve_claim
@@ -477,8 +476,7 @@ async def list_trends(
     user: User = Depends(get_miniapp_user),
 ) -> list[dict[str, Any]]:
     del user
-    prompts = await get_prompts_by_tag(session, TREND_TAG, limit=limit)
-    prompts = await hydrate_visible_trend_categories(session, prompts)
+    prompts = await get_visible_trends(session, limit=limit)
     if kind:
         prompts = [item for item in prompts if trend_kind(item) == kind]
     return [trend_public_payload(item) for item in prompts]

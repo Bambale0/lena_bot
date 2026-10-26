@@ -7,11 +7,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Sequence
 
-from sqlalchemy import and_, desc, func, or_, select
+from sqlalchemy import and_, desc, func, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import attributes
 
-from core.trends import is_trend_prompt
+from core.trends import TREND_CATEGORY_PREFIX, is_trend_prompt
 from db.models import PromptStatus, TrendCategory, UserPrompt
 
 MAX_CATEGORY_CURSOR_LENGTH = 512
@@ -77,22 +77,28 @@ def decode_category_cursor(value: str) -> tuple[int, int]:
     return order, category_id
 
 
-def encode_trend_cursor(created_at: datetime, prompt_id: int) -> str:
-    timestamp = created_at
-    if timestamp.tzinfo is None:
-        timestamp = timestamp.replace(tzinfo=UTC)
-    timestamp = timestamp.astimezone(UTC)
-    return _encode_cursor({"i": int(prompt_id), "t": timestamp.isoformat(), "v": 1})
+def encode_trend_cursor(created_at: datetime | None, prompt_id: int) -> str:
+    timestamp: str | None = None
+    if created_at is not None:
+        normalized = created_at
+        if normalized.tzinfo is None:
+            normalized = normalized.replace(tzinfo=UTC)
+        timestamp = normalized.astimezone(UTC).isoformat()
+    return _encode_cursor({"i": int(prompt_id), "t": timestamp, "v": 1})
 
 
-def decode_trend_cursor(value: str) -> tuple[datetime, int]:
+def decode_trend_cursor(value: str) -> tuple[datetime | None, int]:
     payload = _decode_cursor(value)
     if set(payload) != {"i", "t", "v"} or payload.get("v") != 1:
         raise ValueError("Invalid trend cursor")
     prompt_id = payload.get("i")
     timestamp = payload.get("t")
-    if type(prompt_id) is not int or prompt_id < 1 or not isinstance(timestamp, str):
+    if type(prompt_id) is not int or prompt_id < 1 or not (
+        timestamp is None or isinstance(timestamp, str)
+    ):
         raise ValueError("Invalid trend cursor")
+    if timestamp is None:
+        return None, prompt_id
     try:
         created_at = datetime.fromisoformat(timestamp)
     except ValueError as exc:
@@ -238,6 +244,45 @@ async def filter_public_prompt_library_items(
     ]
 
 
+async def get_visible_trends(
+    session: AsyncSession,
+    *,
+    limit: int,
+) -> list[UserPrompt]:
+    """Return the bounded legacy trend list after category visibility filtering."""
+    if not 1 <= limit <= 200:
+        raise ValueError("Trend limit is out of range")
+    category_match = or_(
+        UserPrompt.trend_category_id == TrendCategory.id,
+        and_(
+            UserPrompt.trend_category_id.is_(None),
+            UserPrompt.tags.any(literal(TREND_CATEGORY_PREFIX) + TrendCategory.key),
+        ),
+    )
+    statement = (
+        select(UserPrompt, TrendCategory)
+        .join(TrendCategory, category_match)
+        .where(
+            UserPrompt.status == PromptStatus.approved,
+            UserPrompt.is_public.is_(True),
+            UserPrompt.tags.any("trend"),
+            TrendCategory.is_visible.is_(True),
+        )
+        .order_by(
+            desc(UserPrompt.uses_count),
+            desc(UserPrompt.likes),
+            desc(UserPrompt.created_at),
+        )
+        .limit(limit)
+    )
+    rows = list((await session.execute(statement)).all())
+    prompts: list[UserPrompt] = []
+    for prompt, category in rows:
+        attributes.set_committed_value(prompt, "trend_category_record", category)
+        prompts.append(prompt)
+    return prompts
+
+
 async def get_public_category_shelves(
     session: AsyncSession,
     *,
@@ -351,17 +396,24 @@ async def get_public_category_trends(
             *_public_prompt_filters(),
             UserPrompt.trend_category_id == category.id,
         )
-        .order_by(desc(UserPrompt.created_at), desc(UserPrompt.id))
+        .order_by(desc(UserPrompt.created_at).nulls_last(), desc(UserPrompt.id))
         .limit(limit + 1)
     )
     if cursor:
         created_at, prompt_id = decode_trend_cursor(cursor)
-        statement = statement.where(
-            or_(
-                UserPrompt.created_at < created_at,
-                and_(UserPrompt.created_at == created_at, UserPrompt.id < prompt_id),
+        if created_at is None:
+            statement = statement.where(
+                UserPrompt.created_at.is_(None),
+                UserPrompt.id < prompt_id,
             )
-        )
+        else:
+            statement = statement.where(
+                or_(
+                    UserPrompt.created_at < created_at,
+                    and_(UserPrompt.created_at == created_at, UserPrompt.id < prompt_id),
+                    UserPrompt.created_at.is_(None),
+                )
+            )
     rows = list((await session.execute(statement)).all())
     prompts = [row[0] for row in rows]
     has_more = len(prompts) > limit

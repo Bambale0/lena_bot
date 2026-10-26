@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy.dialects import postgresql
 
 from api.trends_routes import (
     TrendCreateRequest,
@@ -15,6 +16,7 @@ from api.trends_routes import (
     list_trend_categories,
     list_trend_category_items,
 )
+from db import trend_category_repository
 from db.models import PromptCategory, PromptStatus, TrendCategory, UserPrompt
 from db.prompt_repository import _normalize_tags
 from db.trend_category_repository import (
@@ -38,7 +40,7 @@ def _category(category_id: int, key: str, order: int):
     )
 
 
-def _prompt(prompt_id: int, category_id: int, created_at: datetime):
+def _prompt(prompt_id: int, category_id: int | None, created_at: datetime | None):
     return SimpleNamespace(
         id=prompt_id,
         author_id=1,
@@ -74,9 +76,11 @@ class _ScriptedSession:
     def __init__(self, *results):
         self._results = list(results)
         self.execute_count = 0
+        self.statements = []
 
-    async def execute(self, _statement):
+    async def execute(self, statement):
         self.execute_count += 1
+        self.statements.append(statement)
         return _Rows(self._results.pop(0))
 
 
@@ -87,6 +91,8 @@ def test_opaque_cursors_round_trip_and_reject_invalid_payloads():
     created_at = datetime(2026, 10, 26, 12, 30, tzinfo=UTC)
     trend_cursor = encode_trend_cursor(created_at, 99)
     assert decode_trend_cursor(trend_cursor) == (created_at, 99)
+    null_cursor = encode_trend_cursor(None, 98)
+    assert decode_trend_cursor(null_cursor) == (None, 98)
 
     for value in ("", "not-base64", "e30", "a" * 513):
         with pytest.raises(ValueError):
@@ -127,6 +133,47 @@ async def test_shelves_use_two_bounded_queries_not_one_query_per_category():
 
 
 @pytest.mark.asyncio
+async def test_legacy_trend_query_filters_visible_categories_before_limit():
+    category = TrendCategory(
+        id=9,
+        key="cat_dynamic",
+        title="Dynamic",
+        sort_order=8,
+        is_visible=True,
+    )
+    prompt = UserPrompt(
+        id=41,
+        author_id=1,
+        title="Trend 41",
+        description="Description",
+        category=PromptCategory.other,
+        prompt_text="hidden",
+        tags=["trend", "trend-video", "trend-category:cat_dynamic"],
+        trend_category_id=None,
+        status=PromptStatus.approved,
+        is_public=True,
+        created_at=datetime(2026, 10, 26, 12, tzinfo=UTC),
+    )
+    session = _ScriptedSession([(prompt, category)])
+
+    items = await trend_category_repository.get_visible_trends(session, limit=1)
+
+    assert [item.id for item in items] == [41]
+    assert items[0].trend_category_record is category
+    assert session.execute_count == 1
+    sql = str(
+        session.statements[0].compile(
+            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+        )
+    ).upper()
+    assert "JOIN TREND_CATEGORIES" in sql
+    assert "TREND_CATEGORIES.IS_VISIBLE IS TRUE" in sql
+    assert "USER_PROMPTS.TREND_CATEGORY_ID IS NULL" in sql
+    assert "TREND-CATEGORY:" in sql
+    assert "LIMIT" in sql
+
+
+@pytest.mark.asyncio
 async def test_folder_uses_stable_created_id_cursor_and_reports_more():
     category = _category(2, "portrait", 1)
     now = datetime(2026, 10, 26, 12, tzinfo=UTC)
@@ -149,6 +196,60 @@ async def test_folder_uses_stable_created_id_cursor_and_reports_more():
     assert [item.id for item in page.items] == [30, 29]
     assert page.has_more is True
     assert decode_trend_cursor(page.next_cursor) == (now, 29)
+
+
+@pytest.mark.asyncio
+async def test_folder_cursor_paginates_null_timestamps_without_duplicates():
+    category = _category(2, "portrait", 1)
+    now = datetime(2026, 10, 26, 12, tzinfo=UTC)
+
+    first_session = _ScriptedSession(
+        [(category,)],
+        [(_prompt(30, 2, now),), (_prompt(29, 2, None),)],
+    )
+    first = await get_public_category_trends(
+        first_session, key="portrait", limit=1, cursor=None
+    )
+    assert first is not None
+    assert [item.id for item in first.items] == [30]
+    assert decode_trend_cursor(first.next_cursor) == (now, 30)
+
+    second_session = _ScriptedSession(
+        [(category,)],
+        [(_prompt(29, 2, None),), (_prompt(28, 2, None),)],
+    )
+    second = await get_public_category_trends(
+        second_session, key="portrait", limit=1, cursor=first.next_cursor
+    )
+    assert second is not None
+    assert [item.id for item in second.items] == [29]
+    assert decode_trend_cursor(second.next_cursor) == (None, 29)
+
+    third_session = _ScriptedSession(
+        [(category,)],
+        [(_prompt(28, 2, None),)],
+    )
+    third = await get_public_category_trends(
+        third_session, key="portrait", limit=1, cursor=second.next_cursor
+    )
+    assert third is not None
+    assert [item.id for item in third.items] == [28]
+    assert third.has_more is False
+    assert third.next_cursor is None
+
+    first_sql = str(
+        first_session.statements[1].compile(dialect=postgresql.dialect())
+    ).upper()
+    second_sql = str(
+        second_session.statements[1].compile(dialect=postgresql.dialect())
+    ).upper()
+    third_sql = str(
+        third_session.statements[1].compile(dialect=postgresql.dialect())
+    ).upper()
+    assert "CREATED_AT DESC NULLS LAST" in first_sql
+    assert "CREATED_AT IS NULL" in second_sql
+    assert "CREATED_AT IS NULL" in third_sql
+    assert "USER_PROMPTS.ID <" in third_sql
 
 
 @pytest.mark.asyncio
