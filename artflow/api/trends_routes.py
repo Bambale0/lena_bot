@@ -3,7 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from typing import Annotated, Any
+from collections.abc import Awaitable, Callable
+from typing import Annotated, Any, TypeVar
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
@@ -59,12 +60,20 @@ from db.prompt_repository import (
 )
 from db.session import get_session
 from db.trend_category_repository import (
+    TrendCategoryConflict,
+    TrendCategoryMutationError,
+    TrendCategoryPopulated,
+    create_trend_category,
+    get_admin_trend_category_catalog,
     get_existing_trend_category,
     get_public_category_shelves,
     get_public_category_trends,
     get_visible_trend_category_for_prompt,
     get_visible_trends,
+    reassign_trend_prompt,
+    reorder_trend_categories,
     require_existing_trend_category,
+    update_trend_category,
 )
 from db.trend_run_claims import get_claim, release_pre_submit_claim, reserve_claim
 
@@ -115,9 +124,82 @@ class TrendUploadResponse(BaseModel):
     size: int
 
 
+class TrendCategoryCreateRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=80)
+    expected_revision: int = Field(ge=1, strict=True)
+
+
+class TrendCategoryUpdateRequest(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=80)
+    is_visible: bool | None = None
+    confirm_populated: bool = False
+    expected_revision: int = Field(ge=1, strict=True)
+
+
+class TrendCategoryReorderRequest(BaseModel):
+    keys: list[str] = Field(min_length=1, max_length=100)
+    expected_revision: int = Field(ge=1, strict=True)
+
+
+class TrendCategoryReassignRequest(BaseModel):
+    prompt_id: int = Field(ge=1, strict=True)
+    expected_revision: int = Field(ge=1, strict=True)
+
+
 def _require_admin(user: User) -> None:
     if not getattr(user, "tg_id", None) or user.tg_id not in settings.ADMIN_IDS:
         raise HTTPException(status_code=403, detail="Admin access required")
+
+
+def _admin_category_out(item: Any) -> dict[str, Any]:
+    category = getattr(item, "category", item)
+    return {
+        "key": str(category.key),
+        "title": str(category.title),
+        "sort_order": int(category.sort_order),
+        "is_visible": bool(category.is_visible),
+        "trend_count": int(getattr(item, "trend_count", 0) or 0),
+        "published_count": int(getattr(item, "published_count", 0) or 0),
+    }
+
+
+CategoryMutationResult = TypeVar("CategoryMutationResult")
+
+
+async def _run_category_mutation(
+    session: AsyncSession,
+    operation: Callable[[], Awaitable[CategoryMutationResult]],
+) -> CategoryMutationResult:
+    try:
+        result = await operation()
+        await session.commit()
+        return result
+    except TrendCategoryConflict as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "trend_category_revision_conflict",
+                "message": str(exc),
+                "revision": exc.revision,
+            },
+        ) from exc
+    except TrendCategoryPopulated as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "trend_category_not_empty",
+                "message": str(exc),
+                "trend_count": exc.count,
+            },
+        ) from exc
+    except TrendCategoryMutationError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception:
+        await session.rollback()
+        raise
 
 
 def _credits_out(value: float | int | None) -> float:
@@ -819,6 +901,139 @@ async def admin_list_trends(
         .order_by(desc(UserPrompt.created_at))
     )
     return [trend_admin_payload(item) for item in result.scalars().all()]
+
+
+@router.get("/admin/trend-categories")
+async def admin_list_trend_categories(
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> dict[str, Any]:
+    _require_admin(user)
+    catalog = await get_admin_trend_category_catalog(session)
+    return {
+        "revision": int(catalog.revision),
+        "items": [_admin_category_out(item) for item in catalog.items],
+    }
+
+
+@router.post("/admin/trend-categories", status_code=201)
+async def admin_create_trend_category(
+    body: TrendCategoryCreateRequest,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> dict[str, Any]:
+    _require_admin(user)
+    category, revision = await _run_category_mutation(
+        session,
+        lambda: create_trend_category(
+            session,
+            title=body.title,
+            expected_revision=body.expected_revision,
+            actor_tg_id=int(user.tg_id),
+            source="web",
+        ),
+    )
+    logger.info(
+        "trend_category_created key=%s revision=%s actor=%s",
+        category.key,
+        revision,
+        user.tg_id,
+    )
+    return {"revision": revision, "category": _admin_category_out(category)}
+
+
+@router.post("/admin/trend-categories/reorder")
+async def admin_reorder_trend_categories(
+    body: TrendCategoryReorderRequest,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> dict[str, Any]:
+    _require_admin(user)
+    categories, revision = await _run_category_mutation(
+        session,
+        lambda: reorder_trend_categories(
+            session,
+            keys=body.keys,
+            expected_revision=body.expected_revision,
+            actor_tg_id=int(user.tg_id),
+            source="web",
+        ),
+    )
+    logger.info(
+        "trend_categories_reordered count=%s revision=%s actor=%s",
+        len(categories),
+        revision,
+        user.tg_id,
+    )
+    return {
+        "revision": revision,
+        "items": [_admin_category_out(item) for item in categories],
+    }
+
+
+@router.post("/admin/trend-categories/{key}/update")
+async def admin_update_trend_category(
+    key: str,
+    body: TrendCategoryUpdateRequest,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> dict[str, Any]:
+    _require_admin(user)
+    category, revision = await _run_category_mutation(
+        session,
+        lambda: update_trend_category(
+            session,
+            key=key,
+            title=body.title,
+            is_visible=body.is_visible,
+            confirm_populated=body.confirm_populated,
+            expected_revision=body.expected_revision,
+            actor_tg_id=int(user.tg_id),
+            source="web",
+        ),
+    )
+    logger.info(
+        "trend_category_updated key=%s visible=%s revision=%s actor=%s",
+        category.key,
+        category.is_visible,
+        revision,
+        user.tg_id,
+    )
+    return {"revision": revision, "category": _admin_category_out(category)}
+
+
+@router.post("/admin/trend-categories/{key}/reassign")
+async def admin_reassign_trend_category(
+    key: str,
+    body: TrendCategoryReassignRequest,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> dict[str, Any]:
+    _require_admin(user)
+    prompt, category, revision = await _run_category_mutation(
+        session,
+        lambda: reassign_trend_prompt(
+            session,
+            prompt_id=body.prompt_id,
+            target_key=key,
+            expected_revision=body.expected_revision,
+            actor_tg_id=int(user.tg_id),
+            source="web",
+        ),
+    )
+    logger.info(
+        "trend_category_reassigned prompt=%s key=%s revision=%s actor=%s",
+        prompt.id,
+        category.key,
+        revision,
+        user.tg_id,
+    )
+    return {
+        "ok": True,
+        "prompt_id": int(prompt.id),
+        "category_key": str(category.key),
+        "revision": revision,
+    }
 
 
 @router.post("/admin/trends/upload")

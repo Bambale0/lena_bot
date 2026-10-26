@@ -6,19 +6,43 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Sequence
+from uuid import uuid4
 
 from sqlalchemy import and_, desc, func, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import attributes
 
-from core.trends import TREND_CATEGORY_PREFIX, is_trend_prompt
-from db.models import PromptStatus, TrendCategory, UserPrompt
+from core.trends import TREND_CATEGORY_PREFIX, is_trend_prompt, mirror_trend_category_tag
+from db.models import (
+    PromptStatus,
+    TrendCategory,
+    TrendCategoryAudit,
+    TrendCategoryCatalogState,
+    UserPrompt,
+)
 
 MAX_CATEGORY_CURSOR_LENGTH = 512
 MAX_CATEGORY_PAGE_SIZE = 24
 MAX_FOLDER_PAGE_SIZE = 48
 MAX_PREVIEW_ITEMS = 5
 CATEGORY_KEY_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
+MAX_TREND_CATEGORIES = 100
+
+
+class TrendCategoryConflict(ValueError):
+    def __init__(self, message: str, revision: int):
+        super().__init__(message)
+        self.revision = int(revision)
+
+
+class TrendCategoryMutationError(ValueError):
+    pass
+
+
+class TrendCategoryPopulated(TrendCategoryMutationError):
+    def __init__(self, count: int):
+        super().__init__("Подтвердите скрытие непустой категории")
+        self.count = int(count)
 
 
 @dataclass(slots=True)
@@ -41,6 +65,19 @@ class TrendCategoryItemsPage:
     items: list[UserPrompt]
     has_more: bool
     next_cursor: str | None
+
+
+@dataclass(slots=True)
+class TrendCategoryAdminItem:
+    category: TrendCategory
+    trend_count: int
+    published_count: int
+
+
+@dataclass(slots=True)
+class TrendCategoryAdminCatalog:
+    items: list[TrendCategoryAdminItem]
+    revision: int
 
 
 def _encode_cursor(payload: dict[str, Any]) -> str:
@@ -514,3 +551,337 @@ async def hydrate_visible_trend_categories(
         attributes.set_committed_value(prompt, "trend_category_record", category)
         visible.append(prompt)
     return visible
+
+
+def _normalized_admin_title(value: Any) -> str:
+    title = " ".join(str(value or "").split())
+    if not 1 <= len(title) <= 80:
+        raise TrendCategoryMutationError("Название категории должно содержать от 1 до 80 символов")
+    return title
+
+
+async def _locked_catalog_state(session: AsyncSession) -> TrendCategoryCatalogState:
+    row = (
+        await session.execute(
+            select(TrendCategoryCatalogState)
+            .where(TrendCategoryCatalogState.id == 1)
+            .with_for_update()
+        )
+    ).first()
+    if row is None:
+        raise TrendCategoryMutationError("Состояние каталога недоступно")
+    return row[0]
+
+
+def _require_catalog_revision(
+    state: TrendCategoryCatalogState, expected_revision: int
+) -> None:
+    if int(state.revision) != int(expected_revision):
+        raise TrendCategoryConflict("Каталог уже изменился", int(state.revision))
+
+
+def _category_state(category: TrendCategory) -> dict[str, Any]:
+    return {
+        "key": str(category.key),
+        "title": str(category.title),
+        "sort_order": int(category.sort_order),
+        "is_visible": bool(category.is_visible),
+    }
+
+
+def _audit_category_change(
+    session: AsyncSession,
+    *,
+    category: TrendCategory,
+    action: str,
+    revision: int,
+    actor_tg_id: int,
+    source: str,
+    before: dict[str, Any] | None,
+    after: dict[str, Any] | None,
+    target_prompt_id: int | None = None,
+) -> None:
+    session.add(
+        TrendCategoryAudit(
+            category_id=int(category.id),
+            category_key=str(category.key),
+            target_prompt_id=target_prompt_id,
+            action=action,
+            source=source,
+            actor_tg_id=actor_tg_id,
+            actor_operator=None,
+            catalog_revision=revision,
+            before_state=before,
+            after_state=after,
+        )
+    )
+
+
+async def _all_categories_locked(session: AsyncSession) -> list[TrendCategory]:
+    rows = await session.execute(
+        select(TrendCategory)
+        .order_by(TrendCategory.sort_order, TrendCategory.id)
+        .with_for_update()
+    )
+    return [row[0] for row in rows.all()]
+
+
+async def get_admin_trend_category_catalog(
+    session: AsyncSession,
+) -> TrendCategoryAdminCatalog:
+    state_row = await session.execute(
+        select(TrendCategoryCatalogState).where(TrendCategoryCatalogState.id == 1)
+    )
+    state = state_row.first()
+    if state is None:
+        raise TrendCategoryMutationError("Состояние каталога недоступно")
+    published = and_(
+        UserPrompt.status == PromptStatus.approved,
+        UserPrompt.is_public.is_(True),
+    )
+    rows = await session.execute(
+        select(
+            TrendCategory,
+            func.count(UserPrompt.id).label("trend_count"),
+            func.count(UserPrompt.id).filter(published).label("published_count"),
+        )
+        .outerjoin(
+            UserPrompt,
+            and_(_prompt_matches_category(), UserPrompt.tags.any("trend")),
+        )
+        .group_by(TrendCategory.id)
+        .order_by(TrendCategory.sort_order, TrendCategory.id)
+    )
+    return TrendCategoryAdminCatalog(
+        items=[
+            TrendCategoryAdminItem(
+                category=category,
+                trend_count=int(trend_count or 0),
+                published_count=int(published_count or 0),
+            )
+            for category, trend_count, published_count in rows.all()
+        ],
+        revision=int(state[0].revision),
+    )
+
+
+async def create_trend_category(
+    session: AsyncSession,
+    *,
+    title: str,
+    expected_revision: int,
+    actor_tg_id: int,
+    source: str,
+) -> tuple[TrendCategory, int]:
+    state = await _locked_catalog_state(session)
+    _require_catalog_revision(state, expected_revision)
+    categories = await _all_categories_locked(session)
+    normalized = _normalized_admin_title(title)
+    if len(categories) >= MAX_TREND_CATEGORIES:
+        raise TrendCategoryMutationError("Достигнут лимит: 100 категорий")
+    if any(str(item.title).casefold() == normalized.casefold() for item in categories):
+        raise TrendCategoryMutationError("Категория с таким названием уже существует")
+    known_keys = {str(item.key) for item in categories}
+    key = ""
+    for _attempt in range(5):
+        candidate = f"cat_{uuid4().hex[:16]}"
+        if candidate not in known_keys:
+            key = candidate
+            break
+    if not key:
+        raise TrendCategoryMutationError("Не удалось создать уникальный ключ категории")
+    category = TrendCategory(
+        key=key,
+        title=normalized,
+        sort_order=len(categories),
+        is_visible=True,
+    )
+    session.add(category)
+    await session.flush()
+    state.revision = int(state.revision) + 1
+    _audit_category_change(
+        session,
+        category=category,
+        action="create",
+        revision=int(state.revision),
+        actor_tg_id=actor_tg_id,
+        source=source,
+        before=None,
+        after=_category_state(category),
+    )
+    await session.flush()
+    return category, int(state.revision)
+
+
+async def _category_trend_count(
+    session: AsyncSession, category: TrendCategory
+) -> int:
+    category_match = or_(
+        UserPrompt.trend_category_id == category.id,
+        and_(
+            UserPrompt.trend_category_id.is_(None),
+            UserPrompt.tags.any(f"{TREND_CATEGORY_PREFIX}{category.key}"),
+        ),
+    )
+    return int(
+        (
+            await session.execute(
+                select(func.count(UserPrompt.id)).where(
+                    UserPrompt.tags.any("trend"), category_match
+                )
+            )
+        ).scalar_one()
+        or 0
+    )
+
+
+async def update_trend_category(
+    session: AsyncSession,
+    *,
+    key: str,
+    title: str | None,
+    is_visible: bool | None,
+    confirm_populated: bool,
+    expected_revision: int,
+    actor_tg_id: int,
+    source: str,
+) -> tuple[TrendCategory, int]:
+    state = await _locked_catalog_state(session)
+    _require_catalog_revision(state, expected_revision)
+    categories = await _all_categories_locked(session)
+    category = next((item for item in categories if str(item.key) == key), None)
+    if category is None:
+        raise TrendCategoryMutationError("Категория не найдена")
+    before = _category_state(category)
+    if title is not None:
+        normalized = _normalized_admin_title(title)
+        if any(
+            int(item.id) != int(category.id)
+            and str(item.title).casefold() == normalized.casefold()
+            for item in categories
+        ):
+            raise TrendCategoryMutationError("Категория с таким названием уже существует")
+        category.title = normalized
+    if is_visible is not None and bool(is_visible) != bool(category.is_visible):
+        if not is_visible:
+            count = await _category_trend_count(session, category)
+            if count and not confirm_populated:
+                raise TrendCategoryPopulated(count)
+        category.is_visible = bool(is_visible)
+    after = _category_state(category)
+    if before == after:
+        return category, int(state.revision)
+    state.revision = int(state.revision) + 1
+    _audit_category_change(
+        session,
+        category=category,
+        action="update",
+        revision=int(state.revision),
+        actor_tg_id=actor_tg_id,
+        source=source,
+        before=before,
+        after=after,
+    )
+    await session.flush()
+    return category, int(state.revision)
+
+
+async def reorder_trend_categories(
+    session: AsyncSession,
+    *,
+    keys: list[str],
+    expected_revision: int,
+    actor_tg_id: int,
+    source: str,
+) -> tuple[list[TrendCategory], int]:
+    state = await _locked_catalog_state(session)
+    _require_catalog_revision(state, expected_revision)
+    categories = await _all_categories_locked(session)
+    existing = {str(item.key): item for item in categories}
+    if len(keys) != len(set(keys)) or set(keys) != set(existing):
+        raise TrendCategoryMutationError("Передайте полный список категорий без повторов")
+    changed = [
+        existing[key]
+        for index, key in enumerate(keys)
+        if int(existing[key].sort_order) != index
+    ]
+    if not changed:
+        return categories, int(state.revision)
+    before = {str(item.key): _category_state(item) for item in categories}
+    for index, category in enumerate(categories):
+        category.sort_order = -(index + 1)
+    await session.flush()
+    ordered = [existing[key] for key in keys]
+    for index, category in enumerate(ordered):
+        category.sort_order = index
+    state.revision = int(state.revision) + 1
+    for category in ordered:
+        old = before[str(category.key)]
+        new = _category_state(category)
+        if old == new:
+            continue
+        _audit_category_change(
+            session,
+            category=category,
+            action="reorder",
+            revision=int(state.revision),
+            actor_tg_id=actor_tg_id,
+            source=source,
+            before=old,
+            after=new,
+        )
+    await session.flush()
+    return ordered, int(state.revision)
+
+
+async def reassign_trend_prompt(
+    session: AsyncSession,
+    *,
+    prompt_id: int,
+    target_key: str,
+    expected_revision: int,
+    actor_tg_id: int,
+    source: str,
+) -> tuple[UserPrompt, TrendCategory, int]:
+    state = await _locked_catalog_state(session)
+    _require_catalog_revision(state, expected_revision)
+    category_row = await session.execute(
+        select(TrendCategory).where(TrendCategory.key == target_key).with_for_update()
+    )
+    category_result = category_row.first()
+    if category_result is None:
+        raise TrendCategoryMutationError("Категория не найдена")
+    category = category_result[0]
+    prompt_row = await session.execute(
+        select(UserPrompt).where(UserPrompt.id == prompt_id).with_for_update()
+    )
+    prompt_result = prompt_row.first()
+    prompt = prompt_result[0] if prompt_result is not None else None
+    if not is_trend_prompt(prompt):
+        raise TrendCategoryMutationError("Тренд не найден")
+    before_key = _legacy_category_key(prompt)
+    if getattr(prompt, "trend_category_id", None) is not None:
+        old_row = await session.execute(
+            select(TrendCategory.key).where(
+                TrendCategory.id == int(prompt.trend_category_id)
+            )
+        )
+        before_key = old_row.scalar_one_or_none() or before_key
+    if int(getattr(prompt, "trend_category_id", 0) or 0) == int(category.id) and before_key == str(category.key):
+        return prompt, category, int(state.revision)
+    prompt.trend_category_id = int(category.id)
+    prompt.tags = mirror_trend_category_tag(list(prompt.tags or []), str(category.key))
+    state.revision = int(state.revision) + 1
+    _audit_category_change(
+        session,
+        category=category,
+        action="reassign",
+        revision=int(state.revision),
+        actor_tg_id=actor_tg_id,
+        source=source,
+        before={"category_key": before_key},
+        after={"category_key": str(category.key)},
+        target_prompt_id=int(prompt.id),
+    )
+    await session.flush()
+    return prompt, category, int(state.revision)
