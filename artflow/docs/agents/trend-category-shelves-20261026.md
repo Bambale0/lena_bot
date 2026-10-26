@@ -44,7 +44,7 @@
 
 ### Trends landing
 
-- Render vertical category shelves on the approved black/red visual foundation.
+- Render vertical category shelves on the restored black/lilac Studio foundation.
 - Each shelf has a prominent title, a **Смотреть все** action, and 3–5 horizontally scrollable live tiles.
 - Tiles show preview, title, available duration context, and a persistent **Повторить** action. They do not show a speculative price; the existing repeat flow calculates the exact authenticated quote only after the user chooses duration and inputs.
 - A skeleton is shown while loading. A failed preview falls back to a poster/placeholder and does not collapse the shelf. The title and **Повторить** remain usable; retrying media is a secondary action and never blocks generation.

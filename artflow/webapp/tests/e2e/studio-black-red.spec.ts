@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("Studio black red navigation, balance cancel and profile work across the device matrix", async ({page}) => {
+test("Studio black lilac navigation, balance cancel and profile work across the device matrix", async ({page}) => {
   const mutations: string[] = [];
   await page.addInitScript(() => {
     window.Telegram = { WebApp: { initData:"studio-device-fixture", version:"8.0", colorScheme:"dark", ready(){}, expand(){}, requestFullscreen(){}, HapticFeedback:{impactOccurred(){},notificationOccurred(){}} } };

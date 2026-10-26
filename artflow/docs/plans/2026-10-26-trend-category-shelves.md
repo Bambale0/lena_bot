@@ -4,7 +4,7 @@
 
 **Goal:** Replace hardcoded trend category chips with database-backed category shelves, full-folder browsing, and complete administrator management across APIX web/Mini App and Telegram bot, delivered through a backward-safe two-phase production rollout.
 
-**Architecture:** Phase A expands the schema and deploys dynamic compatible readers, bounded read APIs, visibility enforcement, indexes, and legacy fallback without enabling custom category writes. Phase B adds audited admin mutations, the black/red shelf and folder UX, and Telegram folder navigation; every surface reads one category catalog while legacy tags remain mirrored during the compatibility window.
+**Architecture:** Phase A expands the schema and deploys dynamic compatible readers, bounded read APIs, visibility enforcement, indexes, and legacy fallback without enabling custom category writes. Phase B adds audited admin mutations, the restored black/lilac shelf and folder UX, and Telegram folder navigation; every surface reads one category catalog while legacy tags remain mirrored during the compatibility window.
 
 **Tech Stack:** Python 3.12, FastAPI, SQLAlchemy async, Alembic, PostgreSQL/SQLite test fixtures, aiogram, React 19, TypeScript, Vite, Vitest, Playwright, GitHub Actions.
 
@@ -209,7 +209,7 @@ Commit message: `feat(admin): manage trend categories safely`
 
 **Step 1: Write failing browser tests**
 
-At 320/390/768/1280 widths, require black/red vertical shelves, 3–5 live tiles, two-line titles, visible **Смотреть все** and **Повторить**, folder deep-link/back/scroll restoration, explicit **Показать ещё**, whole-catalog and folder empty states, later-page retry without losing loaded content, broken-preview-but-actionable cards, reduced-motion, viewport-only video playback, and admin create/rename/reorder/hide/publish/reassign with stale `409` form preservation.
+At 320/390/768/1280 widths, require black/lilac vertical shelves, 3–5 live tiles, two-line titles, visible **Смотреть все** and **Повторить**, folder deep-link/back/scroll restoration, explicit **Показать ещё**, whole-catalog and folder empty states, later-page retry without losing loaded content, broken-preview-but-actionable cards, reduced-motion, viewport-only video playback, and admin create/rename/reorder/hide/publish/reassign with stale `409` form preservation.
 
 **Step 2: Run RED**
 

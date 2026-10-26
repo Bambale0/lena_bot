@@ -44,7 +44,7 @@ test("throwing Telegram APIs cannot break initialization or cleanup", () => {
   assert.doesNotThrow(() => configureTelegramWebApp()());
 });
 
-test("Studio chrome becomes black and restores the previous colors", () => {
+test("Studio chrome becomes black lilac and restores the previous colors", () => {
   const { calls } = environment(); const cleanup = telegram.configureStudioChrome();
   assert.deepEqual(calls, ["header:#000000", "background:#000000", "bottom:#000000"]);
   cleanup();
