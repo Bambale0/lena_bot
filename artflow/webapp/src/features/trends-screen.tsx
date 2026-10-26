@@ -288,7 +288,7 @@ function TrendGroup({
   );
 }
 
-function TrendAdminForm({ client, categories, onCreated }: { client: MiniAppApi; categories: TrendCategoryShelf[]; onCreated: () => void }) {
+function TrendAdminForm({ client, categories, onCreated }: { client: MiniAppApi; categories: Array<Pick<TrendCategoryShelf, "key" | "title">>; onCreated: () => void }) {
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<TrendKind>("image");
   const [category, setCategory] = useState("");
@@ -568,29 +568,54 @@ function SparklesFallback({ kind }: { kind: TrendKind }) {
   return kind === "video" ? <Film aria-hidden="true" /> : <ImageIcon aria-hidden="true" />;
 }
 
-function ShelfTrendTile({ trend }: { trend: TrendItem }) {
-  return <button type="button" className="trend-live-tile" aria-label={`Повторить: ${trend.title}`} onClick={() => openTrendRunner(trend)}>
-    <LiveTrendMedia trend={trend} />
-    <span className="trend-live-copy"><strong>{trend.title}</strong><small>{trend.description || (trend.kind === "video" ? "Видео" : "Фото")}</small><span><Repeat2 size={14} /> Повторить</span></span>
-  </button>;
+function ShelfTrendTile({ trend, isAdmin, client, onUpdated }: { trend: TrendItem; isAdmin: boolean; client: MiniAppApi; onUpdated: () => void }) {
+  const [editingFields, setEditingFields] = useState(false);
+  const [userFields, setUserFields] = useState<TrendUserField[]>([]);
+  const [savingFields, setSavingFields] = useState(false);
+  const openFields = () => {
+    setUserFields((trend.user_fields || []).map(field => trendFieldFromLabel(field.label || field.key)).slice(0, 6));
+    setEditingFields(true);
+  };
+  const saveFields = async () => {
+    if (savingFields) return;
+    setSavingFields(true);
+    try {
+      await client.request<TrendItem>(`/admin/trends/${trend.id}/update`, { method: "POST", body: JSON.stringify({ user_fields: userFields }) });
+      toast.success("Поля тренда сохранены"); setEditingFields(false); onUpdated();
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Не удалось сохранить поля"); }
+    finally { setSavingFields(false); }
+  };
+  return <article className="trend-live-tile">
+    <button type="button" className="trend-live-open" aria-label={`Повторить: ${trend.title}`} onClick={() => openTrendRunner(trend)}>
+      <LiveTrendMedia trend={trend} />
+      <span className="trend-live-copy"><strong>{trend.title}</strong><small>{trend.description || (trend.kind === "video" ? "Видео" : "Фото")}</small><span><Repeat2 size={14} /> Повторить</span></span>
+    </button>
+    <div className="trend-live-actions">
+      <button type="button" aria-label={`Скопировать ссылку: ${trend.title}`} onClick={async () => {
+        try { await copyTrendLink(trend); toast.success("Ссылка скопирована"); }
+        catch (error) { toast.error(error instanceof Error ? error.message : "Не удалось скопировать ссылку"); }
+      }}><Link2 size={14} /> Поделиться</button>
+      {isAdmin ? <button type="button" onClick={() => editingFields ? setEditingFields(false) : openFields()}>{editingFields ? "Закрыть" : "Поля"}</button> : null}
+    </div>
+    {isAdmin && editingFields ? <div className="trend-live-editor"><TrendFieldPicker fields={userFields} onChange={setUserFields} /><Button disabled={savingFields} onClick={() => void saveFields()}>{savingFields ? "Сохраняю…" : "Сохранить поля"}</Button></div> : null}
+  </article>;
 }
 
-function CategoryShelf({ shelf, filter, onOpen }: { shelf: TrendCategoryShelf; filter: TrendsScreenProps["filter"]; onOpen: () => void }) {
+function CategoryShelf({ shelf, filter, onOpen, isAdmin, client, onUpdated }: { shelf: TrendCategoryShelf; filter: TrendsScreenProps["filter"]; onOpen: () => void; isAdmin: boolean; client: MiniAppApi; onUpdated: () => void }) {
   const previews = filter === "all" ? shelf.preview_items : shelf.preview_items.filter(item => item.kind === filter);
-  if (!previews.length) return null;
   return <section className="trend-category-shelf" data-category-key={shelf.key}>
     <div className="trend-category-heading"><div><h2>{shelf.title}</h2><p>{shelf.trend_count} {shelf.trend_count === 1 ? "пример" : "примеров"}</p></div>
       <button type="button" aria-label={`Смотреть все: ${shelf.title}`} onClick={onOpen}>Смотреть все <FolderOpen size={16} /></button></div>
-    <div className="trend-live-rail">{previews.slice(0, 5).map(trend => <ShelfTrendTile key={trend.id} trend={trend} />)}</div>
+    {previews.length ? <div className="trend-live-rail">{previews.slice(0, 5).map(trend => <ShelfTrendTile key={trend.id} trend={trend} isAdmin={isAdmin} client={client} onUpdated={onUpdated} />)}</div> : <button type="button" className="trend-shelf-open-filtered" onClick={onOpen}>В первых примерах нет этого формата — открыть всю папку</button>}
   </section>;
 }
 
-function CategoryManager({ client, onChanged }: { client: MiniAppApi; onChanged: () => void }) {
+function CategoryManager({ client, onChanged, catalog, onCatalog }: { client: MiniAppApi; onChanged: () => void; catalog: AdminTrendCategoryCatalog | null; onCatalog: (catalog: AdminTrendCategoryCatalog) => void }) {
   const [open, setOpen] = useState(false);
-  const [catalog, setCatalog] = useState<AdminTrendCategoryCatalog | null>(null);
   const [title, setTitle] = useState("");
   const [renames, setRenames] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const [attempted, setAttempted] = useState(false);
   const [error, setError] = useState("");
   const [confirmKey, setConfirmKey] = useState<string | null>(null);
   const [promptId, setPromptId] = useState("");
@@ -599,12 +624,17 @@ function CategoryManager({ client, onChanged }: { client: MiniAppApi; onChanged:
     setBusy(true); setError("");
     try {
       const next = await client.getAdminTrendCategories();
-      setCatalog(next); setRenames(Object.fromEntries(next.items.map(item => [item.key, item.title])));
+      setRenames(current => Object.fromEntries(next.items.map(item => {
+        const previous = catalog?.items.find(row => row.key === item.key)?.title;
+        const draft = current[item.key];
+        return [item.key, draft !== undefined && previous !== undefined && draft !== previous ? draft : item.title];
+      })));
+      onCatalog(next);
       if (!targetKey && next.items.length) setTargetKey(next.items[0].key);
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Не удалось загрузить категории"); }
     finally { setBusy(false); }
   };
-  useEffect(() => { if (open && !catalog && !busy) void load(); }, [open, catalog, busy]);
+  useEffect(() => { if (open && !catalog && !attempted) { setAttempted(true); void load(); } }, [open, catalog, attempted]);
   const mutationError = (caught: unknown) => {
     setError(caught instanceof ApiError && caught.status === 409 ? "Каталог изменился. Черновик сохранён — обновите список и повторите." : caught instanceof Error ? caught.message : "Изменение не сохранено");
   };
@@ -613,7 +643,7 @@ function CategoryManager({ client, onChanged }: { client: MiniAppApi; onChanged:
     setBusy(true); setError("");
     try {
       const result = await client.createTrendCategory(title.trim(), catalog.revision);
-      setCatalog({ revision: result.revision, items: [...catalog.items, result.category] });
+      onCatalog({ revision: result.revision, items: [...catalog.items, result.category] });
       setRenames(current => ({ ...current, [result.category.key]: result.category.title })); setTitle(""); onChanged();
     } catch (caught) { mutationError(caught); } finally { setBusy(false); }
   };
@@ -622,7 +652,8 @@ function CategoryManager({ client, onChanged }: { client: MiniAppApi; onChanged:
     setBusy(true); setError("");
     try {
       const result = await client.updateTrendCategory(item.key, { ...patch, expected_revision: catalog.revision });
-      setCatalog({ revision: result.revision, items: catalog.items.map(row => row.key === item.key ? { ...row, ...result.category } : row) });
+      onCatalog({ revision: result.revision, items: catalog.items.map(row => row.key === item.key ? { ...row, ...result.category } : row) });
+      setRenames(current => ({ ...current, [item.key]: result.category.title }));
       setConfirmKey(null); onChanged();
     } catch (caught) { mutationError(caught); } finally { setBusy(false); }
   };
@@ -632,16 +663,16 @@ function CategoryManager({ client, onChanged }: { client: MiniAppApi; onChanged:
     if (target < 0 || target >= catalog.items.length) return;
     const items = [...catalog.items]; [items[index], items[target]] = [items[target], items[index]];
     setBusy(true); setError("");
-    try { const next = await client.reorderTrendCategories(items.map(item => item.key), catalog.revision); setCatalog(next); onChanged(); }
+    try { const next = await client.reorderTrendCategories(items.map(item => item.key), catalog.revision); onCatalog(next); onChanged(); }
     catch (caught) { mutationError(caught); } finally { setBusy(false); }
   };
   const reassign = async () => {
     if (!catalog || busy || !targetKey || !/^\d+$/.test(promptId)) return;
     setBusy(true); setError("");
-    try { const result = await client.reassignTrendCategory(targetKey, Number(promptId), catalog.revision); setCatalog({ ...catalog, revision: result.revision }); setPromptId(""); onChanged(); }
+    try { const result = await client.reassignTrendCategory(targetKey, Number(promptId), catalog.revision); onCatalog({ ...catalog, revision: result.revision }); setPromptId(""); onChanged(); }
     catch (caught) { mutationError(caught); } finally { setBusy(false); }
   };
-  if (!open) return <Button variant="outline" className="w-full sm:w-auto" onClick={() => setOpen(true)}>Управление категориями</Button>;
+  if (!open) return <Button variant="outline" className="w-full sm:w-auto" onClick={() => { setAttempted(false); setOpen(true); }}>Управление категориями</Button>;
   return <Card className="trend-category-manager">
     <div className="trend-manager-title"><div><h2>Категории трендов</h2><p>Версия {catalog?.revision ?? "—"}</p></div><Button size="icon" variant="ghost" aria-label="Закрыть управление категориями" onClick={() => setOpen(false)}><X /></Button></div>
     {error && <div role="alert" className="trend-manager-error">{error} <button onClick={() => void load()}>Обновить</button></div>}
@@ -670,7 +701,9 @@ function TrendsScreen({ filter, loading, onFilterChange, onRefresh }: TrendsScre
   const [folder, setFolder] = useState<TrendCategoryItemsPage | null>(null);
   const [folderLoading, setFolderLoading] = useState(false);
   const [folderError, setFolderError] = useState("");
+  const [adminCatalog, setAdminCatalog] = useState<AdminTrendCategoryCatalog | null>(null);
   const shelfScroll = useRef(0);
+  const openedFromShelf = useRef(false);
 
   const loadShelves = async (append = false) => {
     setShelfLoading(true); setShelfError("");
@@ -685,8 +718,14 @@ function TrendsScreen({ filter, loading, onFilterChange, onRefresh }: TrendsScre
   useEffect(() => {
     client.request<{ is_admin?: boolean }>("/me/permissions").then(user => setIsAdmin(Boolean(user.is_admin))).catch(() => setIsAdmin(false));
   }, [client]);
+  const loadAdminCatalog = async () => {
+    if (!isAdmin) return;
+    try { setAdminCatalog(await client.getAdminTrendCategories()); }
+    catch { /* The category manager exposes an explicit retry with the server error. */ }
+  };
+  useEffect(() => { if (isAdmin) void loadAdminCatalog(); }, [client, isAdmin]);
   useEffect(() => {
-    const sync = () => setFolderKey(new URLSearchParams(window.location.search).get("trendCategory") || "");
+    const sync = () => { openedFromShelf.current = false; setFolderKey(new URLSearchParams(window.location.search).get("trendCategory") || ""); };
     window.addEventListener("popstate", sync); return () => window.removeEventListener("popstate", sync);
   }, []);
   useEffect(() => {
@@ -697,10 +736,11 @@ function TrendsScreen({ filter, loading, onFilterChange, onRefresh }: TrendsScre
   }, [client, folderKey]);
   const openFolder = (key: string) => {
     const main = document.querySelector<HTMLElement>(".apix-shell > main"); shelfScroll.current = main?.scrollTop || window.scrollY;
-    const url = new URL(window.location.href); url.searchParams.set("trendCategory", key); history.pushState({}, "", url); setFolderKey(key);
+    const url = new URL(window.location.href); url.searchParams.set("trendCategory", key); history.pushState({}, "", url); openedFromShelf.current = true; setFolderKey(key);
   };
   const closeFolder = () => {
-    const url = new URL(window.location.href); url.searchParams.delete("trendCategory"); history.pushState({}, "", url); setFolderKey("");
+    if (openedFromShelf.current) { openedFromShelf.current = false; history.back(); }
+    else { const url = new URL(window.location.href); url.searchParams.delete("trendCategory"); history.replaceState({}, "", url); setFolderKey(""); }
     requestAnimationFrame(() => { const main = document.querySelector<HTMLElement>(".apix-shell > main"); if (main) main.scrollTop = shelfScroll.current; else window.scrollTo({ top: shelfScroll.current }); });
   };
   const loadMoreFolder = async () => {
@@ -710,8 +750,8 @@ function TrendsScreen({ filter, loading, onFilterChange, onRefresh }: TrendsScre
     catch (caught) { setFolderError(caught instanceof Error ? caught.message : "Не удалось загрузить следующую страницу"); }
     finally { setFolderLoading(false); }
   };
-  const refresh = () => { onRefresh(); void loadShelves(false); if (folderKey) { setFolderKey(""); requestAnimationFrame(() => setFolderKey(folderKey)); } };
-  const visibleShelves = shelves.map(shelf => ({ ...shelf, preview_items: shelf.preview_items.filter(item => !isPinterestServiceTrend(item)) })).filter(shelf => filter === "all" ? shelf.preview_items.length : shelf.preview_items.some(item => item.kind === filter));
+  const refresh = () => { onRefresh(); void loadShelves(false); void loadAdminCatalog(); if (folderKey) { setFolderKey(""); requestAnimationFrame(() => setFolderKey(folderKey)); } };
+  const visibleShelves = shelves.map(shelf => ({ ...shelf, preview_items: shelf.preview_items.filter(item => !isPinterestServiceTrend(item)) })).filter(shelf => shelf.preview_items.length);
   const folderItems = (folder?.items || []).filter(item => !isPinterestServiceTrend(item) && (filter === "all" || item.kind === filter));
 
   if (folderKey) return <div className="trend-folder-page">
@@ -721,7 +761,7 @@ function TrendsScreen({ filter, loading, onFilterChange, onRefresh }: TrendsScre
     {folderLoading && !folder ? <div className="trend-state"><LoaderCircle className="animate-spin" /> Загружаем папку…</div> : null}
     {folderError && !folder ? <div className="trend-state" role="alert"><p>{folderError}</p><Button onClick={() => { setFolderKey(""); requestAnimationFrame(() => setFolderKey(folderKey)); }}>Повторить</Button></div> : null}
     {folder && !folderItems.length ? <div className="trend-state"><FolderOpen /><p>В этой папке пока нет подходящих примеров.</p></div> : null}
-    {folderItems.length ? <div className="trend-folder-grid">{folderItems.map(item => <ShelfTrendTile key={item.id} trend={item} />)}</div> : null}
+    {folderItems.length ? <div className="trend-folder-grid">{folderItems.map(item => <ShelfTrendTile key={item.id} trend={item} isAdmin={isAdmin} client={client} onUpdated={refresh} />)}</div> : null}
     {folderError && folder ? <div className="trend-page-error" role="alert">{folderError}</div> : null}
     {folder?.has_more ? <Button className="trend-load-more" variant="outline" disabled={folderLoading} onClick={() => void loadMoreFolder()}>{folderLoading ? "Загружаем…" : "Показать ещё"}</Button> : null}
   </div>;
@@ -730,11 +770,11 @@ function TrendsScreen({ filter, loading, onFilterChange, onRefresh }: TrendsScre
     <header className="trend-shelves-header"><div><p>Готовые сценарии</p><h1>Тренды по категориям</h1><span>Откройте папку или сразу повторите понравившийся пример.</span></div><Button variant="outline" size="icon" disabled={loading || shelfLoading} onClick={refresh} aria-label="Обновить тренды"><RefreshCw className={loading || shelfLoading ? "animate-spin" : ""} /></Button></header>
     <details className="apix-help max-w-xl"><summary>Как повторить тренд</summary><p className="pb-2">Выберите пример, добавьте свои материалы, настройте доступные параметры и подтвердите стоимость перед запуском.</p></details>
     <div className="trend-kind-filters">{filters.map(({ value, label, icon: Icon }) => <button key={value} className={filter === value ? "active" : ""} onClick={() => onFilterChange(value)}><Icon />{label}</button>)}</div>
-    {isAdmin ? <div className="trend-admin-tools"><CategoryManager client={client} onChanged={refresh} /><TrendAdminForm client={client} categories={shelves} onCreated={refresh} /></div> : null}
+    {isAdmin ? <div className="trend-admin-tools"><CategoryManager client={client} onChanged={refresh} catalog={adminCatalog} onCatalog={setAdminCatalog} /><TrendAdminForm client={client} categories={adminCatalog?.items || []} onCreated={refresh} /></div> : null}
     {shelfLoading && !shelves.length ? <div className="trend-shelf-skeleton" aria-label="Загружаем категории"><i /><i /><i /></div> : null}
     {shelfError && !shelves.length ? <div className="trend-state" role="alert"><p>{shelfError}</p><Button onClick={() => void loadShelves(false)}>Попробовать снова</Button></div> : null}
     {!shelfLoading && !shelfError && !visibleShelves.length ? <div className="trend-state"><FolderOpen /><p>Категории пока пусты. Можно создать работу по своей идее.</p></div> : null}
-    <div className="trend-shelves-list">{visibleShelves.map(shelf => <CategoryShelf key={shelf.key} shelf={shelf} filter={filter} onOpen={() => openFolder(shelf.key)} />)}</div>
+    <div className="trend-shelves-list">{visibleShelves.map(shelf => <CategoryShelf key={shelf.key} shelf={shelf} filter={filter} onOpen={() => openFolder(shelf.key)} isAdmin={isAdmin} client={client} onUpdated={refresh} />)}</div>
     {shelfError && shelves.length ? <div className="trend-page-error" role="alert">{shelfError}</div> : null}
     {shelfMore ? <Button variant="outline" className="trend-load-more" disabled={shelfLoading} onClick={() => void loadShelves(true)}>{shelfLoading ? "Загружаем…" : "Показать ещё категории"}</Button> : null}
   </div>;

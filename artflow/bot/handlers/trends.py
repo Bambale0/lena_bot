@@ -46,6 +46,7 @@ from db.prompt_repository import (
 )
 from db.trend_category_repository import (
     filter_public_prompt_library_items,
+    get_public_category_shelves,
     get_public_category_trends,
     get_visible_trend_category,
     list_visible_trend_categories,
@@ -163,7 +164,7 @@ def _folder_kb(
         )
     builder.row(InlineKeyboardButton(text="🔥 Повторить шаблон", callback_data=f"trends:use:{prompt.id}"))
     if is_admin:
-        builder.row(InlineKeyboardButton(text="🗑 Убрать тренд", callback_data=f"trends:archive:{prompt.id}"))
+        builder.row(InlineKeyboardButton(text="🗑 Убрать тренд", callback_data=f"trends:archive:{prompt.id}:{category_key}:{category_page}"))
     builder.row(InlineKeyboardButton(text="← Категории", callback_data=f"trends:categories:{category_page}"))
     builder.row(InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"))
     return builder.as_markup()
@@ -245,22 +246,38 @@ async def _show_categories(
     user: User | None,
     *,
     page: int,
+    edit: bool = True,
 ) -> None:
-    categories = list(await list_visible_trend_categories(session))
-    if not categories:
-        await safe_edit_message(
-            holder,
-            "🔥 <b>Тренды</b>\n\nПока нет доступных категорий.",
-            reply_markup=_empty_kb(_is_admin(user)),
+    categories = []
+    cursor = None
+    seen_cursors: set[str] = set()
+    while True:
+        category_page = await get_public_category_shelves(
+            session, limit=24, cursor=cursor, preview_limit=1
         )
+        categories.extend(item.category for item in category_page.items)
+        if not category_page.has_more or not category_page.next_cursor:
+            break
+        if category_page.next_cursor in seen_cursors:
+            raise RuntimeError("Trend category pagination repeated a cursor")
+        seen_cursors.add(category_page.next_cursor)
+        cursor = category_page.next_cursor
+    if not categories:
+        text = "🔥 <b>Тренды</b>\n\nПока нет доступных категорий."
+        markup = _empty_kb(_is_admin(user))
+        if edit:
+            await safe_edit_message(holder, text, reply_markup=markup)
+        else:
+            await holder.answer(text, reply_markup=markup, parse_mode="HTML")
         return
     total_pages = max(1, (len(categories) + CATEGORY_PAGE_SIZE - 1) // CATEGORY_PAGE_SIZE)
     safe_page = min(max(page, 0), total_pages - 1)
-    await safe_edit_message(
-        holder,
-        "🔥 <b>Тренды по категориям</b>\n\nВыбери папку — внутри можно листать живые примеры и сразу повторить понравившийся.",
-        reply_markup=_category_kb(categories, page=safe_page, is_admin=_is_admin(user)),
-    )
+    text = "🔥 <b>Тренды по категориям</b>\n\nВыбери папку — внутри можно листать живые примеры и сразу повторить понравившийся."
+    markup = _category_kb(categories, page=safe_page, is_admin=_is_admin(user))
+    if edit:
+        await safe_edit_message(holder, text, reply_markup=markup)
+    else:
+        await holder.answer(text, reply_markup=markup, parse_mode="HTML")
 
 
 async def _show_folder(
@@ -272,12 +289,28 @@ async def _show_folder(
     category_page: int,
     index: int,
 ) -> None:
-    folder = await get_public_category_trends(
-        session,
-        key=category_key,
-        limit=FOLDER_TREND_LIMIT,
-        cursor=None,
-    )
+    folder = None
+    items: list[UserPrompt] = []
+    cursor = None
+    seen_cursors: set[str] = set()
+    while True:
+        current = await get_public_category_trends(
+            session,
+            key=category_key,
+            limit=FOLDER_TREND_LIMIT,
+            cursor=cursor,
+        )
+        if current is None:
+            folder = None
+            break
+        folder = current
+        items.extend(current.items)
+        if not current.has_more or not current.next_cursor:
+            break
+        if current.next_cursor in seen_cursors:
+            raise RuntimeError("Trend folder pagination repeated a cursor")
+        seen_cursors.add(current.next_cursor)
+        cursor = current.next_cursor
     if folder is None:
         await safe_edit_message(
             holder,
@@ -287,7 +320,6 @@ async def _show_folder(
             .as_markup(),
         )
         return
-    items = list(folder.items)
     if not items:
         await safe_edit_message(
             holder,
@@ -312,13 +344,13 @@ async def _show_folder(
     media = _media_source(prompt.preview_url)
     try:
         if trend_kind(prompt) == "video" and media:
-            if getattr(holder, "video", None):
+            if getattr(holder, "video", None) or getattr(holder, "photo", None):
                 await holder.edit_media(InputMediaVideo(media=media, caption=caption, parse_mode="HTML"), reply_markup=markup)
             else:
                 await holder.answer_video(media, caption=caption, reply_markup=markup)
             return
         if media:
-            if getattr(holder, "photo", None):
+            if getattr(holder, "photo", None) or getattr(holder, "video", None):
                 await holder.edit_media(InputMediaPhoto(media=media, caption=caption, parse_mode="HTML"), reply_markup=markup)
             else:
                 await holder.answer_photo(media, caption=caption, reply_markup=markup)
@@ -333,7 +365,7 @@ async def _show_folder(
 async def open_trends(event: Message | CallbackQuery, session: AsyncSession, state: FSMContext, db_user: User | None = None) -> None:
     await state.clear()
     holder = event.message if isinstance(event, CallbackQuery) else event
-    await _show_categories(holder, session, db_user, page=0)  # type: ignore[arg-type]
+    await _show_categories(holder, session, db_user, page=0, edit=isinstance(event, CallbackQuery))  # type: ignore[arg-type]
     if isinstance(event, CallbackQuery):
         await safe_answer_callback(event)
 
@@ -662,20 +694,25 @@ async def confirm_trend(call: CallbackQuery, state: FSMContext, session: AsyncSe
     await approve_prompt(session, prompt.id)
     await state.clear()
     await call.message.answer("✅ Тренд опубликован.")
-    await _show(call.message, session, db_user, 0)
+    await _show_categories(call.message, session, db_user, page=0)  # type: ignore[arg-type]
     await safe_answer_callback(call)
 
 
 @router.callback_query(F.data.startswith("trends:archive:"), IsAdmin())
 async def archive_trend(call: CallbackQuery, session: AsyncSession, db_user: User) -> None:
-    trend_id = int(call.data.rsplit(":", 1)[1])  # type: ignore[union-attr]
+    parts = str(call.data or "").split(":")
+    if len(parts) not in {3, 5} or not parts[2].isascii() or not parts[2].isdecimal():
+        await call.answer("Тренд не найден", show_alert=True)
+        return
+    trend_id = int(parts[2])
     prompt = await get_prompt_by_id(session, trend_id)
     if not is_trend_prompt(prompt):
         await call.answer("Тренд не найден", show_alert=True)
         return
     await deactivate_prompt(session, trend_id)
     await call.answer("Тренд скрыт")
-    await _show(call.message, session, db_user, 0)  # type: ignore[arg-type]
+    category_page = int(parts[4]) if len(parts) == 5 and parts[4].isascii() and parts[4].isdecimal() else 0
+    await _show_categories(call.message, session, db_user, page=category_page)  # type: ignore[arg-type]
 
 
 @router.callback_query(F.data == "trends:cancel", IsAdmin())

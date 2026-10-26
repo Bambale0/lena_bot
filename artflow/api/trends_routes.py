@@ -163,6 +163,16 @@ def _admin_category_out(item: Any) -> dict[str, Any]:
     }
 
 
+async def _fresh_admin_category(
+    session: AsyncSession, key: str
+) -> tuple[Any, int]:
+    catalog = await get_admin_trend_category_catalog(session)
+    item = next((row for row in catalog.items if str(row.category.key) == key), None)
+    if item is None:
+        raise HTTPException(status_code=500, detail="Category disappeared after mutation")
+    return item, int(catalog.revision)
+
+
 CategoryMutationResult = TypeVar("CategoryMutationResult")
 
 
@@ -939,7 +949,8 @@ async def admin_create_trend_category(
         revision,
         user.tg_id,
     )
-    return {"revision": revision, "category": _admin_category_out(category)}
+    fresh, fresh_revision = await _fresh_admin_category(session, str(category.key))
+    return {"revision": fresh_revision, "category": _admin_category_out(fresh)}
 
 
 @router.post("/admin/trend-categories/reorder")
@@ -965,9 +976,10 @@ async def admin_reorder_trend_categories(
         revision,
         user.tg_id,
     )
+    catalog = await get_admin_trend_category_catalog(session)
     return {
-        "revision": revision,
-        "items": [_admin_category_out(item) for item in categories],
+        "revision": int(catalog.revision),
+        "items": [_admin_category_out(item) for item in catalog.items],
     }
 
 
@@ -999,7 +1011,8 @@ async def admin_update_trend_category(
         revision,
         user.tg_id,
     )
-    return {"revision": revision, "category": _admin_category_out(category)}
+    fresh, fresh_revision = await _fresh_admin_category(session, str(category.key))
+    return {"revision": fresh_revision, "category": _admin_category_out(fresh)}
 
 
 @router.post("/admin/trend-categories/{key}/reassign")
@@ -1135,6 +1148,14 @@ async def admin_update_trend(
             resolved_category = await require_existing_trend_category(session, incoming_category)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if int(getattr(prompt, "trend_category_id", 0) or 0) != int(resolved_category.id):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Категорию нельзя менять через редактирование тренда. "
+                    "Используйте перенос в менеджере категорий."
+                ),
+            )
     else:
         try:
             resolved_category = await get_existing_trend_category(
@@ -1178,6 +1199,10 @@ async def admin_update_trend(
         merged_settings = trend_settings(prompt)
         incoming_settings = dict(body.settings or {})
         incoming_settings.pop("user_fields", None)
+        # Category assignment is revision-guarded and audited by the dedicated
+        # reassign endpoint. A legacy client may echo the current category, but
+        # it must never mutate the mirrored tag through this route.
+        incoming_settings.pop("category", None)
         merged_settings.update(incoming_settings)
         _merge_pricing_options(merged_settings, pricing_options)
         merged_settings.pop("user_fields", None)

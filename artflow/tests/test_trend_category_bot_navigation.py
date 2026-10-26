@@ -13,7 +13,7 @@ def _category(index: int):
 
 
 def _prompt(index: int):
-    return SimpleNamespace(id=index, title=f"Тренд {index}")
+    return SimpleNamespace(id=index, title=f"Тренд {index}", preview_url=None)
 
 
 def _callbacks(markup) -> list[str]:
@@ -50,7 +50,7 @@ def test_folder_keyboard_restores_category_page_and_keeps_admin_actions_private(
     assert "trends:folder-nav:cat_01:1:1" in _callbacks(public)
     assert "trends:categories:1" in _callbacks(public)
     assert not any(value.startswith("trends:archive:") for value in _callbacks(public))
-    assert "trends:archive:7" in _callbacks(admin)
+    assert "trends:archive:7:cat_01:1" in _callbacks(admin)
     assert all(len(value.encode("utf-8")) <= 64 for value in _callbacks(admin))
 
 
@@ -64,7 +64,7 @@ async def test_open_trends_shows_category_folders_first(monkeypatch):
     await trends.open_trends(message, SimpleNamespace(), state, None)
 
     state.clear.assert_awaited_once()
-    show.assert_awaited_once_with(message, ANY, None, page=0)
+    show.assert_awaited_once_with(message, ANY, None, page=0, edit=False)
 
 
 @pytest.mark.asyncio
@@ -92,3 +92,84 @@ async def test_open_folder_and_back_keep_category_page(monkeypatch):
     call.data = "trends:categories:2"
     await trends.navigate_trend_categories(call, SimpleNamespace(), None)
     show_categories.assert_awaited_once_with(call.message, ANY, None, page=2)
+
+
+@pytest.mark.asyncio
+async def test_direct_command_answers_with_a_new_bot_message(monkeypatch):
+    page = SimpleNamespace(
+        items=[SimpleNamespace(category=_category(1))],
+        has_more=False,
+        next_cursor=None,
+    )
+    monkeypatch.setattr(trends, "get_public_category_shelves", AsyncMock(return_value=page))
+    edit = AsyncMock()
+    monkeypatch.setattr(trends, "safe_edit_message", edit)
+    holder = SimpleNamespace(answer=AsyncMock())
+
+    await trends._show_categories(holder, SimpleNamespace(), None, page=0, edit=False)
+
+    holder.answer.assert_awaited_once()
+    assert "Тренды по категориям" in holder.answer.await_args.args[0]
+    edit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_folder_navigation_loads_every_server_page(monkeypatch):
+    category = _category(1)
+    first = SimpleNamespace(
+        category=category,
+        items=[_prompt(index) for index in range(1, 49)],
+        has_more=True,
+        next_cursor="next-page",
+    )
+    second = SimpleNamespace(
+        category=category,
+        items=[_prompt(49)],
+        has_more=False,
+        next_cursor=None,
+    )
+    load = AsyncMock(side_effect=[first, second])
+    monkeypatch.setattr(trends, "get_public_category_trends", load)
+    monkeypatch.setattr(trends, "_caption", lambda prompt, **_kwargs: prompt.title)
+    monkeypatch.setattr(trends, "_folder_kb", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(trends, "_media_source", lambda _url: None)
+    edit = AsyncMock()
+    monkeypatch.setattr(trends, "safe_edit_message", edit)
+    holder = SimpleNamespace()
+
+    await trends._show_folder(
+        holder,
+        SimpleNamespace(),
+        None,
+        category_key="cat_01",
+        category_page=0,
+        index=48,
+    )
+
+    assert [call.kwargs["cursor"] for call in load.await_args_list] == [None, "next-page"]
+    assert "Тренд 49" in edit.await_args.args[1]
+
+
+@pytest.mark.asyncio
+async def test_folder_replaces_existing_photo_with_video(monkeypatch):
+    category = _category(1)
+    prompt = SimpleNamespace(id=1, title="Видео", preview_url="https://cdn.test/video.mp4")
+    page = SimpleNamespace(category=category, items=[prompt], has_more=False, next_cursor=None)
+    monkeypatch.setattr(trends, "get_public_category_trends", AsyncMock(return_value=page))
+    monkeypatch.setattr(trends, "_caption", lambda *_args, **_kwargs: "Видео")
+    monkeypatch.setattr(trends, "_folder_kb", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(trends, "_media_source", lambda _url: "https://cdn.test/video.mp4")
+    monkeypatch.setattr(trends, "trend_kind", lambda _prompt: "video")
+    holder = SimpleNamespace(photo=[object()], video=None, edit_media=AsyncMock(), answer_video=AsyncMock())
+
+    await trends._show_folder(
+        holder,
+        SimpleNamespace(),
+        None,
+        category_key="cat_01",
+        category_page=0,
+        index=0,
+    )
+
+    holder.edit_media.assert_awaited_once()
+    holder.answer_video.assert_not_awaited()

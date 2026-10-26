@@ -859,15 +859,19 @@ async def reassign_trend_prompt(
     prompt = prompt_result[0] if prompt_result is not None else None
     if not is_trend_prompt(prompt):
         raise TrendCategoryMutationError("Тренд не найден")
-    before_key = _legacy_category_key(prompt)
+    legacy_key = _legacy_category_key(prompt)
+    relation_key: str | None = None
     if getattr(prompt, "trend_category_id", None) is not None:
         old_row = await session.execute(
             select(TrendCategory.key).where(
                 TrendCategory.id == int(prompt.trend_category_id)
             )
         )
-        before_key = old_row.scalar_one_or_none() or before_key
-    if int(getattr(prompt, "trend_category_id", 0) or 0) == int(category.id) and before_key == str(category.key):
+        relation_key = old_row.scalar_one_or_none()
+    before_key = legacy_key or relation_key
+    relation_matches = int(getattr(prompt, "trend_category_id", 0) or 0) == int(category.id)
+    mirror_matches = legacy_key == str(category.key)
+    if relation_matches and mirror_matches:
         return prompt, category, int(state.revision)
     prompt.trend_category_id = int(category.id)
     prompt.tags = mirror_trend_category_tag(list(prompt.tags or []), str(category.key))

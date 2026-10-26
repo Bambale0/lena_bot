@@ -75,6 +75,10 @@ class _Rows:
     def first(self):
         return self._rows[0] if self._rows else None
 
+    def scalar_one_or_none(self):
+        row = self.first()
+        return row[0] if row is not None else None
+
 
 class _ScriptedSession:
     def __init__(self, *results):
@@ -86,6 +90,19 @@ class _ScriptedSession:
         self.execute_count += 1
         self.statements.append(statement)
         return _Rows(self._results.pop(0))
+
+
+class _MutationSession(_ScriptedSession):
+    def __init__(self, *results):
+        super().__init__(*results)
+        self.added = []
+        self.flush_count = 0
+
+    def add(self, item):
+        self.added.append(item)
+
+    async def flush(self):
+        self.flush_count += 1
 
 
 def test_opaque_cursors_round_trip_and_reject_invalid_payloads():
@@ -427,7 +444,7 @@ async def test_web_admin_create_dual_writes_category_relation_and_legacy_tag(mon
 
 
 @pytest.mark.asyncio
-async def test_web_admin_update_dual_writes_changed_category_and_tag(monkeypatch):
+async def test_web_admin_update_rejects_unguarded_category_change(monkeypatch):
     category = _category(6, "animals", 4)
     prompt = SimpleNamespace(
         id=70,
@@ -451,16 +468,54 @@ async def test_web_admin_update_dual_writes_changed_category_and_tag(monkeypatch
     )
     session = SimpleNamespace(commit=AsyncMock(), refresh=AsyncMock())
 
-    await admin_update_trend(
-        70,
-        TrendUpdateRequest(settings={"category": "animals"}),
-        session=session,
-        user=SimpleNamespace(id=1, tg_id=111),
+    with pytest.raises(HTTPException) as exc:
+        await admin_update_trend(
+            70,
+            TrendUpdateRequest(settings={"category": "animals"}),
+            session=session,
+            user=SimpleNamespace(id=1, tg_id=111),
+        )
+
+    assert exc.value.status_code == 409
+    assert "менеджере категорий" in str(exc.value.detail)
+    assert prompt.trend_category_id == 3
+    assert "trend-category:portrait" in prompt.tags
+    session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_reassign_repairs_stale_legacy_tag_when_relation_already_matches():
+    state = SimpleNamespace(revision=7)
+    category = _category(1, "featured", 0)
+    prompt = SimpleNamespace(
+        id=73,
+        tags=["trend", "trend-category:legacy-special"],
+        trend_category_id=1,
+    )
+    session = _MutationSession(
+        [(state,)],
+        [(category,)],
+        [(prompt,)],
+        [("featured",)],
     )
 
-    assert prompt.trend_category_id == 6
-    assert "trend-category:animals" in prompt.tags
-    assert "trend-category:portrait" not in prompt.tags
+    updated, target, revision = await trend_category_repository.reassign_trend_prompt(
+        session,
+        prompt_id=73,
+        target_key="featured",
+        expected_revision=7,
+        actor_tg_id=111,
+        source="web",
+    )
+
+    assert updated is prompt
+    assert target is category
+    assert revision == 8
+    assert state.revision == 8
+    assert "trend-category:featured" in prompt.tags
+    assert "trend-category:legacy-special" not in prompt.tags
+    assert session.added[0].before_state == {"category_key": "legacy-special"}
+    assert session.added[0].after_state == {"category_key": "featured"}
 
 
 @pytest.mark.asyncio
@@ -522,7 +577,7 @@ async def test_telegram_admin_create_dual_writes_category_relation_and_tag(monke
     )
     monkeypatch.setattr(bot_trends, "create_prompt", create)
     monkeypatch.setattr(bot_trends, "approve_prompt", AsyncMock())
-    monkeypatch.setattr(bot_trends, "_show", AsyncMock())
+    monkeypatch.setattr(bot_trends, "_show_categories", AsyncMock())
     monkeypatch.setattr(bot_trends, "safe_answer_callback", AsyncMock())
     monkeypatch.setattr(
         bot_trends,

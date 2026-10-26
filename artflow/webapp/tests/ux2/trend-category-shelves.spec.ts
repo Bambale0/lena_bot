@@ -49,6 +49,8 @@ async function prepare(page: Page, admin = true) {
         ? json({ category: { key: "portrait", title: "Портреты и образы", sort_order: 0 }, items: categories.items[0].preview_items, has_more: true, next_cursor: "next" })
         : json({ category: { key: "portrait", title: "Портреты и образы", sort_order: 0 }, items: [{ id: 14, kind: "image", title: "Новый портрет", preview_url: "https://media.example.test/14.png" }], has_more: false, next_cursor: null });
     }
+    if (path === "/api/v1/trends/11/link") return json({ link: "https://t.me/fixture_bot?start=trend_11" });
+    if (path === "/api/v1/admin/trends/11/update") return json(categories.items[0].preview_items[0]);
     if (path === "/api/v1/admin/trend-categories" && method === "GET") return json({ revision, items: adminItems });
     if (path === "/api/v1/admin/trend-categories" && method === "POST") {
       revision += 1;
@@ -75,7 +77,12 @@ test("black lilac trends are live category shelves with a full folder", async ({
   await expect(page.getByRole("heading", { name: "Портреты и образы" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Смотреть все: Портреты и образы" })).toBeVisible();
   await expect(page.getByRole("button", { name: /Повторить: Неоновый портрет/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Скопировать ссылку: Неоновый портрет" })).toBeVisible();
   await expect(page.getByText("Все категории", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Видео", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "С животными 🐾" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "В первых примерах нет этого формата — открыть всю папку" })).toBeVisible();
+  await page.getByRole("button", { name: "Все", exact: true }).click();
   for (const width of [320, 390, 768, 1280]) {
     await page.setViewportSize({ width, height: 844 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -98,6 +105,12 @@ test("admin manages categories while ordinary users never see controls", async (
   await page.getByLabel("Название новой категории").fill("Кинообразы");
   await page.getByRole("button", { name: "Создать категорию" }).click();
   await expect(page.getByLabel("Название Кинообразы")).toHaveValue("Кинообразы");
+  await expect(page.getByRole("option", { name: "Кинообразы", exact: true })).toHaveCount(1);
+  await page.getByRole("button", { name: "Добавить тренд" }).click();
+  await expect(page.getByRole("option", { name: "Кинообразы", exact: true })).toHaveCount(2);
+  await page.getByRole("button", { name: "Закрыть форму" }).click();
+  await page.getByRole("button", { name: "Поля", exact: true }).first().click();
+  await expect(page.getByRole("button", { name: "Сохранить поля" }).first()).toBeVisible();
   await page.getByRole("button", { name: "Скрыть Портреты и образы" }).click();
   await page.getByRole("button", { name: "Подтвердить скрытие" }).click();
   expect(writes.some(row => row.path === "/api/v1/admin/trend-categories" && row.body.expected_revision === 3)).toBe(true);

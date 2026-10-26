@@ -26,6 +26,20 @@ def _category(key: str = "cat_ab12", title: str = "Новая папка"):
     )
 
 
+def _catalog(category=None, revision: int = 1):
+    category = category or _category()
+    return SimpleNamespace(
+        revision=revision,
+        items=[
+            SimpleNamespace(
+                category=category,
+                trend_count=category.trend_count,
+                published_count=category.published_count,
+            )
+        ],
+    )
+
+
 @pytest.mark.asyncio
 async def test_non_admin_cannot_read_or_mutate_category_catalog(monkeypatch):
     monkeypatch.setattr(trends_routes.settings, "ADMIN_IDS", [111])
@@ -45,6 +59,9 @@ async def test_admin_create_returns_opaque_key_and_next_revision(monkeypatch):
     category = _category()
     create = AsyncMock(return_value=(category, 4))
     monkeypatch.setattr(trends_routes, "create_trend_category", create)
+    monkeypatch.setattr(
+        trends_routes, "get_admin_trend_category_catalog", AsyncMock(return_value=_catalog(category, 4))
+    )
     session = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock())
 
     result = await trends_routes.admin_create_trend_category(
@@ -96,6 +113,11 @@ async def test_reorder_requires_and_forwards_the_full_key_set(monkeypatch):
     monkeypatch.setattr(trends_routes.settings, "ADMIN_IDS", [111])
     reorder = AsyncMock(return_value=([_category()], 6))
     monkeypatch.setattr(trends_routes, "reorder_trend_categories", reorder)
+    monkeypatch.setattr(
+        trends_routes,
+        "get_admin_trend_category_catalog",
+        AsyncMock(return_value=_catalog(revision=6)),
+    )
     session = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock())
 
     result = await trends_routes.admin_reorder_trend_categories(
