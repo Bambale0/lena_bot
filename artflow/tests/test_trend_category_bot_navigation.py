@@ -92,4 +92,3 @@ async def test_open_folder_and_back_keep_category_page(monkeypatch):
     call.data = "trends:categories:2"
     await trends.navigate_trend_categories(call, SimpleNamespace(), None)
     show_categories.assert_awaited_once_with(call.message, ANY, None, page=2)
-
