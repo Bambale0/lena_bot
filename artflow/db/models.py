@@ -700,8 +700,81 @@ class PromptStatus(str, enum.Enum):
     deactivated = "deactivated"
 
 
+class TrendCategoryCatalogState(Base):
+    """Single-row revision guard for the administrator-managed trend catalog."""
+
+    __tablename__ = "trend_category_catalog_state"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class TrendCategory(Base):
+    __tablename__ = "trend_categories"
+    __table_args__ = (
+        UniqueConstraint("key", name="uq_trend_categories_key"),
+        UniqueConstraint("sort_order", name="uq_trend_categories_sort_order"),
+        CheckConstraint("length(key) BETWEEN 1 AND 32", name="ck_trend_categories_key_length"),
+        CheckConstraint("length(title) BETWEEN 1 AND 80", name="ck_trend_categories_title_length"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # Public keys are immutable, lowercase ASCII identifiers. Mutation services
+    # validate the alphabet; the database also protects length and uniqueness.
+    key: Mapped[str] = mapped_column(String(32), nullable=False)
+    title: Mapped[str] = mapped_column(String(80), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    is_visible: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class TrendCategoryAudit(Base):
+    """Immutable category mutation and legacy-resolution evidence."""
+
+    __tablename__ = "trend_category_audit"
+    __table_args__ = (
+        CheckConstraint("length(action) BETWEEN 1 AND 32", name="ck_trend_category_audit_action"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    category_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("trend_categories.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    category_key: Mapped[str] = mapped_column(String(32), nullable=False)
+    target_prompt_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("user_prompts.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    action: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+    actor_tg_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    actor_operator: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    catalog_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    before_state: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    after_state: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class UserPrompt(Base):
     __tablename__ = "user_prompts"
+    __table_args__ = (
+        Index(
+            "ix_user_prompts_trend_category_public_created_id",
+            "trend_category_id",
+            "is_public",
+            "created_at",
+            "id",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     author_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
@@ -715,6 +788,11 @@ class UserPrompt(Base):
     # Explicit personalization schema for curated trends. NULL keeps legacy
     # prompts eligible for {{Field}} auto-discovery; [] explicitly disables it.
     trend_user_fields: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
+    trend_category_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("trend_categories.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
     likes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     is_public: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     status: Mapped[PromptStatus] = mapped_column(
@@ -731,6 +809,7 @@ class UserPrompt(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     author: Mapped["User"] = relationship(lazy="noload")
+    trend_category_record: Mapped["TrendCategory | None"] = relationship(lazy="noload")
 
 
 class PromptLike(Base):
