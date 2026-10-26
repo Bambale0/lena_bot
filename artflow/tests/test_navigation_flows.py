@@ -11,7 +11,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from bot.handlers import image_wizard_v2, video_gen
 from bot.keyboards.models import VIDEO_CAPS
 from bot.states import ImageGenFSM, VideoGenFSM
-from db.models import GenerationType
+from db.models import GenerationType, PromptStatus
 from tests.factories import make_callback
 
 
@@ -184,7 +184,16 @@ async def test_new_library_repeat_clears_previous_feed_prompt(state, monkeypatch
 
     await state.set_data({"feed_use_prompt": "wrong prompt", "prompt_multi_ref_file_ids": ["old"]})
     monkeypatch.setattr(
-        marketplace, "get_prompt_by_id", AsyncMock(return_value=SimpleNamespace(title="New"))
+        marketplace,
+        "get_prompt_by_id",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                title="New",
+                status=PromptStatus.approved,
+                is_public=True,
+                tags=[],
+            )
+        ),
     )
     monkeypatch.setattr(marketplace.repo, "get_all_model_costs", AsyncMock(return_value=[]))
     await marketplace.cb_prompt_use(
