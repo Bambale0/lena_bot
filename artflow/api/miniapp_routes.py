@@ -2118,6 +2118,8 @@ class FeedRemixRequest(BaseModel):
     duration_override: int | None = Field(default=None, strict=True, ge=1, le=30)
     aspect_ratio: str | None = None
     resolution: str | None = None
+    aspect_ratio_override: str | None = None
+    resolution_override: str | None = None
     image_url: str | None = None
     source_image_url: str | None = None
     reference_urls: list[str] = []
@@ -4173,10 +4175,21 @@ def _prepare_feed_remix_inputs(
             source_duration = creator_inputs.get("duration")
             if isinstance(source_duration, int) and not isinstance(source_duration, bool) and 2 <= source_duration <= 30:
                 replay_settings["duration"] = source_duration
-            if isinstance(creator_inputs.get("aspect_ratio"), str) and creator_inputs["aspect_ratio"] in caps.get("aspect_ratios", []):
-                replay_settings["aspect_ratio"] = creator_inputs["aspect_ratio"]
-            if isinstance(creator_inputs.get("resolution"), str) and creator_inputs["resolution"] in caps.get("resolutions", []):
-                replay_settings["resolution"] = creator_inputs["resolution"]
+            for field, choices in (
+                ("aspect_ratio", "aspect_ratios"),
+                ("resolution", "resolutions"),
+            ):
+                allowed = caps.get(choices, [])
+                override = getattr(body, f"{field}_override")
+                if override is not None:
+                    if override not in allowed:
+                        raise HTTPException(
+                            status_code=422,
+                            detail="Выбранный формат или разрешение больше недоступны",
+                        )
+                    replay_settings[field] = override
+                elif isinstance(creator_inputs.get(field), str) and creator_inputs[field] in allowed:
+                    replay_settings[field] = creator_inputs[field]
             source_grok_mode = creator_inputs.get("grok_mode") or creator_inputs.get("mode")
             if source_grok_mode in caps.get("mode_options", []):
                 replay_settings["grok_mode"] = source_grok_mode

@@ -248,6 +248,8 @@ async def _enter_seedance25_flow(
         duration=old.get("feed_use_original_duration") or 5,
         aspect_ratio=old.get("feed_use_original_aspect_ratio") or "adaptive",
         resolution=old.get("feed_use_original_resolution") or "720p",
+        aspect_ratio_override=None,
+        resolution_override=None,
         mode="multimodal" if old.get("feed_use_source_video_url") else "text",
         image_url=None,
         image_file_id=None,

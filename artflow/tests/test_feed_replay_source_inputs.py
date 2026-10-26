@@ -97,7 +97,7 @@ async def test_api_feed_video_created_from_photo_reuses_author_prompt_without_an
 
 
 @pytest.mark.asyncio
-async def test_bot_replay_restores_recipe_except_explicit_duration(video_launch):
+async def test_bot_replay_accepts_explicit_duration_ratio_and_resolution(video_launch):
     video_launch.source.gen_type = GenerationType.video
     video_launch.source.model = MODEL
     video_launch.source.prompt = PROMPT
@@ -106,11 +106,39 @@ async def test_bot_replay_restores_recipe_except_explicit_duration(video_launch)
     _, _, restored, _ = await video_gen._prepare_feed_video_inputs(
         session=video_launch.kwargs["session"], db_user=video_launch.kwargs["db_user"],
         source_feed_gen_id=77, model_key=MODEL, prompt=PROMPT, image_url=USER,
-        data={**video_launch.data, "duration_override": 15, "aspect_ratio": "16:9", "resolution": "720p"},
+        data={
+            **video_launch.data,
+            "duration_override": 15,
+            "aspect_ratio_override": "16:9",
+            "resolution_override": "720p",
+        },
     )
     assert restored["duration"] == 15
-    assert restored["resolution"] == "480p"
-    assert restored["aspect_ratio"] == "9:16"
+    assert restored["resolution"] == "720p"
+    assert restored["aspect_ratio"] == "16:9"
+
+
+def test_exact_repeat_bot_keyboard_keeps_ratio_and_resolution_choices():
+    repeat = {
+        "feed_use_gen_id": 77,
+        "feed_use_gen_type": "video",
+        "feed_use_has_original_recipe": True,
+        "feed_use_prompt": PROMPT,
+        "model_key": MODEL,
+        "mode": "multimodal",
+        "duration": 10,
+        "aspect_ratio": "9:16",
+        "resolution": "480p",
+    }
+    callbacks = {
+        str(button.callback_data)
+        for row in video_gen._video_params_reply_markup(MODEL, repeat).inline_keyboard
+        for button in row
+    }
+    assert "vpar_ratio:16:9" in callbacks
+    assert "vpar_ratio:9:16" in callbacks
+    assert "vpar_res:480p" in callbacks
+    assert "vpar_res:720p" in callbacks
 
 
 def test_source_edit_bot_keyboard_locks_time_but_wan_reference_does_not():
@@ -187,7 +215,7 @@ async def test_bot_feed_video_uses_real_author_video_when_it_was_submitted(video
 
 
 @pytest.mark.asyncio
-async def test_api_source_video_repeat_restores_creator_settings_before_quote(api_launch):
+async def test_api_source_video_repeat_accepts_explicit_ratio_and_resolution_overrides(api_launch):
     api_launch.source.gen_type = GenerationType.video
     api_launch.source.model = MODEL
     api_launch.source.result_url = RESULT_MP4
@@ -195,15 +223,46 @@ async def test_api_source_video_repeat_restores_creator_settings_before_quote(ap
     body = api_launch.routes.FeedRemixRequest(
         model=MODEL, image_url=USER, mode="text", duration=5,
         aspect_ratio="adaptive", resolution="720p",
+        aspect_ratio_override="16:9", resolution_override="720p",
     )
     quote = await api_launch.routes.quote_feed_remix(77, body, api_launch.session, api_launch.user)
     await api_launch.routes.remix_feed_post(77, body, api_launch.session, api_launch.user)
     submitted = api_launch.generate.await_args
     assert quote["cost_credits"] == 40
     assert submitted.kwargs["duration"] == 10
-    assert submitted.kwargs["aspect_ratio"] == "9:16"
-    assert submitted.kwargs["resolution"] == "480p"
+    assert submitted.kwargs["aspect_ratio"] == "16:9"
+    assert submitted.kwargs["resolution"] == "720p"
     assert submitted.kwargs["reference_video_url"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"aspect_ratio_override": "99:1"},
+        {"resolution_override": "8K"},
+    ],
+)
+async def test_api_source_video_repeat_rejects_unavailable_output_overrides(
+    api_launch, overrides,
+):
+    api_launch.source.gen_type = GenerationType.video
+    api_launch.source.model = MODEL
+    api_launch.source.result_url = RESULT_MP4
+    api_launch.source.input_params = origin()
+    body = api_launch.routes.FeedRemixRequest(
+        model=MODEL,
+        image_url=USER,
+        **overrides,
+    )
+
+    with pytest.raises(HTTPException) as raised:
+        await api_launch.routes.quote_feed_remix(
+            77, body, api_launch.session, api_launch.user,
+        )
+
+    assert raised.value.status_code == 422
+    api_launch.generate.assert_not_awaited()
 
 
 @pytest.mark.asyncio

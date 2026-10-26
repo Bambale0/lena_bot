@@ -299,6 +299,10 @@ function FeedRemixRunnerPortal() {
       ...(bucket !== "video" || durationOverride == null ? {} : { duration_override: durationOverride }),
       aspect_ratio: creatorRecipeReplay ? item.original_aspect_ratio ?? aspectRatio : aspectRatio,
       resolution: creatorRecipeReplay ? item.original_resolution ?? resolution : resolution,
+      ...(creatorRecipeReplay && aspectRatio !== item.original_aspect_ratio
+        ? { aspect_ratio_override: aspectRatio } : {}),
+      ...(creatorRecipeReplay && resolution !== item.original_resolution
+        ? { resolution_override: resolution } : {}),
       image_url: primaryUserReference || (!sourceIsVideo ? sourceMedia || null : null),
       source_image_url: !sourceIsVideo ? sourceMedia || null : null,
       reference_urls: references,
@@ -352,14 +356,14 @@ function FeedRemixRunnerPortal() {
     setPaymentBusy(false);
     setModelKey(sourceHasRecipe ? nextItem.model : draft?.modelKey || nextItem?.model || "");
     setMode(sourceHasRecipe ? "image" : draft?.mode || (nextItem && itemLooksVideo(nextItem) ? "text" : "image"));
-    setAspectRatio(sourceHasRecipe ? nextItem.original_aspect_ratio || "9:16" :
-      draft?.aspectRatio || (nextItem?.source_image_recipe_available ? nextItem.original_aspect_ratio : null)
+    setAspectRatio(draft?.aspectRatio || (sourceHasRecipe ? nextItem.original_aspect_ratio || "9:16" :
+      (nextItem?.source_image_recipe_available ? nextItem.original_aspect_ratio : null))
       || nextItem?.aspect_ratio || "1:1");
     setQuality(draft?.quality || (nextItem?.source_image_recipe_available ? nextItem.original_image_quality : null) || "basic");
     setCount(draft?.count || 1);
     setDuration(draft?.durationOverride ?? (sourceHasRecipe ? nextItem.original_duration || 5 : draft?.duration || 5));
     setDurationOverride(draft?.durationOverride);
-    setResolution(sourceHasRecipe ? nextItem.original_resolution || "720p" : draft?.resolution || "720p");
+    setResolution(draft?.resolution || (sourceHasRecipe ? nextItem.original_resolution || "720p" : "720p"));
     setGrokMode(sourceHasRecipe ? nextItem.original_grok_mode || "normal" : draft?.grokMode || "normal");
     setGrokMode(draft?.grokMode || "normal");
   }, []);
@@ -1035,7 +1039,7 @@ function FeedRemixRunnerPortal() {
           <div className="grid grid-cols-2 gap-2">
             <label className="grid gap-1 text-xs font-semibold">
               Формат
-              <select className="min-h-10 rounded-xl border border-input bg-background px-3 text-sm" value={aspectRatio} onChange={(event) => setAspectRatio(event.target.value)} disabled={busy || creatorRecipeReplay}>
+              <select className="min-h-10 rounded-xl border border-input bg-background px-3 text-sm" value={aspectRatio} onChange={(event) => setAspectRatio(event.target.value)} disabled={busy}>
                 {aspectRatios.map((ratio) => <option key={ratio} value={ratio}>{ratio}</option>)}
               </select>
             </label>
@@ -1119,7 +1123,7 @@ function FeedRemixRunnerPortal() {
               </div>
               <label className="grid gap-1 text-xs font-semibold">
                 Разрешение
-                <select className="min-h-10 rounded-xl border border-input bg-background px-3 text-sm" value={resolution} onChange={(event) => setResolution(event.target.value)} disabled={busy || creatorRecipeReplay}>
+                <select className="min-h-10 rounded-xl border border-input bg-background px-3 text-sm" value={resolution} onChange={(event) => setResolution(event.target.value)} disabled={busy}>
                   {resolutions.map((value) => <option key={value} value={value}>{value}</option>)}
                 </select>
               </label>

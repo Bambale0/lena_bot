@@ -833,12 +833,20 @@ test("creator photo-to-video replay selects duration, restores draft and reconfi
   await expect(dialog.getByLabel("Длительность видео в повторе")).toHaveAttribute("aria-valuetext", "10 секунд");
   await expandRepeatControls(dialog);
   await dialog.getByRole("button", { name: "15 сек", exact: true }).click();
+  await dialog.getByLabel("Формат").selectOption("16:9");
+  await dialog.getByLabel("Разрешение").selectOption("1080p");
   await expect(dialog.getByText("Стоимость: 30 💋").first()).toBeVisible();
   expect(sent).toBeNull();
-  expect(quoted?.duration_override).toBe(15);
+  await expect.poll(() => quoted).toMatchObject({
+    duration_override: 15,
+    aspect_ratio_override: "16:9",
+    resolution_override: "1080p",
+  });
   await page.reload();
   await expandRepeatControls(dialog);
   await expect(dialog.getByLabel("Длительность видео в повторе")).toHaveAttribute("aria-valuetext", "15 секунд");
+  await expect(dialog.getByLabel("Формат")).toHaveValue("16:9");
+  await expect(dialog.getByLabel("Разрешение")).toHaveValue("1080p");
   await expect(dialog.getByText("Стоимость: 30 💋").first()).toBeVisible();
   if (testInfo.project.name === "iPhone SE") {
     await expandRepeatControls(dialog);
@@ -855,7 +863,9 @@ test("creator photo-to-video replay selects duration, restores draft and reconfi
     model: model.key, change_request: "",
     image_url: "https://example.test/uploaded-ref.png",
     reference_urls: ["https://example.test/uploaded-ref.png"],
-    video_url: null, duration: 10, duration_override: 15, quoted_credits: 35, aspect_ratio: "9:16", resolution: "720p",
+    video_url: null, duration: 10, duration_override: 15, quoted_credits: 35,
+    aspect_ratio: "9:16", resolution: "720p",
+    aspect_ratio_override: "16:9", resolution_override: "1080p",
   });
 });
 
