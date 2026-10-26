@@ -63,15 +63,29 @@ test("black lilac foundation: palette, five destinations and full profile works"
     await page.screenshot({ path: info.outputPath(`black-lilac-home-${width}.png`), fullPage: true });
   }
   await nav.getByRole("tab", { name: "Профиль", exact: true }).click();
+  await expect(page.getByRole("region", { name: "Баланс профиля" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Пополнить баланс", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Быстрые действия", exact: true })).toBeVisible();
+  for (const action of ["Баланс и платежи", "Мои промпты", "Помощь", "Редактировать профиль", "Настройки", "Управление APIX"]) {
+    await expect(page.getByRole("button", { name: action, exact: true })).toBeVisible();
+  }
   await expect(page.getByRole("heading", { name: "Мои работы", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Обновить работы", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "В работе", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Все работы", exact: true })).toHaveCount(0);
   for (const width of [320, 390, 768, 1280]) {
     await page.setViewportSize({ width, height: 844 });
+    const touchTargets = await page.locator(".studio-profile-topup, .studio-profile-quick-actions button, .studio-profile-sections button").evaluateAll(nodes => nodes.map(node => {
+      const box = node.getBoundingClientRect(); return { width: box.width, height: box.height };
+    }));
+    for (const target of touchTargets) { expect(target.width).toBeGreaterThanOrEqual(44); expect(target.height).toBeGreaterThanOrEqual(44); }
     await page.screenshot({ path: info.outputPath(`black-lilac-profile-${width}.png`), fullPage: true });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   }
+  await page.getByRole("button", { name: "Пополнить баланс", exact: true }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.getByRole("dialog").getByRole("button", { name: "Закрыть", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Быстрые действия", exact: true })).toBeVisible();
   await nav.getByRole("tab", { name: "Главная", exact: true }).click();
   await page.getByRole("button", { name: "Все проекты", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Мои работы", exact: true })).toBeVisible();

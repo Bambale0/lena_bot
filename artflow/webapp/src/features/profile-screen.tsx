@@ -11,6 +11,7 @@ import { firstMedia, formatCredits, formatRelativeDate, generationStatusLabel } 
 
 interface ProfileScreenProps {
   worksSection?: ReactNode;
+  quickActions?: ReactNode;
   user: UserProfile;
   tasks: GenerationTask[];
   referrals: ReferralStats | null;
@@ -27,6 +28,7 @@ type ProfileSection = "works" | "partner" | "history";
 
 function ProfileScreen({
   worksSection,
+  quickActions,
   user,
   tasks,
   referrals,
@@ -57,24 +59,33 @@ function ProfileScreen({
   };
 
   return (
-    <div className="grid gap-3">
-      <Card className="overflow-hidden">
-        <div className="h-12 bg-gradient-to-r from-primary/45 via-fuchsia-500/25 to-cyan-400/25" />
-        <CardContent className="relative grid gap-2.5 pb-3">
-          <div className="-mt-7 flex items-end justify-between gap-2">
-            <div className="flex min-w-0 items-end gap-2">
-              <span className="grid size-14 shrink-0 place-items-center overflow-hidden rounded-2xl border-3 border-background bg-gradient-to-br from-primary to-cyan-400 text-xl font-bold text-white shadow-lg">
-                {user.photo_url ? <img src={user.photo_url} alt="" className="size-full object-cover" /> : name.slice(0, 1).toUpperCase()}
+    <div className="studio-profile-page">
+      <Card className="studio-profile-hero overflow-hidden">
+        <CardContent className="studio-profile-hero-content">
+          <div className="studio-profile-identity">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="studio-profile-avatar grid size-16 shrink-0 place-items-center overflow-hidden rounded-2xl border border-border bg-primary/15 text-xl font-bold text-primary">
+                {user.photo_url ? <img src={user.photo_url} alt={name} className="size-full object-cover" /> : name.slice(0, 1).toUpperCase()}
               </span>
-              <div className="min-w-0 pb-0.5">
-                <h1 className="truncate text-lg font-bold tracking-tight">{name}</h1>
-                <p className="truncate text-[10px] text-muted-foreground">{user.username ? `@${user.username}` : "Telegram-профиль"}</p>
+              <div className="min-w-0">
+                <p className="studio-profile-eyebrow">Личный кабинет</p>
+                <h1 className="truncate text-2xl font-bold tracking-tight">{name}</h1>
+                <p className="truncate text-xs text-muted-foreground">{user.username ? `@${user.username}` : "Telegram-профиль"}</p>
               </div>
             </div>
-            <Button variant="soft" size="sm" onClick={onBalanceOpen}><span aria-hidden="true">💋</span> {formatCredits(user.credits)}</Button>
           </div>
 
-          <div className="grid grid-cols-4 gap-1.5">
+          <section className="studio-profile-balance" aria-label="Баланс профиля">
+            <span className="studio-profile-balance-icon"><Wallet aria-hidden="true" /></span>
+            <div className="min-w-0">
+              <p>Доступно для создания</p>
+              <strong>{formatCredits(user.credits)} <span>кредитов</span></strong>
+              <small>Пополнение откроется здесь, без потери текущего экрана.</small>
+            </div>
+            <Button className="studio-profile-topup" onClick={onBalanceOpen}>Пополнить баланс</Button>
+          </section>
+
+          <div className="studio-profile-stats">
             <Stat label="История" value={tasks.length} icon={History} />
             <Stat label="Выложено" value={publishedTasks.length} icon={Globe2} />
             <Stat label="Приглашено" value={invited} icon={Users} />
@@ -83,11 +94,13 @@ function ProfileScreen({
         </CardContent>
       </Card>
 
-      <div className="apix-chip-rail flex gap-1 overflow-x-auto pb-1">
-        <SectionButton active={section === "works"} onClick={() => setSection("works")}>Работы</SectionButton>
-        <SectionButton active={section === "partner"} onClick={() => setSection("partner")}>Партнёрский кабинет</SectionButton>
-        <SectionButton active={section === "history"} onClick={() => setSection("history")}>История задач</SectionButton>
-      </div>
+      {quickActions ? <Card className="studio-profile-quick-card"><CardContent><h2>Быстрые действия</h2><div className="studio-profile-quick-actions">{quickActions}</div></CardContent></Card> : null}
+
+      <nav className="studio-profile-sections" aria-label="Разделы профиля">
+        <SectionButton active={section === "works"} icon={Sparkles} onClick={() => setSection("works")}>Работы</SectionButton>
+        <SectionButton active={section === "partner"} icon={Users} onClick={() => setSection("partner")}>Партнёрский кабинет</SectionButton>
+        <SectionButton active={section === "history"} icon={History} onClick={() => setSection("history")}>История задач</SectionButton>
+      </nav>
 
       {section === "works" ? (
         worksSection ? <section className="studio-profile-works" aria-label="Работы и серии">{worksSection}</section> : <section className="grid gap-3">
@@ -314,8 +327,8 @@ function ReferralCabinet({
   );
 }
 
-function SectionButton({ active, children, onClick }: { active: boolean; children: string; onClick: () => void }) {
-  return <button type="button" className={`apix-focus-ring shrink-0 rounded-xl border px-3 py-2 text-xs font-semibold ${active ? "border-primary/55 bg-primary/15 text-primary" : "border-border bg-card/55 text-muted-foreground"}`} onClick={onClick}>{children}</button>;
+function SectionButton({ active, children, icon: Icon, onClick }: { active: boolean; children: string; icon: typeof History; onClick: () => void }) {
+  return <button type="button" aria-pressed={active} className={`apix-focus-ring ${active ? "active" : ""}`} onClick={onClick}><Icon aria-hidden="true" />{children}</button>;
 }
 
 function WorkGrid({ title, empty, tasks, onOpenTask }: { title: string; empty: string; tasks: GenerationTask[]; onOpenTask: (task: GenerationTask) => void }) {
@@ -363,10 +376,9 @@ function MiniStat({ label, value }: { label: string; value: string | number }) {
 
 function Stat({ label, value, icon: Icon }: { label: string; value: string | number; icon: typeof History }) {
   return (
-    <div className="min-w-0 rounded-lg border border-border bg-card/55 px-1.5 py-2 text-center">
-      <Icon className="mx-auto mb-0.5 size-3.5 text-primary" />
-      <p className="truncate text-xs font-bold">{value}</p>
-      <p className="truncate text-[8px] text-muted-foreground">{label}</p>
+    <div className="studio-profile-stat">
+      <Icon aria-hidden="true" />
+      <div className="min-w-0"><p>{value}</p><span>{label}</span></div>
     </div>
   );
 }
