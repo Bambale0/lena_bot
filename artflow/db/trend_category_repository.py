@@ -426,9 +426,14 @@ async def get_public_category_trends(
     key: str,
     limit: int,
     cursor: str | None,
+    offset: int = 0,
 ) -> TrendCategoryItemsPage | None:
     if not 1 <= limit <= MAX_FOLDER_PAGE_SIZE:
         raise ValueError("Trend limit is out of range")
+    if offset < 0:
+        raise ValueError("Trend offset is out of range")
+    if cursor and offset:
+        raise ValueError("Cursor and offset cannot be combined")
     normalized_key = str(key or "").strip().lower()
     if not normalized_key or len(normalized_key) > 32:
         raise ValueError("Invalid category key")
@@ -455,6 +460,7 @@ async def get_public_category_trends(
             ),
         )
         .order_by(desc(UserPrompt.created_at).nulls_last(), desc(UserPrompt.id))
+        .offset(offset)
         .limit(limit + 1)
     )
     if cursor:

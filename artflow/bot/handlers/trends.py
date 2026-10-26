@@ -147,20 +147,36 @@ def _folder_kb(
     total: int,
     category_key: str,
     category_page: int,
+    folder_page: int,
+    has_more: bool,
     is_admin: bool,
 ):
     builder = InlineKeyboardBuilder()
-    if total > 1:
+    has_previous = index > 0 or folder_page > 0
+    has_next = index + 1 < total or has_more
+    if has_previous or has_next:
+        buttons = []
+        if has_previous:
+            previous_page = folder_page if index > 0 else folder_page - 1
+            previous_index = index - 1 if index > 0 else FOLDER_TREND_LIMIT - 1
+            buttons.append(
+                InlineKeyboardButton(
+                    text="◀️",
+                    callback_data=f"trends:fn:{category_key}:{category_page}:{previous_page}:{previous_index}",
+                )
+            )
+        buttons.append(InlineKeyboardButton(text=f"{index + 1}/{total}", callback_data="trends:noop"))
+        if has_next:
+            next_page = folder_page if index + 1 < total else folder_page + 1
+            next_index = index + 1 if index + 1 < total else 0
+            buttons.append(
+                InlineKeyboardButton(
+                    text="▶️",
+                    callback_data=f"trends:fn:{category_key}:{category_page}:{next_page}:{next_index}",
+                )
+            )
         builder.row(
-            InlineKeyboardButton(
-                text="◀️",
-                callback_data=f"trends:folder-nav:{category_key}:{category_page}:{(index - 1) % total}",
-            ),
-            InlineKeyboardButton(text=f"{index + 1}/{total}", callback_data="trends:noop"),
-            InlineKeyboardButton(
-                text="▶️",
-                callback_data=f"trends:folder-nav:{category_key}:{category_page}:{(index + 1) % total}",
-            ),
+            *buttons,
         )
     builder.row(InlineKeyboardButton(text="🔥 Повторить шаблон", callback_data=f"trends:use:{prompt.id}"))
     if is_admin:
@@ -287,30 +303,17 @@ async def _show_folder(
     *,
     category_key: str,
     category_page: int,
+    folder_page: int,
     index: int,
 ) -> None:
-    folder = None
-    items: list[UserPrompt] = []
-    cursor = None
-    seen_cursors: set[str] = set()
-    while True:
-        current = await get_public_category_trends(
-            session,
-            key=category_key,
-            limit=FOLDER_TREND_LIMIT,
-            cursor=cursor,
-        )
-        if current is None:
-            folder = None
-            break
-        folder = current
-        items.extend(current.items)
-        if not current.has_more or not current.next_cursor:
-            break
-        if current.next_cursor in seen_cursors:
-            raise RuntimeError("Trend folder pagination repeated a cursor")
-        seen_cursors.add(current.next_cursor)
-        cursor = current.next_cursor
+    safe_folder_page = max(folder_page, 0)
+    folder = await get_public_category_trends(
+        session,
+        key=category_key,
+        limit=FOLDER_TREND_LIMIT,
+        cursor=None,
+        offset=safe_folder_page * FOLDER_TREND_LIMIT,
+    )
     if folder is None:
         await safe_edit_message(
             holder,
@@ -320,7 +323,7 @@ async def _show_folder(
             .as_markup(),
         )
         return
-    if not items:
+    if not folder.items:
         await safe_edit_message(
             holder,
             f"📁 <b>{html.escape(str(folder.category.title))}</b>\n\nВ этой папке пока нет опубликованных трендов.",
@@ -329,16 +332,18 @@ async def _show_folder(
             .as_markup(),
         )
         return
-    safe_index = index % len(items)
-    prompt = items[safe_index]
-    caption = _caption(prompt, index=safe_index, total=len(items))
+    safe_index = index % len(folder.items)
+    prompt = folder.items[safe_index]
+    caption = _caption(prompt, index=safe_index, total=len(folder.items))
     caption = f"📁 <b>{html.escape(str(folder.category.title))}</b>\n\n{caption}"
     markup = _folder_kb(
         prompt,
         index=safe_index,
-        total=len(items),
+        total=len(folder.items),
         category_key=str(folder.category.key),
         category_page=category_page,
+        folder_page=safe_folder_page,
+        has_more=folder.has_more,
         is_admin=_is_admin(user),
     )
     media = _media_source(prompt.preview_url)
@@ -390,15 +395,16 @@ async def open_trend_folder(call: CallbackQuery, session: AsyncSession, db_user:
         db_user,
         category_key=parts[2],
         category_page=int(parts[3]),
+        folder_page=0,
         index=0,
     )
     await safe_answer_callback(call)
 
 
-@router.callback_query(F.data.startswith("trends:folder-nav:"))
+@router.callback_query(F.data.startswith("trends:fn:"))
 async def navigate_trend_folder(call: CallbackQuery, session: AsyncSession, db_user: User | None = None) -> None:
     parts = str(call.data or "").split(":")
-    if len(parts) != 5 or not all(part.isascii() and part.isdecimal() for part in parts[3:]):
+    if len(parts) != 6 or not all(part.isascii() and part.isdecimal() for part in parts[3:]):
         await call.answer("Тренд недоступен", show_alert=True)
         return
     await _show_folder(
@@ -407,7 +413,8 @@ async def navigate_trend_folder(call: CallbackQuery, session: AsyncSession, db_u
         db_user,
         category_key=parts[2],
         category_page=int(parts[3]),
-        index=int(parts[4]),
+        folder_page=int(parts[4]),
+        index=int(parts[5]),
     )
     await safe_answer_callback(call)
 

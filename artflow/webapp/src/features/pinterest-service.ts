@@ -1,6 +1,5 @@
 import type { TrendItem } from "@/lib/types";
 
-const PINTEREST_MARKERS = ["pinterest", "пинтерест"];
 export const PINTEREST_SERVICE_ALIAS_ID = 0;
 
 const PINTEREST_SERVICE_FALLBACK: TrendItem = {
@@ -20,14 +19,7 @@ function normalized(value: unknown): string {
 
 export function isPinterestServiceTrend(trend: TrendItem): boolean {
   const category = normalized(trend.category);
-  if (category.includes("pinterest")) return true;
-
-  const searchable = [trend.title, trend.description, trend.category_title]
-    .map(normalized)
-    .filter(Boolean)
-    .join(" ");
-
-  return PINTEREST_MARKERS.some((marker) => searchable.includes(marker));
+  return trend.id === PINTEREST_SERVICE_ALIAS_ID || category === "pinterest";
 }
 
 export function findPinterestServiceTrend(items: TrendItem[]): TrendItem {

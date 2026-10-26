@@ -41,13 +41,15 @@ def test_category_keyboard_is_paged_and_callback_data_stays_within_telegram_limi
 
 def test_folder_keyboard_restores_category_page_and_keeps_admin_actions_private():
     public = trends._folder_kb(
-        _prompt(7), index=0, total=2, category_key="cat_01", category_page=1, is_admin=False
+        _prompt(7), index=0, total=2, category_key="cat_01", category_page=1,
+        folder_page=0, has_more=True, is_admin=False
     )
     admin = trends._folder_kb(
-        _prompt(7), index=0, total=2, category_key="cat_01", category_page=1, is_admin=True
+        _prompt(7), index=0, total=2, category_key="cat_01", category_page=1,
+        folder_page=0, has_more=True, is_admin=True
     )
 
-    assert "trends:folder-nav:cat_01:1:1" in _callbacks(public)
+    assert "trends:fn:cat_01:1:0:1" in _callbacks(public)
     assert "trends:categories:1" in _callbacks(public)
     assert not any(value.startswith("trends:archive:") for value in _callbacks(public))
     assert "trends:archive:7:cat_01:1" in _callbacks(admin)
@@ -86,7 +88,21 @@ async def test_open_folder_and_back_keep_category_page(monkeypatch):
         None,
         category_key="cat_03",
         category_page=2,
+        folder_page=0,
         index=0,
+    )
+
+    show_folder.reset_mock()
+    call.data = "trends:fn:cat_03:2:4:17"
+    await trends.navigate_trend_folder(call, SimpleNamespace(), None)
+    show_folder.assert_awaited_once_with(
+        call.message,
+        ANY,
+        None,
+        category_key="cat_03",
+        category_page=2,
+        folder_page=4,
+        index=17,
     )
 
     call.data = "trends:categories:2"
@@ -114,21 +130,15 @@ async def test_direct_command_answers_with_a_new_bot_message(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_folder_navigation_loads_every_server_page(monkeypatch):
+async def test_folder_navigation_loads_only_the_requested_server_page(monkeypatch):
     category = _category(1)
-    first = SimpleNamespace(
-        category=category,
-        items=[_prompt(index) for index in range(1, 49)],
-        has_more=True,
-        next_cursor="next-page",
-    )
-    second = SimpleNamespace(
+    requested = SimpleNamespace(
         category=category,
         items=[_prompt(49)],
         has_more=False,
         next_cursor=None,
     )
-    load = AsyncMock(side_effect=[first, second])
+    load = AsyncMock(return_value=requested)
     monkeypatch.setattr(trends, "get_public_category_trends", load)
     monkeypatch.setattr(trends, "_caption", lambda prompt, **_kwargs: prompt.title)
     monkeypatch.setattr(trends, "_folder_kb", lambda *_args, **_kwargs: None)
@@ -143,10 +153,17 @@ async def test_folder_navigation_loads_every_server_page(monkeypatch):
         None,
         category_key="cat_01",
         category_page=0,
-        index=48,
+        folder_page=1,
+        index=0,
     )
 
-    assert [call.kwargs["cursor"] for call in load.await_args_list] == [None, "next-page"]
+    load.assert_awaited_once_with(
+        ANY,
+        key="cat_01",
+        limit=trends.FOLDER_TREND_LIMIT,
+        cursor=None,
+        offset=trends.FOLDER_TREND_LIMIT,
+    )
     assert "Тренд 49" in edit.await_args.args[1]
 
 
@@ -168,6 +185,7 @@ async def test_folder_replaces_existing_photo_with_video(monkeypatch):
         None,
         category_key="cat_01",
         category_page=0,
+        folder_page=0,
         index=0,
     )
 

@@ -10,6 +10,12 @@ const categories = {
     { key: "animals", title: "С животными 🐾", sort_order: 1, trend_count: 1, preview_items: [
       { id: 21, kind: "image", title: "С медведем", preview_url: "https://media.example.test/21.png", category: "animals", category_title: "С животными 🐾" },
     ] },
+    { key: "cat_marker", title: "Pinterest вдохновение", sort_order: 2, trend_count: 1, preview_items: [
+      { id: 31, kind: "image", title: "Редакторский кадр", preview_url: "https://media.example.test/31.png", category: "cat_marker", category_title: "Pinterest вдохновение" },
+    ] },
+    { key: "cat_long", title: "ОченьДлинноеНазваниеКатегорииБезПробеловКотороеДолжноКорректноПереноситьсяНаМобильном", sort_order: 3, trend_count: 1, preview_items: [
+      { id: 41, kind: "image", title: "Длинная папка", preview_url: "https://media.example.test/41.png", category: "cat_long", category_title: "Длинная папка" },
+    ] },
   ],
   has_more: false,
   next_cursor: null,
@@ -64,6 +70,10 @@ async function prepare(page: Page, admin = true) {
       adminItems = adminItems.map(item => item.key === key ? { ...item, ...body } : item);
       return json({ revision, category: adminItems.find(item => item.key === key) });
     }
+    if (/\/api\/v1\/admin\/trend-categories\/[^/]+\/reassign$/.test(path)) {
+      revision += 1;
+      return json({ ok: true, prompt_id: body.prompt_id, category_key: path.split("/").at(-2), revision });
+    }
     return json([]);
   });
   return writes;
@@ -77,11 +87,12 @@ test("black lilac trends are live category shelves with a full folder", async ({
   await expect(page.getByRole("heading", { name: "Портреты и образы" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Смотреть все: Портреты и образы" })).toBeVisible();
   await expect(page.getByRole("button", { name: /Повторить: Неоновый портрет/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Pinterest вдохновение" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Скопировать ссылку: Неоновый портрет" })).toBeVisible();
   await expect(page.getByText("Все категории", { exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Видео", exact: true }).click();
   await expect(page.getByRole("heading", { name: "С животными 🐾" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "В первых примерах нет этого формата — открыть всю папку" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "В первых примерах нет этого формата — открыть всю папку" }).first()).toBeVisible();
   await page.getByRole("button", { name: "Все", exact: true }).click();
   for (const width of [320, 390, 768, 1280]) {
     await page.setViewportSize({ width, height: 844 });
@@ -105,12 +116,16 @@ test("admin manages categories while ordinary users never see controls", async (
   await page.getByLabel("Название новой категории").fill("Кинообразы");
   await page.getByRole("button", { name: "Создать категорию" }).click();
   await expect(page.getByLabel("Название Кинообразы")).toHaveValue("Кинообразы");
-  await expect(page.getByRole("option", { name: "Кинообразы", exact: true })).toHaveCount(1);
+  await expect(page.getByRole("option", { name: "Кинообразы", exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Добавить тренд" }).click();
-  await expect(page.getByRole("option", { name: "Кинообразы", exact: true })).toHaveCount(2);
+  await expect(page.getByRole("option", { name: "Кинообразы", exact: true })).toHaveCount(1);
   await page.getByRole("button", { name: "Закрыть форму" }).click();
   await page.getByRole("button", { name: "Поля", exact: true }).first().click();
   await expect(page.getByRole("button", { name: "Сохранить поля" }).first()).toBeVisible();
+  await page.getByRole("button", { name: "Перенести Неоновый портрет" }).click();
+  await page.getByLabel("Новая категория для Неоновый портрет").selectOption("animals");
+  await page.getByRole("button", { name: "Перенести", exact: true }).click();
+  await expect.poll(() => writes.some(row => row.path.endsWith("/animals/reassign") && row.body.prompt_id === 11)).toBe(true);
   await page.getByRole("button", { name: "Скрыть Портреты и образы" }).click();
   await page.getByRole("button", { name: "Подтвердить скрытие" }).click();
   expect(writes.some(row => row.path === "/api/v1/admin/trend-categories" && row.body.expected_revision === 3)).toBe(true);
