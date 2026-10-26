@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Sequence
@@ -16,6 +17,7 @@ MAX_CATEGORY_CURSOR_LENGTH = 512
 MAX_CATEGORY_PAGE_SIZE = 24
 MAX_FOLDER_PAGE_SIZE = 48
 MAX_PREVIEW_ITEMS = 5
+CATEGORY_KEY_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 
 
 @dataclass(slots=True)
@@ -106,6 +108,31 @@ def _public_prompt_filters():
         UserPrompt.trend_category_id.is_not(None),
         UserPrompt.tags.any("trend"),
     )
+
+
+def normalize_category_key(value: Any) -> str:
+    key = str(value or "").strip().lower()
+    if not CATEGORY_KEY_PATTERN.fullmatch(key):
+        raise ValueError("Invalid trend category")
+    return key
+
+
+async def get_existing_trend_category(
+    session: AsyncSession, category_key: Any
+) -> TrendCategory | None:
+    key = normalize_category_key(category_key)
+    result = await session.execute(select(TrendCategory).where(TrendCategory.key == key))
+    row = result.first()
+    return row[0] if row is not None else None
+
+
+async def require_existing_trend_category(
+    session: AsyncSession, category_key: Any
+) -> TrendCategory:
+    category = await get_existing_trend_category(session, category_key)
+    if category is None:
+        raise ValueError("Trend category is unavailable")
+    return category
 
 
 async def get_public_category_shelves(

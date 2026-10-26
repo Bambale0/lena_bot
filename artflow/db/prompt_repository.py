@@ -48,7 +48,8 @@ def _normalize_tags(tags: list[str] | None) -> list[str]:
     for tag in tags or []:
         normalized = re.sub(r"[^a-z0-9_+:-]", "", tag.lower().strip().lstrip("#"))
         if normalized and normalized not in cleaned:
-            cleaned.append(normalized[:32])
+            max_length = 47 if normalized.startswith("trend-category:") else 32
+            cleaned.append(normalized[:max_length])
     return cleaned
 
 
@@ -106,6 +107,7 @@ async def create_prompt(
     model: str | None = None,
     tags: list[str] | None = None,
     is_public: bool = True,
+    trend_category_id: int | None = None,
 ) -> UserPrompt:
     prompt = UserPrompt(
         author_id=author_id,
@@ -118,6 +120,7 @@ async def create_prompt(
         tags=_normalize_tags(tags) or infer_tags(prompt_text),
         is_public=is_public,
         status=PromptStatus.pending,
+        trend_category_id=trend_category_id,
     )
     session.add(prompt)
     await session.commit()

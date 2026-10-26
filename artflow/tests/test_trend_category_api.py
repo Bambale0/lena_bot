@@ -2,12 +2,21 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
 
-from api.trends_routes import list_trend_categories, list_trend_category_items
+from api.trends_routes import (
+    TrendCreateRequest,
+    TrendUpdateRequest,
+    admin_create_trend,
+    admin_update_trend,
+    list_trend_categories,
+    list_trend_category_items,
+)
 from db.models import PromptCategory, PromptStatus, TrendCategory, UserPrompt
+from db.prompt_repository import _normalize_tags
 from db.trend_category_repository import (
     decode_category_cursor,
     decode_trend_cursor,
@@ -84,6 +93,11 @@ def test_opaque_cursors_round_trip_and_reject_invalid_payloads():
             decode_category_cursor(value)
         with pytest.raises(ValueError):
             decode_trend_cursor(value)
+
+
+def test_legacy_mirror_keeps_the_full_maximum_category_key():
+    key = "a" * 32
+    assert _normalize_tags([f"trend-category:{key}"]) == [f"trend-category:{key}"]
 
 
 @pytest.mark.asyncio
@@ -235,3 +249,154 @@ async def test_folder_route_returns_category_items_and_composite_cursor(monkeypa
     assert result["items"][0]["category_title"] == "Portrait"
     assert result["has_more"] is True
     assert decode_trend_cursor(result["next_cursor"]) == (prompt.created_at, prompt.id)
+
+
+@pytest.mark.asyncio
+async def test_web_admin_create_dual_writes_category_relation_and_legacy_tag(monkeypatch):
+    category = _category(6, "animals", 4)
+    prompt = SimpleNamespace(id=70, trend_user_fields=None)
+    create = AsyncMock(return_value=prompt)
+    monkeypatch.setattr("api.trends_routes.settings.ADMIN_IDS", [111])
+    monkeypatch.setattr("api.trends_routes._validated_model", AsyncMock())
+    monkeypatch.setattr("api.trends_routes.create_prompt", create)
+    monkeypatch.setattr("api.trends_routes.approve_prompt", AsyncMock(return_value=prompt))
+    monkeypatch.setattr("api.trends_routes.trend_admin_payload", lambda item: {"id": item.id})
+    monkeypatch.setattr(
+        "api.trends_routes.require_existing_trend_category",
+        AsyncMock(return_value=category),
+        raising=False,
+    )
+    session = SimpleNamespace(commit=AsyncMock())
+
+    await admin_create_trend(
+        TrendCreateRequest(
+            kind="image",
+            title="Animal trend",
+            description="",
+            prompt_template="hidden",
+            preview_url="https://cdn.test/animal.webp",
+            model="image-model",
+            settings={"category": "animals"},
+        ),
+        session=session,
+        user=SimpleNamespace(id=1, tg_id=111),
+    )
+
+    assert create.await_args.kwargs["trend_category_id"] == 6
+    assert "trend-category:animals" in create.await_args.kwargs["tags"]
+
+
+@pytest.mark.asyncio
+async def test_web_admin_update_dual_writes_changed_category_and_tag(monkeypatch):
+    category = _category(6, "animals", 4)
+    prompt = SimpleNamespace(
+        id=70,
+        title="Portrait trend",
+        description="",
+        prompt_text="hidden",
+        preview_url="https://cdn.test/portrait.webp",
+        model="image-model",
+        tags=["trend", "trend-category:portrait"],
+        trend_category_id=3,
+        trend_category_record=None,
+        trend_user_fields=[],
+    )
+    monkeypatch.setattr("api.trends_routes.settings.ADMIN_IDS", [111])
+    monkeypatch.setattr("api.trends_routes.get_prompt_by_id", AsyncMock(return_value=prompt))
+    monkeypatch.setattr("api.trends_routes.trend_admin_payload", lambda item: {"id": item.id})
+    monkeypatch.setattr(
+        "api.trends_routes.require_existing_trend_category",
+        AsyncMock(return_value=category),
+        raising=False,
+    )
+    session = SimpleNamespace(commit=AsyncMock(), refresh=AsyncMock())
+
+    await admin_update_trend(
+        70,
+        TrendUpdateRequest(settings={"category": "animals"}),
+        session=session,
+        user=SimpleNamespace(id=1, tg_id=111),
+    )
+
+    assert prompt.trend_category_id == 6
+    assert "trend-category:animals" in prompt.tags
+    assert "trend-category:portrait" not in prompt.tags
+
+
+@pytest.mark.asyncio
+async def test_web_admin_update_preserves_unresolved_legacy_category(monkeypatch):
+    prompt = SimpleNamespace(
+        id=72,
+        title="Legacy trend",
+        description="",
+        prompt_text="hidden",
+        preview_url="https://cdn.test/legacy.webp",
+        model="image-model",
+        tags=["trend", "trend-category:legacy-special", "trend-ratio:1:1"],
+        trend_category_id=1,
+        trend_category_record=None,
+        trend_user_fields=[],
+    )
+    monkeypatch.setattr("api.trends_routes.settings.ADMIN_IDS", [111])
+    monkeypatch.setattr("api.trends_routes.get_prompt_by_id", AsyncMock(return_value=prompt))
+    monkeypatch.setattr("api.trends_routes.trend_admin_payload", lambda item: {"id": item.id})
+    monkeypatch.setattr(
+        "api.trends_routes.get_existing_trend_category", AsyncMock(return_value=None)
+    )
+    session = SimpleNamespace(commit=AsyncMock(), refresh=AsyncMock())
+
+    await admin_update_trend(
+        72,
+        TrendUpdateRequest(settings={"ratio": "4:5"}),
+        session=session,
+        user=SimpleNamespace(id=1, tg_id=111),
+    )
+
+    assert prompt.trend_category_id == 1
+    assert "trend-category:legacy-special" in prompt.tags
+    assert "trend-category:featured" not in prompt.tags
+
+
+@pytest.mark.asyncio
+async def test_telegram_admin_create_dual_writes_category_relation_and_tag(monkeypatch):
+    from bot.handlers import trends as bot_trends
+
+    category = _category(6, "animals", 4)
+    prompt = SimpleNamespace(id=71)
+    create = AsyncMock(return_value=prompt)
+    state = AsyncMock()
+    state.get_data.return_value = {
+        "kind": "image",
+        "category": "animals",
+        "title": "Animal trend",
+        "description": "",
+        "prompt_template": "hidden",
+        "preview_url": "https://cdn.test/animal.webp",
+        "model": "image-model",
+        "scenario": "image",
+        "requires_reference": True,
+    }
+    call = SimpleNamespace(
+        message=SimpleNamespace(answer=AsyncMock()),
+        answer=AsyncMock(),
+    )
+    monkeypatch.setattr(bot_trends, "create_prompt", create)
+    monkeypatch.setattr(bot_trends, "approve_prompt", AsyncMock())
+    monkeypatch.setattr(bot_trends, "_show", AsyncMock())
+    monkeypatch.setattr(bot_trends, "safe_answer_callback", AsyncMock())
+    monkeypatch.setattr(
+        bot_trends,
+        "require_existing_trend_category",
+        AsyncMock(return_value=category),
+        raising=False,
+    )
+
+    await bot_trends.confirm_trend(
+        call,
+        state,
+        session=SimpleNamespace(),
+        db_user=SimpleNamespace(id=1),
+    )
+
+    assert create.await_args.kwargs["trend_category_id"] == 6
+    assert "trend-category:animals" in create.await_args.kwargs["tags"]

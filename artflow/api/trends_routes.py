@@ -37,9 +37,12 @@ from core.trend_user_fields import (
     normalize_configured_trend_user_fields,
 )
 from core.trends import (
+    DEFAULT_TREND_CATEGORY,
     TREND_TAG,
     build_trend_tags,
     is_trend_prompt,
+    legacy_trend_category,
+    mirror_trend_category_tag,
     trend_admin_payload,
     trend_is_public,
     trend_kind,
@@ -57,9 +60,11 @@ from db.prompt_repository import (
 )
 from db.session import get_session
 from db.trend_category_repository import (
+    get_existing_trend_category,
     get_public_category_shelves,
     get_public_category_trends,
     hydrate_trend_categories,
+    require_existing_trend_category,
 )
 from db.trend_run_claims import get_claim, release_pre_submit_claim, reserve_claim
 
@@ -849,12 +854,17 @@ async def admin_create_trend(
     tag_settings = dict(body.settings)
     tag_settings.pop("user_fields", None)
     _merge_pricing_options(tag_settings, pricing_options)
-    try:
-        trend_tags = build_trend_tags(body.kind, tag_settings)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if body.kind == "video":
         _validate_trend_video_settings(runtime_model, tag_settings)
+    try:
+        category = await require_existing_trend_category(
+            session, tag_settings.get("category") or DEFAULT_TREND_CATEGORY
+        )
+        tag_settings["category"] = category.key
+        trend_tags = build_trend_tags(body.kind, tag_settings)
+        trend_tags = mirror_trend_category_tag(trend_tags, category.key)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     prompt = await create_prompt(
         session,
         author_id=user.id,
@@ -866,6 +876,7 @@ async def admin_create_trend(
         model=runtime_model,
         tags=trend_tags,
         is_public=True,
+        trend_category_id=int(category.id),
     )
     prompt.trend_user_fields = configured_user_fields
     await session.commit()
@@ -887,6 +898,28 @@ async def admin_update_trend(
     if not is_trend_prompt(prompt):
         raise HTTPException(status_code=404, detail="Trend not found")
     kind = trend_kind(prompt)
+    original_legacy_category = legacy_trend_category(prompt)
+    incoming_category = (
+        body.settings.get("category")
+        if body.settings is not None and "category" in body.settings
+        else None
+    )
+    if incoming_category is not None:
+        try:
+            resolved_category = await require_existing_trend_category(session, incoming_category)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    else:
+        try:
+            resolved_category = await get_existing_trend_category(
+                session, original_legacy_category or DEFAULT_TREND_CATEGORY
+            )
+        except ValueError:
+            # Old malformed keys remain evidence until an administrator
+            # explicitly resolves them; unrelated edits must not rewrite them.
+            resolved_category = None
+    if resolved_category is not None:
+        prompt.trend_category_id = int(resolved_category.id)
     if body.model is not None:
         runtime_model, pricing_options = split_pricing_variant_key(body.model)
         await _validated_model(session, runtime_model, kind)
@@ -924,6 +957,13 @@ async def admin_update_trend(
         merged_settings.pop("user_fields", None)
         try:
             prompt.tags = build_trend_tags(kind, merged_settings)
+            mirrored_key = (
+                str(resolved_category.key)
+                if resolved_category is not None
+                else original_legacy_category
+            )
+            if mirrored_key:
+                prompt.tags = mirror_trend_category_tag(prompt.tags, mirrored_key)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
     if kind == "video" and (body.model is not None or body.settings is not None):

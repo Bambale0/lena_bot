@@ -65,6 +65,22 @@ def trend_category(prompt: UserPrompt) -> str:
     return legacy_key or DEFAULT_TREND_CATEGORY
 
 
+def legacy_trend_category(prompt: UserPrompt) -> str | None:
+    """Return the mirrored tag key without applying relation/fallback precedence."""
+
+    return _tag_value(normalized_tags(prompt), TREND_CATEGORY_PREFIX)
+
+
+def mirror_trend_category_tag(tags: list[str], category_key: str) -> list[str]:
+    """Mirror an already validated DB key while preserving all other settings tags."""
+
+    key = str(category_key or "").strip().lower()
+    if not key:
+        raise ValueError("Trend category is required")
+    kept = [item for item in tags if not str(item).lower().startswith(TREND_CATEGORY_PREFIX)]
+    return list(dict.fromkeys([*kept, f"{TREND_CATEGORY_PREFIX}{key}"]))
+
+
 def trend_category_payload(category: str, relation: Any = None) -> dict[str, str]:
     key = str(category or "").strip().lower() or DEFAULT_TREND_CATEGORY
     relation_key = str(getattr(relation, "key", "") or "").strip().lower()

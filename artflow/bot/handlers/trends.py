@@ -44,6 +44,7 @@ from db.prompt_repository import (
     get_prompt_by_id,
     get_prompts_by_tag,
 )
+from db.trend_category_repository import require_existing_trend_category
 
 router = Router(name="trends")
 MAX_BOT_PREVIEW_BYTES = 20 * 1024 * 1024
@@ -425,6 +426,14 @@ async def confirm_trend(call: CallbackQuery, state: FSMContext, session: AsyncSe
     if kind == "video" and data.get("duration") not in duration_options(str(data.get("model") or "")):
         await call.answer("Для этой модели выбери доступную длительность", show_alert=True)
         return
+    try:
+        category = await require_existing_trend_category(
+            session, settings_payload["category"]
+        )
+    except ValueError:
+        await call.answer("Эта категория больше недоступна", show_alert=True)
+        return
+    settings_payload["category"] = category.key
     prompt = await create_prompt(
         session,
         author_id=db_user.id,
@@ -436,6 +445,7 @@ async def confirm_trend(call: CallbackQuery, state: FSMContext, session: AsyncSe
         model=data["model"],
         tags=build_trend_tags(kind, settings_payload),
         is_public=True,
+        trend_category_id=int(category.id),
     )
     await approve_prompt(session, prompt.id)
     await state.clear()

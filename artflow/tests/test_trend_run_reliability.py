@@ -237,6 +237,15 @@ async def trend_client(monkeypatch):
         "api.trends_routes._find_idempotent_trend_run", AsyncMock(return_value=None)
     )
     monkeypatch.setattr("api.trends_routes._validated_model", AsyncMock())
+    category = SimpleNamespace(id=1, key="featured", title="Тренды", sort_order=0)
+    monkeypatch.setattr(
+        "api.trends_routes.require_existing_trend_category",
+        AsyncMock(return_value=category),
+    )
+    monkeypatch.setattr(
+        "api.trends_routes.get_existing_trend_category",
+        AsyncMock(return_value=category),
+    )
     monkeypatch.setattr(
         "api.trends_routes.verify_uploaded_asset",
         lambda *_args, **_kwargs: {"url": "https://example.com/photo.png"},
