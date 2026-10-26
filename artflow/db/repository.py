@@ -1874,6 +1874,18 @@ async def finish_generation(
             "overage_seconds": settled.overage_seconds,
         }
         fields["credits_spent"] = settled.final_credits
+        if wan_billing.get("prompt_reward_deferred") is True:
+            from db.prompt_repository import apply_deferred_prompt_rewards
+
+            royalties = await apply_deferred_prompt_rewards(
+                session,
+                prompt_id=params.get("prompt_id"),
+                using_user_id=locked.user_id,
+                final_credits=settled.final_credits,
+                generation_id=gen_id,
+            )
+            params["wan30_billing"]["prompt_rewards_settled"] = True
+            params["wan30_billing"]["prompt_rewards"] = royalties
         logger.info(
             "WAN duration settled gen=%s billable_seconds=%s refund_credits=%s overage_seconds=%s",
             gen_id, settled.billable_seconds, settled.refund_credits, settled.overage_seconds,

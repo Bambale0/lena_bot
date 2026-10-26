@@ -1,5 +1,38 @@
 # Execution ledger — Studio capability completion (2026-10-24)
 
+## Active 2026-10-26 — WAN native edit, P1 reward settlement release
+
+- Base production main at preflight: `179d7a01e5a6328d9cb0642fa8fe9523e12fbafe`.
+  Isolated PR branch: `fix/wan3-neironych-native-edit-20261026`, PR #306.
+  Original commit: `d10fe0731ed7c3398dbbb6378c6bc4120804dec9`.
+- Scope: repair native Standard WAN Edit route and actual-output settlement
+  without changing admin pricing/routes, KIE-only incompatibilities or
+  downstream acceptance semantics. No migration, manual SQL or paid test.
+- Review P1 verified: Mini App prompt royalties were committed immediately
+  from all reserved credits, while completion refunded unused duration. This
+  could exceed net customer charge and create undeserved account credits.
+  Additionally, existing use_prompt/add_credits helpers commit independent
+  transactions, so they are unsafe inside atomic generation settlement.
+- Fix: retain prompt use count on successful launch, mark pending author and
+  referrer rewards in stored WAN billing, and pay from final bounded settled
+  charge under the same Generation lock/transaction as result, customer
+  refund, credit_ledger and notification. No payout on provider failure,
+  no repeated payout for concurrent callbacks; a sub-one-credit charge
+  cannot trigger a one-credit author bonus. Generation source id is included
+  in reward ledger. Existing fixed-price model reward policy unaffected.
+- Tests: new real disposable PostgreSQL schema reproduces RED P1, GREEN with
+  deferred accounting (5 competing callbacks); successful completion/refund,
+  race against failure, mid-reward ledger error rollback and retry, and
+  no reward on failed generation. SQLite atomic rollback, routing and
+  Mini App quote tests retained. Focused 45 passed / 0 failed; final full backend after fractional-credit test exit 0.
+- Release gates: [x] complete full-suite Ruff/pytest/provider checks (exit 0; provider 100 contracts);
+  [ ] publish amended PR HEAD; [ ] reviewer P1 addressed and resolved;
+  [ ] exact-head required GitHub CI green; [ ] protected squash auto-merge;
+  [ ] exact main SHA CI and Production Autodeploy; [ ] production
+  running-container/version/health/errors verified read-only;
+  [ ] final report and monitoring cleanup. No manual production restart.
+
+
 ## Active 2026-10-25 — Release remaining audited backend capabilities
 
 PR302 merged through protected native auto-merge at f8779fb6c377479c456c512568982ccd3f20b94b, but exact-main CI40211783118 stopped deployment:392smoke passed,274/275Studio passed; held-preflight test read the intentional pre-response transactionId:null before response identity55. Backend/PostgreSQL,bot,provider and300journeys passed; Production Autodeploy was SKIPPED, not released. Separate test-only follow-up c534da5 deterministically reproduces the race with a held invoice response, then waits for persisted55 before releasing global preflight. Original exact identity, raw marker preservation, one POST and pending UI assertions remain; explicit zero-generation assertion added. Focused1/1 and full44fastrepeat/build/diff checks pass. No product, timeout, retry or backend change. Independent scoped review APPROVED with no findings (postmerge-ci-review.md); protected follow-up CI/main autodeploy/live verification remain mandatory. This is a new CI maintenance task, not a second final product fix wave; no blind rerun or manual deploy bypass. Cost if diagnosis is wrong: further investigation before any product change, never accepting null as a finished invoice.

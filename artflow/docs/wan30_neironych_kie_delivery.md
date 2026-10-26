@@ -89,10 +89,10 @@ silent fallback to an inactive or cheaper base tariff.
 ## Known deliberate limit
 
 KIE supports automatic duration=-1 in the lower-level validated
-contract. It is NOT offered as a paid UI choice yet: charging a
-30-second reserve without an exactly-once actual-duration refund
-would overcharge shorter outputs. Ordinary fixed durations 2-30 sec
-are fully supported; automatic duration needs separate settlement work.
+contract. The paid UI does not yet expose it, despite backend settlement
+now supporting verified actual output duration for already accepted
+automatic-duration jobs. This requires a separate UI rollout and provider
+compatibility confirmation. Fixed durations 2-30 sec are fully supported.
 
 ## Release / rollback
 
@@ -187,10 +187,25 @@ production checkout/build/configuration was used.
   credits_spent, settlement marker, user balance, and credit_ledger
   wan30_duration_refund row are committed atomically under a generation row
   lock together with any Telegram completion notice.
+- For a public Mini App prompt attached to an unsettled WAN quote, the use
+  counter is incremented when submission succeeds, but the author and L2/L3
+  referral rewards are **not** issued from the original reserve. A durable
+  prompt_reward_deferred marker records the intent with the validated quote.
+  Upon successful completion the author/referrals receive existing
+  configured-share rewards based only on the final measured customer charge.
+  A fractional charge below one credit does not mint a minimum one-credit
+  author reward. Prompt deactivation after admission does not invalidate a
+  previously accepted generation; a removed prompt/author skips the reward
+  while still completing the job and delivering the customer's refund.
+- Deferred royalty credit updates, per-generation ledger rows, the customer
+  duration refund, settled prompt-reward audit and generation status are
+  committed in the SAME row-locked transaction. The helper must not call
+  standalone wallet operations that commit halfway. Duplicate notifications
+  cannot pay royalties twice; failed generations pay no deferred royalties.
 - Duplicate webhooks, delayed polling, provider timeouts, ledger failures and
   callback/timeout races must not cause second paid POSTs, extra debits or
-  duplicate refunds. If output duration exceeds the reserved cap, log
-  overage_seconds for operator review without charging more.
+  duplicate refunds or royalties. If output duration exceeds the reserved cap,
+  log overage_seconds for operator review without charging more.
 - Already accepted jobs remain on their recorded provider. Existing KIE-only
   routes and incompatible modes remain stable; no migration or manual SQL.
 - Provider reference: https://api.xn--e1aikcel5c5a.online/guide?lang=ru

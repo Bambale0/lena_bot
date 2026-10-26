@@ -15,7 +15,17 @@ from api.wan30_contract import (
 )
 from api.wan30_launch import Wan30Quote
 from db import repository as repo
-from db.models import Base, CreditLedgerEntry, Generation, GenerationStatus, GenerationType, User
+from db.models import (
+    Base,
+    CreditLedgerEntry,
+    Generation,
+    GenerationStatus,
+    GenerationType,
+    PromptCategory,
+    PromptStatus,
+    User,
+    UserPrompt,
+)
 
 
 def source_edit(*, duration=10, first_seconds=10.56, model="wan/3-0-video",
@@ -209,7 +219,7 @@ async def wan_pg_db(monkeypatch):
     )
     tables = [
         table for table in Base.metadata.sorted_tables
-        if table.name in {"users", "image_sessions", "generations", "credit_ledger"}
+        if table.name in {"users", "image_sessions", "generations", "credit_ledger", "user_prompts"}
     ]
     async with engine.begin() as connection:
         await connection.run_sync(lambda c: Base.metadata.create_all(c, tables=tables))
@@ -348,3 +358,232 @@ async def test_wan_duration_probe_reads_verified_api_owned_mp4(tmp_path, monkeyp
         "https://apixbotai.com/static/upload/provider-results/owned.mp4",
     ) == 5.038
     probe.assert_awaited_once_with(video, MediaKind.VIDEO)
+
+
+@pytest_asyncio.fixture
+async def wan_pg_prompt_db(wan_pg_db):
+    """Submitted public prompt whose WAN reward must wait for the final charge."""
+    factory = wan_pg_db
+    async with factory() as session:
+        session.add_all([
+            User(id=800, tg_id=800, credits=0, referral_code="wan-author",
+                 referrer_id=810, referrer_l2_id=820),
+            User(id=810, tg_id=810, credits=0, referral_code="wan-author-l2"),
+            User(id=820, tg_id=820, credits=0, referral_code="wan-author-l3"),
+        ])
+        await session.flush()
+        session.add(UserPrompt(
+            id=900, author_id=800, title="Recolor video",
+            description="Video edit", category=PromptCategory.art,
+            prompt_text="Recolor @Video1", tags=[],
+            status=PromptStatus.approved, is_public=True, uses_count=1,
+        ))
+        gen = await session.get(Generation, 701)
+        stored = json.loads(gen.input_params)
+        stored["prompt_id"] = 900
+        stored["wan30_billing"]["prompt_reward_deferred"] = True
+        gen.input_params = json.dumps(stored)
+        await session.commit()
+    return factory
+
+
+@pytest.mark.asyncio
+async def test_postgres_deferred_wan_prompt_rewards_use_final_charge_once(wan_pg_prompt_db):
+    import asyncio
+
+    from db.prompt_repository import PROMPT_AUTHOR_SHARE, PROMPT_REF_L2_SHARE, PROMPT_REF_L3_SHARE
+
+    factory = wan_pg_prompt_db
+    url = "https://apixbotai.com/static/upload/provider-results/verified.mp4"
+
+    async def notify():
+        async with factory() as session:
+            return await repo.finish_generation(
+                session, 701, url, expected_task_id="neironych:wan-edit-701",
+            )
+
+    results = await asyncio.wait_for(asyncio.gather(*(notify() for _ in range(5))), 20)
+    assert sum(x is not None for x in results) == 1
+    async with factory() as session:
+        generation = await session.get(Generation, 701)
+        assert generation.credits_spent == 76.0  # Reserved 88, refunded 12
+        billing = json.loads(generation.input_params)["wan30_billing"]
+        assert billing["settled"] is True
+        assert billing["prompt_rewards_settled"] is True
+        amounts = billing["prompt_rewards"]
+        expected = {
+            "author": int(76 * PROMPT_AUTHOR_SHARE),
+            "l2": int(76 * PROMPT_REF_L2_SHARE),
+            "l3": int(76 * PROMPT_REF_L3_SHARE),
+        }
+        assert amounts == expected
+        user_amounts = {700: 112.0, 800: expected["author"],
+                        810: expected["l2"], 820: expected["l3"]}
+        for user_id, expected_balance in user_amounts.items():
+            assert (await session.get(User, user_id)).credits == expected_balance
+        ledgers = (await session.scalars(select(CreditLedgerEntry))).all()
+        assert len(ledgers) == 4
+        assert {item.entry_type: item.delta for item in ledgers} == {
+            "wan30_duration_refund": 12.0,
+            "prompt_reward_author": float(expected["author"]),
+            "prompt_reward_l2": float(expected["l2"]),
+            "prompt_reward_l3": float(expected["l3"]),
+        }
+        assert {(item.entry_type, item.source_type, item.source_id)
+                for item in ledgers} == {
+                    ("wan30_duration_refund", "generation", "701"),
+                    ("prompt_reward_author", "prompt", "900"),
+                    ("prompt_reward_l2", "prompt", "900"),
+                    ("prompt_reward_l3", "prompt", "900"),
+                }
+        assert all(
+            "generation=701" in item.note
+            for item in ledgers if item.entry_type.startswith("prompt_reward_")
+        )
+
+
+def test_wan_prompt_royalty_intent_is_durable_only_for_unsettled_prompt_quote():
+    from api.miniapp_routes import _defer_wan_prompt_reward
+
+    params = Wan30Quote(
+        source_edit(), billable_seconds=22, rate=4.0, credits=88.0,
+        resolution="720p",
+    ).stored_params()
+    assert _defer_wan_prompt_reward(params, prompt_id=900, is_wan=True)
+    assert params["wan30_billing"]["prompt_reward_deferred"] is True
+
+    for prompt_id, is_wan in ((None, True), (900, False)):
+        other = Wan30Quote(
+            source_edit(), billable_seconds=22, rate=4, credits=88,
+            resolution="720p",
+        ).stored_params()
+        assert not _defer_wan_prompt_reward(other, prompt_id=prompt_id, is_wan=is_wan)
+        assert "prompt_reward_deferred" not in other["wan30_billing"]
+    fixed = {"wan30_billing": {"settled": True}}
+    assert not _defer_wan_prompt_reward(fixed, prompt_id=900, is_wan=True)
+
+
+@pytest.mark.asyncio
+async def test_wan_prompt_use_at_submission_counts_without_paying(monkeypatch):
+    from api.miniapp_routes import _mark_prompt_used_after_generation
+    from db import prompt_repository
+
+    recorder = AsyncMock()
+    monkeypatch.setattr(prompt_repository, "use_prompt", recorder)
+    await _mark_prompt_used_after_generation(
+        object(), prompt_id=900, user_id=700, credits_spent=None,
+    )
+    recorder.assert_awaited_once()
+    assert recorder.await_args.kwargs["credits_spent"] is None
+
+
+@pytest.mark.asyncio
+async def test_postgres_failed_wan_does_not_pay_deferred_prompt_rewards(wan_pg_prompt_db):
+    async with wan_pg_prompt_db() as session:
+        failed, refunded = await repo.fail_generation_and_refund(
+            session, 701, "Provider rejected video",
+            expected_task_id="neironych:wan-edit-701", refund_note="wan-prompt-failed",
+        )
+        assert failed and refunded == 88.0
+    async with wan_pg_prompt_db() as session:
+        assert (await session.get(Generation, 701)).status == GenerationStatus.failed
+        assert (await session.get(User, 700)).credits == 188.0
+        for uid in (800, 810, 820):
+            assert (await session.get(User, uid)).credits == 0.0
+        entries = (await session.scalars(select(CreditLedgerEntry))).all()
+        assert len(entries) == 1
+        assert entries[0].delta == 88.0
+
+
+@pytest.mark.asyncio
+async def test_postgres_deferred_wan_reward_failure_rolls_back_and_retries(
+    wan_pg_prompt_db, monkeypatch,
+):
+
+    original_insert = repo._insert_credit_ledger
+
+    async def reject_mid_reward(session, **values):
+        if values.get("entry_type") == "prompt_reward_l2":
+            raise RuntimeError("prompt reward journal unavailable")
+        return await original_insert(session, **values)
+
+    monkeypatch.setattr(repo, "_insert_credit_ledger", reject_mid_reward)
+    url = "https://apixbotai.com/static/upload/provider-results/verified.mp4"
+    async with wan_pg_prompt_db() as session:
+        with pytest.raises(RuntimeError, match="reward journal unavailable"):
+            await repo.finish_generation(
+                session, 701, url, expected_task_id="neironych:wan-edit-701",
+            )
+        await session.rollback()
+
+    async with wan_pg_prompt_db() as session:
+        assert (await session.get(Generation, 701)).status == GenerationStatus.processing
+        for uid, expected in ((700, 100.0), (800, 0.0), (810, 0.0), (820, 0.0)):
+            assert (await session.get(User, uid)).credits == expected
+        assert (await session.scalars(select(CreditLedgerEntry))).all() == []
+
+    monkeypatch.setattr(repo, "_insert_credit_ledger", original_insert)
+    async with wan_pg_prompt_db() as session:
+        result = await repo.finish_generation(
+            session, 701, url, expected_task_id="neironych:wan-edit-701",
+        )
+        assert result and result.credits_spent == 76
+    async with wan_pg_prompt_db() as session:
+        ledgers = (await session.scalars(select(CreditLedgerEntry))).all()
+        assert len(ledgers) == 4
+
+
+@pytest.mark.asyncio
+async def test_postgres_wan_royalty_vs_failure_race_has_single_terminal_outcome(
+    wan_pg_prompt_db,
+):
+    import asyncio
+
+    url = "https://apixbotai.com/static/upload/provider-results/verified.mp4"
+
+    async def complete():
+        async with wan_pg_prompt_db() as session:
+            return await repo.finish_generation(
+                session, 701, url, expected_task_id="neironych:wan-edit-701",
+            )
+
+    async def fail():
+        async with wan_pg_prompt_db() as session:
+            return await repo.fail_generation_and_refund(
+                session, 701, "Failed upstream", expected_task_id="neironych:wan-edit-701",
+                refund_note="wan-royalty-race",
+            )
+
+    await asyncio.wait_for(asyncio.gather(complete(), fail()), timeout=20)
+    async with wan_pg_prompt_db() as session:
+        gen = await session.get(Generation, 701)
+        entries = (await session.scalars(select(CreditLedgerEntry))).all()
+        if gen.status == GenerationStatus.done:
+            assert len(entries) == 4
+            assert (await session.get(User, 700)).credits == 112.0
+            assert (await session.get(User, 800)).credits == 22.0
+        else:
+            assert gen.status == GenerationStatus.failed
+            assert len(entries) == 1
+            assert (await session.get(User, 700)).credits == 188.0
+            assert (await session.get(User, 800)).credits == 0.0
+
+
+@pytest.mark.asyncio
+async def test_postgres_fractional_settled_charge_does_not_mint_minimum_prompt_reward(
+    wan_pg_prompt_db,
+):
+    from db.prompt_repository import apply_deferred_prompt_rewards
+
+    async with wan_pg_prompt_db() as session:
+        rewards = await apply_deferred_prompt_rewards(
+            session, prompt_id=900, using_user_id=700,
+            final_credits=0.5, generation_id=701,
+        )
+        assert rewards == {"author": 0, "l2": 0, "l3": 0}
+        await session.commit()
+
+    async with wan_pg_prompt_db() as session:
+        for user_id in (800, 810, 820):
+            assert (await session.get(User, user_id)).credits == 0.0
+        assert (await session.scalars(select(CreditLedgerEntry))).all() == []
