@@ -54,13 +54,46 @@ def normalize_trend_category(value: Any) -> str:
 
 
 def trend_category(prompt: UserPrompt) -> str:
-    return normalize_trend_category(_tag_value(normalized_tags(prompt), TREND_CATEGORY_PREFIX))
+    relation = getattr(prompt, "trend_category_record", None)
+    relation_key = str(getattr(relation, "key", "") or "").strip().lower()
+    if relation_key:
+        return relation_key
+    # Preserve an unknown legacy key verbatim until an administrator resolves
+    # it. Writers still use normalize_trend_category during the compatibility
+    # phase, so unvalidated new keys cannot enter through the old endpoints.
+    legacy_key = _tag_value(normalized_tags(prompt), TREND_CATEGORY_PREFIX)
+    return legacy_key or DEFAULT_TREND_CATEGORY
 
 
-def trend_category_payload(category: str) -> dict[str, str]:
-    key = normalize_trend_category(category)
-    meta = TREND_CATEGORIES[key]
-    return {"key": key, "title": meta["title"], "emoji": meta["emoji"]}
+def legacy_trend_category(prompt: UserPrompt) -> str | None:
+    """Return the mirrored tag key without applying relation/fallback precedence."""
+
+    return _tag_value(normalized_tags(prompt), TREND_CATEGORY_PREFIX)
+
+
+def mirror_trend_category_tag(tags: list[str], category_key: str) -> list[str]:
+    """Mirror an already validated DB key while preserving all other settings tags."""
+
+    key = str(category_key or "").strip().lower()
+    if not key:
+        raise ValueError("Trend category is required")
+    kept = [item for item in tags if not str(item).lower().startswith(TREND_CATEGORY_PREFIX)]
+    return list(dict.fromkeys([*kept, f"{TREND_CATEGORY_PREFIX}{key}"]))
+
+
+def trend_category_payload(category: str, relation: Any = None) -> dict[str, str]:
+    key = str(category or "").strip().lower() or DEFAULT_TREND_CATEGORY
+    relation_key = str(getattr(relation, "key", "") or "").strip().lower()
+    if relation_key == key:
+        return {
+            "key": key,
+            "title": str(getattr(relation, "title", "") or key),
+            "emoji": TREND_CATEGORIES.get(key, {}).get("emoji", ""),
+        }
+    meta = TREND_CATEGORIES.get(key)
+    if meta:
+        return {"key": key, "title": meta["title"], "emoji": meta["emoji"]}
+    return {"key": key, "title": key, "emoji": ""}
 
 
 def trend_user_fields(prompt: UserPrompt) -> list[dict[str, Any]]:
@@ -141,7 +174,9 @@ def trend_is_public(prompt: UserPrompt | None) -> bool:
 
 def trend_public_payload(prompt: UserPrompt) -> dict[str, Any]:
     created_at: datetime | None = getattr(prompt, "created_at", None)
-    category = trend_category_payload(trend_category(prompt))
+    category = trend_category_payload(
+        trend_category(prompt), getattr(prompt, "trend_category_record", None)
+    )
     kind = trend_kind(prompt)
     return {
         "id": int(prompt.id),

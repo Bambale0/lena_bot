@@ -5,13 +5,21 @@ import logging
 import math
 import re
 
-from sqlalchemy import desc, func, select, update
+from sqlalchemy import and_, desc, exists, func, literal, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.trends import TREND_CATEGORY_PREFIX
 from db import repository as repo
-from db.models import PromptCategory, PromptLike, PromptStatus, User, UserPrompt
+from db.models import (
+    PromptCategory,
+    PromptLike,
+    PromptStatus,
+    TrendCategory,
+    User,
+    UserPrompt,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,12 +51,32 @@ COLLECTION_KEYWORDS: dict[str, tuple[str, ...]] = {
 }
 
 
+def _visible_public_prompt_filter():
+    """Keep ordinary prompts and only trends from currently visible categories."""
+    visible_category = exists(
+        select(TrendCategory.id).where(
+            TrendCategory.is_visible.is_(True),
+            or_(
+                UserPrompt.trend_category_id == TrendCategory.id,
+                and_(
+                    UserPrompt.trend_category_id.is_(None),
+                    UserPrompt.tags.any(
+                        literal(TREND_CATEGORY_PREFIX) + TrendCategory.key
+                    ),
+                ),
+            ),
+        )
+    )
+    return or_(~UserPrompt.tags.any("trend"), visible_category)
+
+
 def _normalize_tags(tags: list[str] | None) -> list[str]:
     cleaned: list[str] = []
     for tag in tags or []:
         normalized = re.sub(r"[^a-z0-9_+:-]", "", tag.lower().strip().lstrip("#"))
         if normalized and normalized not in cleaned:
-            cleaned.append(normalized[:32])
+            max_length = 47 if normalized.startswith("trend-category:") else 32
+            cleaned.append(normalized[:max_length])
     return cleaned
 
 
@@ -106,6 +134,7 @@ async def create_prompt(
     model: str | None = None,
     tags: list[str] | None = None,
     is_public: bool = True,
+    trend_category_id: int | None = None,
 ) -> UserPrompt:
     prompt = UserPrompt(
         author_id=author_id,
@@ -118,6 +147,7 @@ async def create_prompt(
         tags=_normalize_tags(tags) or infer_tags(prompt_text),
         is_public=is_public,
         status=PromptStatus.pending,
+        trend_category_id=trend_category_id,
     )
     session.add(prompt)
     await session.commit()
@@ -126,8 +156,16 @@ async def create_prompt(
     return prompt
 
 
-async def get_prompt_by_id(session: AsyncSession, prompt_id: int) -> UserPrompt | None:
-    result = await session.execute(select(UserPrompt).where(UserPrompt.id == prompt_id))
+async def get_prompt_by_id(
+    session: AsyncSession,
+    prompt_id: int,
+    *,
+    visible_public_only: bool = False,
+) -> UserPrompt | None:
+    statement = select(UserPrompt).where(UserPrompt.id == prompt_id)
+    if visible_public_only:
+        statement = statement.where(_visible_public_prompt_filter())
+    result = await session.execute(statement)
     return result.scalar_one_or_none()
 
 
@@ -149,6 +187,7 @@ async def get_top_prompts(session: AsyncSession, limit: int = TOP_PROMPTS_LIMIT)
         .where(
             UserPrompt.status == PromptStatus.approved,
             UserPrompt.is_public.is_(True),
+            _visible_public_prompt_filter(),
         )
         .order_by(desc(UserPrompt.uses_count), desc(UserPrompt.created_at))
         .limit(limit)
@@ -162,6 +201,7 @@ async def get_popular_prompts(session: AsyncSession, limit: int = TOP_PROMPTS_LI
         .where(
             UserPrompt.status == PromptStatus.approved,
             UserPrompt.is_public.is_(True),
+            _visible_public_prompt_filter(),
         )
         .order_by(desc(UserPrompt.likes), desc(UserPrompt.uses_count), desc(UserPrompt.created_at))
         .limit(limit)
@@ -180,6 +220,7 @@ async def get_prompts_by_tag(
             UserPrompt.status == PromptStatus.approved,
             UserPrompt.is_public.is_(True),
             UserPrompt.tags.any(tag.lower()),
+            _visible_public_prompt_filter(),
         )
         .order_by(desc(UserPrompt.uses_count), desc(UserPrompt.likes), desc(UserPrompt.created_at))
         .limit(limit)
@@ -196,6 +237,7 @@ async def get_approved_prompts(
     q = select(UserPrompt).where(
         UserPrompt.status == PromptStatus.approved,
         UserPrompt.is_public.is_(True),
+        _visible_public_prompt_filter(),
     )
     if category:
         q = q.where(UserPrompt.category == category)
@@ -208,6 +250,7 @@ async def count_approved_prompts(session: AsyncSession, category: PromptCategory
     q = select(func.count()).select_from(UserPrompt).where(
         UserPrompt.status == PromptStatus.approved,
         UserPrompt.is_public.is_(True),
+        _visible_public_prompt_filter(),
     )
     if category:
         q = q.where(UserPrompt.category == category)
@@ -224,8 +267,12 @@ async def increment_usage(session: AsyncSession, prompt_id: int) -> None:
 
 
 async def like_prompt(session: AsyncSession, prompt_id: int, user_id: int) -> tuple[UserPrompt | None, str]:
-    current = await get_prompt_by_id(session, prompt_id)
+    current = await get_prompt_by_id(session, prompt_id, visible_public_only=True)
     if not current or current.status != PromptStatus.approved or not current.is_public:
+        return None, "missing"
+    from db.trend_category_repository import public_prompt_library_item_is_visible
+
+    if not await public_prompt_library_item_is_visible(session, current, lock=True):
         return None, "missing"
 
     try:
@@ -383,8 +430,12 @@ async def use_prompt(
     *,
     credits_spent: int | None = None,
 ) -> tuple[UserPrompt, dict[str, int]]:
-    prompt = await get_prompt_by_id(session, prompt_id)
+    prompt = await get_prompt_by_id(session, prompt_id, visible_public_only=True)
     if not prompt or prompt.status != PromptStatus.approved or not prompt.is_public:
+        raise ValueError(f"Prompt {prompt_id} not available")
+    from db.trend_category_repository import public_prompt_library_item_is_visible
+
+    if not await public_prompt_library_item_is_visible(session, prompt, lock=True):
         raise ValueError(f"Prompt {prompt_id} not available")
 
     await increment_usage(session, prompt_id)

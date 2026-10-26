@@ -37,9 +37,12 @@ from core.trend_user_fields import (
     normalize_configured_trend_user_fields,
 )
 from core.trends import (
+    DEFAULT_TREND_CATEGORY,
     TREND_TAG,
     build_trend_tags,
     is_trend_prompt,
+    legacy_trend_category,
+    mirror_trend_category_tag,
     trend_admin_payload,
     trend_is_public,
     trend_kind,
@@ -53,9 +56,16 @@ from db.prompt_repository import (
     create_prompt,
     deactivate_prompt,
     get_prompt_by_id,
-    get_prompts_by_tag,
 )
 from db.session import get_session
+from db.trend_category_repository import (
+    get_existing_trend_category,
+    get_public_category_shelves,
+    get_public_category_trends,
+    get_visible_trend_category_for_prompt,
+    get_visible_trends,
+    require_existing_trend_category,
+)
 from db.trend_run_claims import get_claim, release_pre_submit_claim, reserve_claim
 
 router = APIRouter(prefix="/api/v1", tags=["trends"])
@@ -181,7 +191,16 @@ async def _get_public_trend(session: AsyncSession, trend_id: int) -> UserPrompt:
     prompt = await get_prompt_by_id(session, trend_id)
     if not trend_is_public(prompt):
         raise HTTPException(status_code=404, detail="Trend not found")
+    category = await get_visible_trend_category_for_prompt(session, prompt)
+    if category is None:
+        raise HTTPException(status_code=404, detail="Trend not found")
     return prompt
+
+
+async def _lock_public_trend_category(session: AsyncSession, prompt: UserPrompt) -> None:
+    category = await get_visible_trend_category_for_prompt(session, prompt, lock=True)
+    if category is None:
+        raise HTTPException(status_code=404, detail="Trend not found")
 
 
 async def _trend_cost_credits(session: AsyncSession, trend: UserPrompt, duration_override: int | None = None) -> float:
@@ -367,6 +386,88 @@ async def _patch_trend_snapshot(
     await session.commit()
 
 
+def _public_trend_in_category(prompt: UserPrompt, category: Any) -> dict[str, Any]:
+    payload = trend_public_payload(prompt)
+    payload.update(
+        {
+            "category": str(category.key),
+            "category_title": str(category.title),
+            "category_emoji": "",
+        }
+    )
+    return payload
+
+
+@router.get("/trend-categories")
+async def list_trend_categories(
+    limit: int = Query(default=24, ge=1, le=24),
+    cursor: str | None = Query(default=None, max_length=512),
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> dict[str, Any]:
+    del user
+    try:
+        page = await get_public_category_shelves(
+            session,
+            limit=limit,
+            cursor=cursor,
+            preview_limit=5,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "items": [
+            {
+                "key": str(item.category.key),
+                "title": str(item.category.title),
+                "sort_order": int(item.category.sort_order),
+                "trend_count": int(item.trend_count),
+                "preview_items": [
+                    _public_trend_in_category(prompt, item.category)
+                    for prompt in item.previews
+                ],
+            }
+            for item in page.items
+        ],
+        "has_more": page.has_more,
+        "next_cursor": page.next_cursor,
+    }
+
+
+@router.get("/trend-categories/{key}/trends")
+async def list_trend_category_items(
+    key: str,
+    limit: int = Query(default=48, ge=1, le=48),
+    cursor: str | None = Query(default=None, max_length=512),
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> dict[str, Any]:
+    del user
+    try:
+        page = await get_public_category_trends(
+            session,
+            key=key,
+            limit=limit,
+            cursor=cursor,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if page is None:
+        raise HTTPException(status_code=404, detail="Trend category not found")
+    return {
+        "category": {
+            "key": str(page.category.key),
+            "title": str(page.category.title),
+            "sort_order": int(page.category.sort_order),
+        },
+        "items": [
+            _public_trend_in_category(prompt, page.category) for prompt in page.items
+        ],
+        "has_more": page.has_more,
+        "next_cursor": page.next_cursor,
+    }
+
+
 @router.get("/trends")
 async def list_trends(
     kind: str | None = Query(default=None, pattern="^(image|video)$"),
@@ -375,7 +476,7 @@ async def list_trends(
     user: User = Depends(get_miniapp_user),
 ) -> list[dict[str, Any]]:
     del user
-    prompts = await get_prompts_by_tag(session, TREND_TAG, limit=limit)
+    prompts = await get_visible_trends(session, limit=limit)
     if kind:
         prompts = [item for item in prompts if trend_kind(item) == kind]
     return [trend_public_payload(item) for item in prompts]
@@ -532,6 +633,9 @@ async def run_trend(
             trend_user_values=body.user_values,
         )
 
+    # Hold a shared category-row lock through durable claim reservation. A hide
+    # committed first blocks this run; a run admitted first is allowed to finish.
+    await _lock_public_trend_category(session, trend)
     claim, created = await reserve_claim(
         session,
         user_id=user_id,
@@ -761,12 +865,17 @@ async def admin_create_trend(
     tag_settings = dict(body.settings)
     tag_settings.pop("user_fields", None)
     _merge_pricing_options(tag_settings, pricing_options)
-    try:
-        trend_tags = build_trend_tags(body.kind, tag_settings)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if body.kind == "video":
         _validate_trend_video_settings(runtime_model, tag_settings)
+    try:
+        category = await require_existing_trend_category(
+            session, tag_settings.get("category") or DEFAULT_TREND_CATEGORY
+        )
+        tag_settings["category"] = category.key
+        trend_tags = build_trend_tags(body.kind, tag_settings)
+        trend_tags = mirror_trend_category_tag(trend_tags, category.key)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     prompt = await create_prompt(
         session,
         author_id=user.id,
@@ -778,6 +887,7 @@ async def admin_create_trend(
         model=runtime_model,
         tags=trend_tags,
         is_public=True,
+        trend_category_id=int(category.id),
     )
     prompt.trend_user_fields = configured_user_fields
     await session.commit()
@@ -799,6 +909,28 @@ async def admin_update_trend(
     if not is_trend_prompt(prompt):
         raise HTTPException(status_code=404, detail="Trend not found")
     kind = trend_kind(prompt)
+    original_legacy_category = legacy_trend_category(prompt)
+    incoming_category = (
+        body.settings.get("category")
+        if body.settings is not None and "category" in body.settings
+        else None
+    )
+    if incoming_category is not None:
+        try:
+            resolved_category = await require_existing_trend_category(session, incoming_category)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    else:
+        try:
+            resolved_category = await get_existing_trend_category(
+                session, original_legacy_category or DEFAULT_TREND_CATEGORY
+            )
+        except ValueError:
+            # Old malformed keys remain evidence until an administrator
+            # explicitly resolves them; unrelated edits must not rewrite them.
+            resolved_category = None
+    if resolved_category is not None:
+        prompt.trend_category_id = int(resolved_category.id)
     if body.model is not None:
         runtime_model, pricing_options = split_pricing_variant_key(body.model)
         await _validated_model(session, runtime_model, kind)
@@ -836,6 +968,13 @@ async def admin_update_trend(
         merged_settings.pop("user_fields", None)
         try:
             prompt.tags = build_trend_tags(kind, merged_settings)
+            mirrored_key = (
+                str(resolved_category.key)
+                if resolved_category is not None
+                else original_legacy_category
+            )
+            if mirrored_key:
+                prompt.tags = mirror_trend_category_tag(prompt.tags, mirrored_key)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
     if kind == "video" and (body.model is not None or body.settings is not None):

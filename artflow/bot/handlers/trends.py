@@ -28,10 +28,10 @@ from core.config import settings
 from core.kling4_access import visible_model_costs
 from core.repeat_duration import duration_options
 from core.trends import (
-    TREND_CATEGORIES,
     TREND_TAG,
     build_trend_tags,
     is_trend_prompt,
+    mirror_trend_category_tag,
     trend_kind,
     trend_user_fields,
 )
@@ -43,6 +43,13 @@ from db.prompt_repository import (
     deactivate_prompt,
     get_prompt_by_id,
     get_prompts_by_tag,
+)
+from db.trend_category_repository import (
+    filter_public_prompt_library_items,
+    get_visible_trend_category,
+    list_visible_trend_categories,
+    public_prompt_library_item_is_visible,
+    require_existing_trend_category,
 )
 
 router = Router(name="trends")
@@ -129,6 +136,7 @@ async def _show(
     trend_id: int | None = None,
 ) -> None:
     items = await get_prompts_by_tag(session, TREND_TAG, limit=80)
+    items = await filter_public_prompt_library_items(session, items)
     if not items:
         await safe_edit_message(
             holder,
@@ -194,7 +202,12 @@ async def trends_noop(call: CallbackQuery) -> None:
 async def use_trend(call: CallbackQuery, session: AsyncSession, state: FSMContext, db_user: User, bot: Bot) -> None:
     trend_id = int(call.data.rsplit(":", 1)[1])  # type: ignore[union-attr]
     prompt = await get_prompt_by_id(session, trend_id)
-    if not is_trend_prompt(prompt) or not prompt.is_public or getattr(prompt.status, "value", prompt.status) != "approved":
+    if (
+        not is_trend_prompt(prompt)
+        or not prompt.is_public
+        or getattr(prompt.status, "value", prompt.status) != "approved"
+        or not await public_prompt_library_item_is_visible(session, prompt)
+    ):
         await call.answer("Тренд уже скрыт", show_alert=True)
         return
     # All surfaces use the same server-side resolver, reference upload,
@@ -246,7 +259,9 @@ async def trend_title(message: Message, state: FSMContext) -> None:
 
 
 @router.message(TrendAdminFSM.description, IsAdmin())
-async def trend_description(message: Message, state: FSMContext) -> None:
+async def trend_description(
+    message: Message, state: FSMContext, session: AsyncSession
+) -> None:
     value = (message.text or "").strip()
     if len(value) > 200:
         await message.answer("Описание длиннее 200 символов.")
@@ -254,11 +269,11 @@ async def trend_description(message: Message, state: FSMContext) -> None:
     await state.update_data(description=value)
     await state.set_state(TrendAdminFSM.category)
     builder = InlineKeyboardBuilder()
-    for key, meta in TREND_CATEGORIES.items():
+    for category in await list_visible_trend_categories(session):
         builder.row(
             InlineKeyboardButton(
-                text=f"{meta['emoji']} {meta['title']}",
-                callback_data=f"trends:category:{key}",
+                text=str(category.title)[:64],
+                callback_data=f"trends:category:{category.key}",
             )
         )
     builder.row(InlineKeyboardButton(text="Отмена", callback_data="trends:cancel"))
@@ -268,9 +283,11 @@ async def trend_description(message: Message, state: FSMContext) -> None:
 @router.callback_query(TrendAdminFSM.category, F.data.startswith("trends:category:"), IsAdmin())
 async def trend_category_pick(call: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
     category = call.data.split(":", 2)[2]  # type: ignore[union-attr]
-    if category not in TREND_CATEGORIES:
+    visible_category = await get_visible_trend_category(session, category)
+    if visible_category is None:
         await call.answer("Категория не найдена", show_alert=True)
         return
+    category = str(visible_category.key)
     data = await state.get_data()
     kind = data.get("kind", "image")
     models = [
@@ -425,6 +442,17 @@ async def confirm_trend(call: CallbackQuery, state: FSMContext, session: AsyncSe
     if kind == "video" and data.get("duration") not in duration_options(str(data.get("model") or "")):
         await call.answer("Для этой модели выбери доступную длительность", show_alert=True)
         return
+    try:
+        category = await require_existing_trend_category(
+            session, settings_payload["category"]
+        )
+    except ValueError:
+        await call.answer("Эта категория больше недоступна", show_alert=True)
+        return
+    settings_payload["category"] = category.key
+    trend_tags = mirror_trend_category_tag(
+        build_trend_tags(kind, settings_payload), category.key
+    )
     prompt = await create_prompt(
         session,
         author_id=db_user.id,
@@ -434,8 +462,9 @@ async def confirm_trend(call: CallbackQuery, state: FSMContext, session: AsyncSe
         prompt_text=data["prompt_template"],
         preview_url=data["preview_url"],
         model=data["model"],
-        tags=build_trend_tags(kind, settings_payload),
+        tags=trend_tags,
         is_public=True,
+        trend_category_id=int(category.id),
     )
     await approve_prompt(session, prompt.id)
     await state.clear()

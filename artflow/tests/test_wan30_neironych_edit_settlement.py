@@ -23,9 +23,19 @@ from db.models import (
     GenerationType,
     PromptCategory,
     PromptStatus,
+    TrendCategory,
     User,
     UserPrompt,
 )
+
+WAN_PG_TABLE_NAMES = {
+    "users",
+    "image_sessions",
+    "generations",
+    "credit_ledger",
+    "trend_categories",
+    "user_prompts",
+}
 
 
 def source_edit(*, duration=10, first_seconds=10.56, model="wan/3-0-video",
@@ -63,6 +73,14 @@ def test_edit_reserves_upper_bound_and_marks_billable_duration_unsettled():
     quote = Wan30Quote(request, billable_seconds=22, rate=4.0, credits=88.0, resolution="720p")
     params = quote.stored_params()
     assert params["wan30_billing"]["settled"] is False
+
+
+def test_selective_wan_postgres_schema_includes_user_prompt_fk_dependencies():
+    tables = [
+        table for table in Base.metadata.sorted_tables if table.name in WAN_PG_TABLE_NAMES
+    ]
+    assert TrendCategory.__table__ in tables
+    assert tables.index(TrendCategory.__table__) < tables.index(UserPrompt.__table__)
 
 
 def test_wan_edit_quote_covers_source_length_even_when_requested_duration_rounds_down():
@@ -219,7 +237,7 @@ async def wan_pg_db(monkeypatch):
     )
     tables = [
         table for table in Base.metadata.sorted_tables
-        if table.name in {"users", "image_sessions", "generations", "credit_ledger", "user_prompts"}
+        if table.name in WAN_PG_TABLE_NAMES
     ]
     async with engine.begin() as connection:
         await connection.run_sync(lambda c: Base.metadata.create_all(c, tables=tables))

@@ -47,6 +47,21 @@ def test_legacy_trend_without_category_uses_featured():
     assert trend_category(item) == DEFAULT_TREND_CATEGORY
 
 
+def test_loaded_relation_is_authoritative_over_legacy_tag():
+    item = _prompt(["trend", "trend-category:animals"])
+    item.trend_category_record = SimpleNamespace(key="portrait", title="Портреты автора")
+    assert trend_category(item) == "portrait"
+    payload = trend_public_payload(item)
+    assert payload["category"] == "portrait"
+    assert payload["category_title"] == "Портреты автора"
+
+
+def test_unknown_legacy_category_key_is_preserved_until_admin_resolution():
+    item = _prompt(["trend", "trend-category:legacy-special"])
+    assert trend_category(item) == "legacy-special"
+    assert "trend-category:legacy-special" in item.tags
+
+
 def test_frontend_is_category_first_and_keeps_studio_as_action():
     source = open("webapp/src/features/trends-screen.tsx", encoding="utf-8").read()
     shell = open("webapp/src/components/app-shell.tsx", encoding="utf-8").read()

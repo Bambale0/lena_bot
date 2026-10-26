@@ -87,6 +87,55 @@ async def test_existing_intent_cannot_be_reused_with_changed_materials(monkeypat
     assert error.value.status_code == 409
 
 
+@pytest.mark.asyncio
+async def test_hidden_trend_does_not_block_existing_kling_intent_retrieval(monkeypatch):
+    from api import kling4_checkout as checkout
+    from api import miniapp_routes as routes
+    from api.kling4_contract import REFERENCE_MODEL
+    from db.models import Kling4Intent, PromptStatus
+
+    intent_id = "12345678-1234-1234-1234-123456789abc"
+    existing_intent = SimpleNamespace(user_id=1, generation_id=77)
+
+    async def get(model, key):
+        return existing_intent if model is Kling4Intent and key == intent_id else None
+
+    prompt = SimpleNamespace(
+        id=12,
+        prompt_text="hidden paid recipe",
+        model=REFERENCE_MODEL,
+        tags=["trend", "trend-video", "trend-category:portrait"],
+        status=PromptStatus.approved,
+        is_public=True,
+        trend_user_fields=[],
+    )
+    generation = SimpleNamespace(id=77)
+    monkeypatch.setattr(routes, "require_kling4_access", AsyncMock())
+    monkeypatch.setattr("db.prompt_repository.get_prompt_by_id", AsyncMock(return_value=prompt))
+    visibility = AsyncMock(return_value=None)
+    monkeypatch.setattr(routes, "get_visible_trend_category_for_prompt", visibility)
+    create = AsyncMock(return_value=generation)
+    monkeypatch.setattr(checkout, "create_kling4_generation", create)
+    monkeypatch.setattr(routes, "_gen_out", lambda item: item)
+    body = routes.VideoGenRequest(
+        model=REFERENCE_MODEL,
+        prompt="hidden",
+        prompt_id=prompt.id,
+        duration=5,
+        intent_id=intent_id,
+    )
+
+    result = await routes.create_video_generation(
+        body,
+        session=SimpleNamespace(get=get),
+        user=SimpleNamespace(id=1),
+    )
+
+    assert result is generation
+    visibility.assert_not_awaited()
+    create.assert_awaited_once()
+
+
 @pytest.mark.parametrize("duration", [True, "5", 5.0])
 def test_api_rejects_coercion_of_kling4_duration(duration):
     from api.miniapp_routes import VideoGenRequest

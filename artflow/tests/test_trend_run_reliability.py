@@ -237,11 +237,21 @@ async def trend_client(monkeypatch):
         "api.trends_routes._find_idempotent_trend_run", AsyncMock(return_value=None)
     )
     monkeypatch.setattr("api.trends_routes._validated_model", AsyncMock())
+    category = SimpleNamespace(id=1, key="featured", title="Тренды", sort_order=0)
+    monkeypatch.setattr(
+        "api.trends_routes.require_existing_trend_category",
+        AsyncMock(return_value=category),
+    )
+    monkeypatch.setattr(
+        "api.trends_routes.get_existing_trend_category",
+        AsyncMock(return_value=category),
+    )
     monkeypatch.setattr(
         "api.trends_routes.verify_uploaded_asset",
         lambda *_args, **_kwargs: {"url": "https://example.com/photo.png"},
     )
     monkeypatch.setattr("api.trends_routes._patch_trend_snapshot", AsyncMock())
+    monkeypatch.setattr("api.trends_routes._lock_public_trend_category", AsyncMock())
     claim = SimpleNamespace(generation_id=None, status="running")
     reserve = AsyncMock(return_value=(claim, True))
     monkeypatch.setattr("api.trends_routes.reserve_claim", reserve)
@@ -281,6 +291,81 @@ async def test_wan_trend_confirms_same_quote_before_paid_launch(trend_client):
     assert quote.await_args.args[0].image_url == "https://example.com/photo.png"
     assert create.await_args.kwargs["body"].quoted_credits == 60
     reserve.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_trend_run_rechecks_category_visibility_before_durable_claim(trend_client):
+    client, monkeypatch, reserve, create = trend_client
+    trend = SimpleNamespace(
+        id=12,
+        trend_category_id=1,
+        model="wan/3-0-video",
+        tags=["trend", "trend-video", "trend-duration:5", "trend-resolution:720p"],
+    )
+    monkeypatch.setattr("api.trends_routes._get_public_trend", AsyncMock(return_value=trend))
+    monkeypatch.setattr(
+        "api.trends_routes.quote_video_generation",
+        AsyncMock(return_value={"cost_credits": 60}),
+    )
+    lock = AsyncMock(side_effect=HTTPException(status_code=404, detail="Trend not found"))
+    monkeypatch.setattr(
+        "api.trends_routes._lock_public_trend_category", lock, raising=False
+    )
+
+    response = await client.post(
+        "/api/v1/trends/12/run",
+        json={
+            "asset_id": "signed-photo-asset-id",
+            "idempotency_key": "hide-race-request",
+            "quoted_credits": 60,
+        },
+    )
+
+    assert response.status_code == 404
+    lock.assert_awaited_once_with(ANY, trend)
+    reserve.assert_not_awaited()
+    create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_existing_claim_result_remains_available_after_category_hide(trend_client):
+    client, monkeypatch, reserve, create = trend_client
+    body = TrendRunRequest(
+        asset_id="signed-photo-asset-id",
+        idempotency_key="accepted-before-hide",
+    )
+    claim = SimpleNamespace(
+        trend_id=12,
+        request_hash=_trend_request_hash(12, body),
+        generation_id=99,
+    )
+    monkeypatch.setattr("api.trends_routes.get_claim", AsyncMock(return_value=claim))
+    monkeypatch.setattr(
+        "api.trends_routes.repo.get_generation_by_id",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                id=99,
+                user_id=7,
+                model="wan/3-0-video",
+                gen_type=GenerationType.video,
+                status="done",
+                credits_spent=60,
+                prompt="hidden",
+                result_url="https://cdn.test/result.mp4",
+                created_at="2026-10-26T12:00:00+00:00",
+            )
+        ),
+    )
+    public_lookup = AsyncMock(side_effect=AssertionError("must not re-admit accepted work"))
+    monkeypatch.setattr("api.trends_routes._get_public_trend", public_lookup)
+
+    response = await client.post("/api/v1/trends/12/run", json=body.model_dump())
+
+    assert response.status_code == 202, response.text
+    assert response.json()["task"]["id"] == 99
+    public_lookup.assert_not_awaited()
+    reserve.assert_not_awaited()
+    create.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -396,6 +481,10 @@ async def test_legacy_trend_accepts_canonical_runtime_model_during_prompt_resolu
         trend_user_fields=[],
     )
     monkeypatch.setattr("db.prompt_repository.get_prompt_by_id", AsyncMock(return_value=prompt))
+    monkeypatch.setattr(
+        "api.miniapp_routes.get_visible_trend_category_for_prompt",
+        AsyncMock(return_value=SimpleNamespace(id=1, key="featured")),
+    )
     body = VideoGenRequest(
         model="bytedance/seedance-2-5",
         prompt="hidden",

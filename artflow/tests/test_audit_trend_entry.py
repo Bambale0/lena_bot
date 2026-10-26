@@ -15,6 +15,11 @@ async def test_every_bot_trend_opens_shared_runner_before_any_generation(monkeyp
     prompt = SimpleNamespace(id=123, tags=tags, is_public=True, status=PromptStatus.approved,
                              trend_user_fields=[], prompt_text="hidden-secret-prompt")
     monkeypatch.setattr(trends, "get_prompt_by_id", AsyncMock(return_value=prompt))
+    monkeypatch.setattr(
+        trends,
+        "public_prompt_library_item_is_visible",
+        AsyncMock(return_value=True),
+    )
     launch = AsyncMock()
     monkeypatch.setattr(marketplace, "_launch_prompt_generation", launch)
     call = SimpleNamespace(data="trends:use:123", message=SimpleNamespace(answer=AsyncMock()), answer=AsyncMock())

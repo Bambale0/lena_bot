@@ -46,7 +46,7 @@ test("new studio is an explicit admin entry while regular UI remains the default
   await expect(page.getByRole("heading", { name: "Что создадим сегодня?" })).toBeVisible();
 });
 
-test("black red foundation: palette, five destinations and full profile works", async ({ page }, info) => {
+test("black lilac foundation: palette, five destinations and full profile works", async ({ page }, info) => {
   await prepare(page);
   await page.goto("/?ux=3");
   await expect(page.locator('[data-ui-version="3"]')).toBeVisible();
@@ -60,7 +60,7 @@ test("black red foundation: palette, five destinations and full profile works", 
     expect(create!.width).toBeGreaterThanOrEqual(44); expect(create!.height).toBeGreaterThanOrEqual(44);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await expect(page.locator(".apix-balance-button")).toContainText("Пополнить");
-    await page.screenshot({ path: info.outputPath(`black-red-home-${width}.png`), fullPage: true });
+    await page.screenshot({ path: info.outputPath(`black-lilac-home-${width}.png`), fullPage: true });
   }
   await nav.getByRole("tab", { name: "Профиль", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Мои работы", exact: true })).toBeVisible();
@@ -69,7 +69,7 @@ test("black red foundation: palette, five destinations and full profile works", 
   await expect(page.getByRole("heading", { name: "Все работы", exact: true })).toHaveCount(0);
   for (const width of [320, 390, 768, 1280]) {
     await page.setViewportSize({ width, height: 844 });
-    await page.screenshot({ path: info.outputPath(`black-red-profile-${width}.png`), fullPage: true });
+    await page.screenshot({ path: info.outputPath(`black-lilac-profile-${width}.png`), fullPage: true });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   }
   await nav.getByRole("tab", { name: "Главная", exact: true }).click();
@@ -81,7 +81,7 @@ test("black red foundation: palette, five destinations and full profile works", 
   await expect(page.locator("[data-apix-editor-back]")).toHaveCount(0);
 });
 
-test("black red foundation: phone profile header stays reachable after works scroll and topup cancel", async ({ page }, info) => {
+test("black lilac foundation: phone profile header stays reachable after works scroll and topup cancel", async ({ page }, info) => {
   await prepare(page); await page.setViewportSize({width:390,height:844}); await page.goto("/?ux=3");
   await page.getByRole("navigation").getByRole("tab", {name:"Профиль",exact:true}).click();
   const balance = page.locator(".apix-balance-button");
@@ -102,11 +102,11 @@ test("black red foundation: phone profile header stays reachable after works scr
   await expect(page.getByRole("dialog")).toBeVisible();
   await page.getByRole("dialog").getByRole("button",{name:"Закрыть",exact:true}).click();
   await checkHeader(); await expect(page.locator(".studio-profile-works")).toBeVisible();
-  await page.screenshot({path:info.outputPath("black-red-profile-persistent-header-390.png"),fullPage:true});
+  await page.screenshot({path:info.outputPath("black-lilac-profile-persistent-header-390.png"),fullPage:true});
   await info.attach("profile-header-bounds",{body:JSON.stringify(measurements,null,2),contentType:"application/json"});
 });
 
-test("black red foundation: explicit topup cancels with the same editor and task", async ({ page }) => {
+test("black lilac foundation: explicit topup cancels with the same editor and task", async ({ page }) => {
   const writes = await prepare(page);
   await page.route("**/api/v1/history?**", route => route.fulfill({ json: [{ id: 77, model: "fixture-image", gen_type: "image", prompt: "Моя работа", status: "done" }] }));
   await page.goto("/?ux=3");
@@ -130,7 +130,7 @@ test("black red foundation: explicit topup cancels with the same editor and task
 });
 
 for (const entry of ["studio", "ordinary", "legacy"] as const) for (const supported of [true, false]) {
-  test(`black red foundation: ${entry} Telegram ${supported ? "modern" : "unsupported"} fullscreen and safe chrome`, async ({ page }) => {
+  test(`black lilac foundation: ${entry} Telegram ${supported ? "modern" : "unsupported"} fullscreen and safe chrome`, async ({ page }) => {
     await prepare(page);
     await page.addInitScript(({ supported }) => {
       const calls: string[] = [], events: Record<string, () => void> = {};
@@ -160,7 +160,7 @@ for (const entry of ["studio", "ordinary", "legacy"] as const) for (const suppor
   });
 }
 
-test("black red foundation: actual contrast, red text, focus and short viewport", async ({ page }, info) => {
+test("black lilac foundation: actual contrast, lilac text, focus and short viewport", async ({ page }, info) => {
   await prepare(page); await page.emulateMedia({ reducedMotion: "reduce" }); await page.goto("/?ux=3");
   await expect(page.locator('[data-ui-version="3"]')).toBeVisible();
   const contrast = await page.evaluate(() => {
@@ -169,12 +169,12 @@ test("black red foundation: actual contrast, red text, focus and short viewport"
     const root = getComputedStyle(document.documentElement);
     return [["--foreground", "--background"], ["--foreground", "--card"], ["--muted-foreground", "--card"], ["--primary", "--card"], ["--primary-foreground", "--primary"]].map(([fg,bg]) => {
       const f = pixel(root.getPropertyValue(fg)), b = pixel(root.getPropertyValue(bg));
-      return { fg, bg, ratio:(Math.max(lum(f),lum(b))+.05)/(Math.min(lum(f),lum(b))+.05), red: f[0] > f[2] };
+      return { fg, bg, ratio:(Math.max(lum(f),lum(b))+.05)/(Math.min(lum(f),lum(b))+.05), lilac: f[2] >= f[0] };
     });
   });
-  for (const pair of contrast) { expect(pair.ratio, `${pair.fg} on ${pair.bg}`).toBeGreaterThanOrEqual(4.5); expect(pair.red).toBe(true); }
+  for (const pair of contrast) { expect(pair.ratio, `${pair.fg} on ${pair.bg}`).toBeGreaterThanOrEqual(4.5); expect(pair.lilac).toBe(true); }
   await info.attach("computed-contrast", { body: JSON.stringify(contrast, null, 2), contentType:"application/json" });
-  await expect(page.locator(".ux2-wordmark strong")).toHaveCSS("color", "rgb(255, 105, 121)");
+  await expect(page.locator(".ux2-wordmark strong")).toHaveCSS("color", "rgb(196, 161, 255)");
   await page.getByRole("button", { name: "Создать фото", exact: true }).click();
   const prompt = page.getByRole("textbox", { name: /^Промпт/ }); await prompt.focus();
   await expect(prompt).toHaveCSS("outline-style", "solid");
@@ -187,7 +187,7 @@ test("black red foundation: actual contrast, red text, focus and short viewport"
   await expect(page.getByRole("dialog").getByRole("button", { name:"Закрыть", exact:true })).toBeInViewport();
   for (let i=0;i<8;i++) await page.keyboard.press("Tab");
   expect(await page.getByRole("dialog").evaluate(node => node.contains(document.activeElement))).toBe(true);
-  await page.screenshot({ path:info.outputPath("black-red-short-topup.png"), fullPage:true });
+  await page.screenshot({ path:info.outputPath("black-lilac-short-topup.png"), fullPage:true });
   await page.keyboard.press("Escape"); await expect(prompt).toHaveValue("Короткий экран с клавиатурой");
 });
 
@@ -207,7 +207,7 @@ async function prepareRepeat(page: Page, pending = false) {
   return writes;
 }
 
-test("black red foundation: independent repeat portal preserves draft through topup and native Back", async ({ page }, info) => {
+test("black lilac foundation: independent repeat portal preserves draft through topup and native Back", async ({ page }, info) => {
   const writes = await prepareRepeat(page);
   const repeat = page.getByRole("dialog", {name:"Повторить работу"});
   const draft = repeat.getByLabel("Что изменить в образе");
@@ -219,11 +219,11 @@ test("black red foundation: independent repeat portal preserves draft through to
   await page.evaluate(() => window.dispatchEvent(new Event("test:telegram-back")));
   await expect(repeat).toBeVisible(); await expect(draft).toHaveValue("Новый красный фон");
   await expect(repeat.getByRole("button", {name:"Пополнить", exact:true})).toBeFocused();
-  await page.screenshot({ path:info.outputPath("black-red-repeat.png"), fullPage:true });
+  await page.screenshot({ path:info.outputPath("black-lilac-repeat.png"), fullPage:true });
   expect(writes.filter(write => /\/topup\/|\/generate\/|\/remix$/.test(write.path))).toHaveLength(0);
 });
 
-test("black red foundation: pending inline checkout blocks generic topup without losing payment marker", async ({ page }) => {
+test("black lilac foundation: pending inline checkout blocks generic topup without losing payment marker", async ({ page }) => {
   const writes = await prepareRepeat(page,true);
   const repeat = page.getByRole("dialog", {name:"Повторить работу"});
   await expect(repeat.getByRole("button", {name:"Пополнить", exact:true})).toBeDisabled();
@@ -233,7 +233,7 @@ test("black red foundation: pending inline checkout blocks generic topup without
   expect(writes.filter(write => /\/topup\//.test(write.path))).toHaveLength(0);
 });
 
-for (const revoked of ["admission", "actor"] as const) test(`black red foundation: revoking ${revoked} removes the portal balance bridge`, async ({ page }) => {
+for (const revoked of ["admission", "actor"] as const) test(`black lilac foundation: revoking ${revoked} removes the portal balance bridge`, async ({ page }) => {
   await prepareRepeat(page);
   const repeat = page.getByRole("dialog", {name:"Повторить работу"});
   await expect(repeat.getByRole("button", {name:"Пополнить", exact:true})).toBeEnabled();

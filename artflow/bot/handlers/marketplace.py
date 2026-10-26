@@ -60,10 +60,25 @@ from db.prompt_repository import (
     set_ai_moderation_result,
     use_prompt,
 )
+from db.trend_category_repository import public_prompt_library_item_is_visible
 
 logger = logging.getLogger(__name__)
 router = Router(name="marketplace")
 DEFAULT_PROMPT_MODEL = ImageModel.NANO_BANANA_PRO
+
+
+async def _public_prompt_is_available(
+    session: AsyncSession,
+    prompt: UserPrompt | None,
+    *,
+    lock: bool = False,
+) -> bool:
+    return bool(
+        prompt
+        and prompt.status == PromptStatus.approved
+        and prompt.is_public
+        and await public_prompt_library_item_is_visible(session, prompt, lock=lock)
+    )
 
 
 def _prompt_library_text() -> str:
@@ -207,7 +222,7 @@ async def show_prompt_card_by_id(
     prompt_id: int,
 ) -> None:
     prompt = await get_prompt_by_id(session, prompt_id)
-    if not prompt or prompt.status != PromptStatus.approved or not prompt.is_public:
+    if not await _public_prompt_is_available(session, prompt):
         await message.answer("Промпт не найден или скрыт.", reply_markup=back_to_menu_kb())
         return
     await _show_prompt_card(holder=message, prompt=prompt, source="top", index=0, total=1)
@@ -249,6 +264,10 @@ async def _launch_prompt_generation(
 ) -> None:
     from bot.handlers.image_gen import _launch_session_generation, _supports_img2img
     from db.models import ImageGenerationAction
+
+    if not await _public_prompt_is_available(session, prompt, lock=True):
+        await call.answer("Промпт не найден или скрыт.", show_alert=True)
+        return
 
     model_key = prompt.model or DEFAULT_PROMPT_MODEL
     model_cost = await repo.resolve_image_model_cost(
@@ -406,7 +425,7 @@ async def cb_prompt_like(call: CallbackQuery, session: AsyncSession, db_user: Us
 async def cb_prompt_share(call: CallbackQuery, session: AsyncSession, db_user: User, bot: Bot) -> None:
     prompt_id = int(call.data.split(":")[1])  # type: ignore[union-attr]
     prompt = await get_prompt_by_id(session, prompt_id)
-    if not prompt:
+    if not await _public_prompt_is_available(session, prompt):
         await call.answer("Промпт не найден", show_alert=True)
         return
     bot_info = await bot.get_me()
@@ -429,7 +448,7 @@ async def cb_prompt_use(
 ) -> None:
     prompt_id = int(call.data.split(":")[1])  # type: ignore[union-attr]
     prompt = await get_prompt_by_id(session, prompt_id)
-    if not prompt:
+    if not await _public_prompt_is_available(session, prompt):
         await call.answer("Промпт не найден", show_alert=True)
         return
 
@@ -519,7 +538,7 @@ async def cb_prompt_skip_ref(
     # Prompt library flow
     prompt_id = data.get("use_prompt_id") or int(call.data.split(":")[1])  # type: ignore[union-attr]
     prompt = await get_prompt_by_id(session, prompt_id)
-    if not prompt:
+    if not await _public_prompt_is_available(session, prompt, lock=True):
         await call.answer("Промпт не найден", show_alert=True)
         await state.clear()
         return
@@ -666,7 +685,7 @@ async def fsm_prompt_use_reference(
         return
 
     prompt = await get_prompt_by_id(session, prompt_id)
-    if not prompt:
+    if not await _public_prompt_is_available(session, prompt, lock=True):
         await message.answer("Промпт не найден.", reply_markup=back_to_menu_kb())
         await state.clear()
         return
@@ -747,7 +766,7 @@ async def cb_prompt_remix(
 ) -> None:
     prompt_id = int(call.data.split(":")[1])  # type: ignore[union-attr]
     prompt = await get_prompt_by_id(session, prompt_id)
-    if not prompt:
+    if not await _public_prompt_is_available(session, prompt, lock=True):
         await call.answer("Промпт не найден", show_alert=True)
         return
     await _launch_prompt_generation(call=call, session=session, state=state, db_user=db_user, bot=bot, prompt=prompt, remix=True)

@@ -13,6 +13,7 @@ from bot.filters.admin import IsAdmin
 from bot.keyboards.models import IMAGE_CAPS, VIDEO_CAPS
 from bot.utils.telegram_ui import safe_answer_callback
 from db import repository as repo
+from db.trend_category_repository import get_visible_trend_category
 
 logger = logging.getLogger(__name__)
 
@@ -106,9 +107,13 @@ def build_trend_admin_router(trends_module: Any) -> Router:
         await safe_answer_callback(call)
 
         payload_kind, category = _parse_category_callback(call.data)
-        if category not in trends_module.TREND_CATEGORIES:
+        visible_category = (
+            await get_visible_trend_category(session, category) if category else None
+        )
+        if visible_category is None:
             await call.message.answer("Эта категория больше недоступна. Выбери другую.")
             return
+        category = str(visible_category.key)
 
         data = await state.get_data()
         state_kind = data.get("kind") if data.get("kind") in {"image", "video"} else None

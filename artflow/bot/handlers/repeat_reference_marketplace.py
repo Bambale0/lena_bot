@@ -537,7 +537,9 @@ async def _run(
 
     prompt_id = data.get("use_prompt_id")
     prompt = await marketplace.get_prompt_by_id(session, prompt_id) if prompt_id else None
-    if not prompt:
+    if not await marketplace._public_prompt_is_available(
+        session, prompt, lock=True
+    ):
         await call.answer("Промпт не найден", show_alert=True)
         await state.clear()
         return

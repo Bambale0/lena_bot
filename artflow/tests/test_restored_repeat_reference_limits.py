@@ -9,7 +9,13 @@ import pytest
 
 from bot.handlers import image_gen, repeat_reference_marketplace, repeat_safe
 from db import repository as repo
-from db.models import GenerationStatus, GenerationType, ImageSession, ImageSessionStatus
+from db.models import (
+    GenerationStatus,
+    GenerationType,
+    ImageSession,
+    ImageSessionStatus,
+    PromptStatus,
+)
 
 REFS = [f"https://example.test/photo-{number}.jpg" for number in range(1, 6)]
 SOURCE = "https://example.test/public-scene.jpg"
@@ -203,7 +209,15 @@ async def test_safe_repeat_deduplicates_restored_urls_without_losing_inputs(repe
 @pytest.mark.parametrize("alias", [False, True])
 async def test_marketplace_restored_ids_are_validated_before_use_and_survive_repeat(repeat_runtime, monkeypatch, alias):
     runtime = repeat_runtime
-    prompt = SimpleNamespace(id=8, prompt_text="chosen prompt", author_id=43, title="synthetic")
+    prompt = SimpleNamespace(
+        id=8,
+        prompt_text="chosen prompt",
+        author_id=43,
+        title="synthetic",
+        status=PromptStatus.approved,
+        is_public=True,
+        tags=[],
+    )
     use = AsyncMock(return_value=(prompt, {}))
     monkeypatch.setattr(repeat_reference_marketplace.marketplace, "get_prompt_by_id", AsyncMock(return_value=prompt))
     monkeypatch.setattr(repeat_reference_marketplace.marketplace, "use_prompt", use)
@@ -513,7 +527,15 @@ async def test_unresolved_restored_photo_never_launches_partial_inputs(repeat_ru
     from bot.handlers import repeat_references
 
     runtime = repeat_runtime
-    prompt = SimpleNamespace(id=8, prompt_text="chosen prompt", author_id=43, title="synthetic")
+    prompt = SimpleNamespace(
+        id=8,
+        prompt_text="chosen prompt",
+        author_id=43,
+        title="synthetic",
+        status=PromptStatus.approved,
+        is_public=True,
+        tags=[],
+    )
     use = AsyncMock(return_value=(prompt, {}))
     monkeypatch.setattr(repeat_reference_marketplace.marketplace, "get_prompt_by_id", AsyncMock(return_value=prompt))
     monkeypatch.setattr(repeat_reference_marketplace.marketplace, "use_prompt", use)
