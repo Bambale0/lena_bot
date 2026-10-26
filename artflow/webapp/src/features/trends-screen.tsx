@@ -625,12 +625,20 @@ function ShelfTrendTile({ trend, isAdmin, client, onUpdated, adminCatalog, onAdm
   </article>;
 }
 
+function CategoryFolderTile({ shelf, onOpen }: { shelf: TrendCategoryShelf; onOpen: () => void }) {
+  const cover = shelf.preview_items[0];
+  return <button type="button" className="trend-live-tile trend-folder-tile" aria-label={`Открыть папку: ${shelf.title}`} onClick={onOpen}>
+    {cover ? <LiveTrendMedia trend={cover} /> : <span className="trend-live-fallback"><FolderOpen aria-hidden="true" /></span>}
+    <span className="trend-live-copy"><strong>{shelf.title}</strong><small>Все {shelf.trend_count} примеров внутри папки</small><span><FolderOpen size={14} /> Открыть папку</span></span>
+  </button>;
+}
+
 function CategoryShelf({ shelf, filter, onOpen, isAdmin, client, onUpdated, adminCatalog, onAdminCatalog }: { shelf: TrendCategoryShelf; filter: TrendsScreenProps["filter"]; onOpen: () => void; isAdmin: boolean; client: MiniAppApi; onUpdated: () => void; adminCatalog: AdminTrendCategoryCatalog | null; onAdminCatalog: (catalog: AdminTrendCategoryCatalog) => void }) {
   const previews = filter === "all" ? shelf.preview_items : shelf.preview_items.filter(item => item.kind === filter);
   return <section className="trend-category-shelf" data-category-key={shelf.key}>
     <div className="trend-category-heading"><div><h2>{shelf.title}</h2><p>{shelf.trend_count} {shelf.trend_count === 1 ? "пример" : "примеров"}</p></div>
       <button type="button" aria-label={`Смотреть все: ${shelf.title}`} onClick={onOpen}>Смотреть все <FolderOpen size={16} /></button></div>
-    {previews.length ? <div className="trend-live-rail">{previews.slice(0, 5).map(trend => <ShelfTrendTile key={trend.id} trend={trend} isAdmin={isAdmin} client={client} onUpdated={onUpdated} adminCatalog={adminCatalog} onAdminCatalog={onAdminCatalog} />)}</div> : <button type="button" className="trend-shelf-open-filtered" onClick={onOpen}>В первых примерах нет этого формата — открыть всю папку</button>}
+    <div className="trend-live-rail">{previews.length ? previews.slice(0, 5).map(trend => <ShelfTrendTile key={trend.id} trend={trend} isAdmin={isAdmin} client={client} onUpdated={onUpdated} adminCatalog={adminCatalog} onAdminCatalog={onAdminCatalog} />) : <CategoryFolderTile shelf={shelf} onOpen={onOpen} />}</div>
   </section>;
 }
 

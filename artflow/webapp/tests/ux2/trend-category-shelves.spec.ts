@@ -92,11 +92,20 @@ test("black lilac trends are live category shelves with a full folder", async ({
   await expect(page.getByText("Все категории", { exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Видео", exact: true }).click();
   await expect(page.getByRole("heading", { name: "С животными 🐾" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "В первых примерах нет этого формата — открыть всю папку" }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Открыть папку: С животными 🐾" })).toBeVisible();
+  await expect(page.locator(".trend-shelf-open-filtered")).toHaveCount(0);
   await page.getByRole("button", { name: "Все", exact: true }).click();
   for (const width of [320, 390, 768, 1280]) {
     await page.setViewportSize({ width, height: 844 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const shelves = await page.locator(".trend-category-shelf").evaluateAll(nodes => nodes.map(node => {
+      const box = node.getBoundingClientRect();
+      return { top: box.top, bottom: box.bottom, left: box.left };
+    }));
+    for (let index = 1; index < shelves.length; index += 1) {
+      expect(shelves[index].top).toBeGreaterThanOrEqual(shelves[index - 1].bottom);
+      expect(Math.abs(shelves[index].left - shelves[0].left)).toBeLessThanOrEqual(1);
+    }
     await page.screenshot({ path: info.outputPath(`trend-shelves-${width}.png`), fullPage: true });
   }
   await page.getByRole("button", { name: "Смотреть все: Портреты и образы" }).click();

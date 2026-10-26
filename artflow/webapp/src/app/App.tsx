@@ -1,6 +1,6 @@
 import { isKling4, kling4Body, kling4Intent } from "@/lib/kling4";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { LoaderCircle } from "lucide-react";
+import { BookOpenText, CircleHelp, CreditCard, LoaderCircle, Settings, ShieldCheck, UserRoundCog } from "lucide-react";
 import { Toaster, toast } from "sonner";
 
 import { AppShell } from "@/components/app-shell";
@@ -73,7 +73,7 @@ import type {
 import { firstMedia, isPendingTask, safeExternalUrl } from "@/lib/utils";
 import { saveDownload } from "@/lib/download";
 
-window.__APIX_MINIAPP_BUILD_ID__ = "20261026-trend-folders-black-lilac-r1";
+window.__APIX_MINIAPP_BUILD_ID__ = "20261026-profile-folders-black-lilac-r2";
 
 type FeedSource = "recent" | "top_day" | "top";
 type VideoQuote = Awaited<ReturnType<MiniAppApi["quoteVideo"]>>;
@@ -1385,6 +1385,14 @@ function App() {
     return (
       <ProfileScreen
         worksSection={lilac ? studioWorks : undefined}
+        quickActions={ux2 ? <>
+          {lilac && <Button variant="outline" onClick={() => setActiveTab("billing")}><CreditCard aria-hidden="true" />Баланс и платежи</Button>}
+          {lilac && <Button variant="outline" onClick={() => setActiveTab("library")}><BookOpenText aria-hidden="true" />Мои промпты</Button>}
+          {lilac && <Button variant="outline" onClick={() => setActiveTab("help")}><CircleHelp aria-hidden="true" />Помощь</Button>}
+          {lilac && <Button variant="outline" onClick={() => setActiveTab("account")}><UserRoundCog aria-hidden="true" />Редактировать профиль</Button>}
+          <Button variant="outline" onClick={() => setActiveTab("settings")}><Settings aria-hidden="true" />{data.user.language === "en" ? "Settings" : "Настройки"}</Button>
+          {lilac && data.user.miniapp_ux2_available === true && <Button variant="outline" onClick={() => setActiveTab("owner")}><ShieldCheck aria-hidden="true" />Управление APIX</Button>}
+        </> : undefined}
         user={data.user}
         tasks={data.recentTasks}
         referrals={referrals}
@@ -1402,8 +1410,6 @@ function App() {
   return (
     <>
       <AppShell ux2={ux2} lilac={lilac} previewBusy={previewBusy} onNewStudio={() => void openLilac()} onExitStudio={exitLilac} activeTab={showFeed ? "feed" : activeTab} user={data.user} onTabChange={setActiveTab} onBalanceOpen={() => setBalanceOpen(true)}>
-        {lilac && activeTab === "profile" && <div className="lilac-profile-links"><Button variant="outline" onClick={() => setActiveTab("billing")}>Баланс и платежи</Button><Button variant="outline" onClick={() => setActiveTab("library")}>Мои промпты</Button><Button variant="outline" onClick={() => setActiveTab("help")}>Помощь</Button>{data.user.miniapp_ux2_available === true && <Button variant="outline" onClick={() => setActiveTab("owner")}>Управление APIX</Button>}</div>}
-        {ux2 && activeTab === "profile" && <div className="ux2-profile-actions">{lilac && <Button variant="outline" onClick={() => setActiveTab("account")}>Редактировать профиль</Button>}<Button variant="outline" onClick={() => setActiveTab("settings")}>{data.user.language === "en" ? "Settings" : "Настройки"}</Button></div>}
         {ux2 && draftStorageUnavailable && <div className="ux2-inline-notice" role="status">{data.user.language === "en" ? "Browser storage is unavailable. Keep this tab open to retain your draft." : "Хранилище браузера недоступно. Не закрывайте вкладку, чтобы не потерять черновик."}</div>}
         {screen}
       </AppShell>
