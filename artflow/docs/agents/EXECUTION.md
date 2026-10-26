@@ -3,7 +3,7 @@
 ## Active 2026-10-26 — Trend category shelves
 
 Baseline `179d7a01e5a6328d9cb0642fa8fe9523e12fbafe`; Phase A implementation head
-`103107dc6adc6374158b6adfe7bc354c754f1006`; branch
+`55d5f796d0441796717db2a12638084d0de46761`; branch
 `feat/admin-trend-categories-20261026`. The approved design and decision log is
 [trend category shelves](trend-category-shelves-20261026.md); the binding staged
 plan is [trend category shelves plan](../plans/2026-10-26-trend-category-shelves.md).
@@ -13,14 +13,19 @@ this change.
 
 Phase A implementation commits are `8c40d17` (expand-only revision 052, catalog,
 relation, audit and backfill), `3a7156d` (bounded shelf/folder reads and typed
-clients), `de6a9f5` (review-driven dual-write repair), and `103107d`
-(hidden-category admission plus the final `FOR SHARE` pre-claim recheck). The
+clients), `de6a9f5` (review-driven dual-write repair), `103107d`
+(hidden-category admission plus the final `FOR SHARE` pre-claim recheck),
+`840820f` (dynamic Telegram tag mirror), and `55d5f79` (database-filtered,
+bounded, set-based migration backfill). The
 preceding approved design commit is `080efe3`. RED tests were introduced for the
 schema/backfill, bounded read contracts, and hide/run boundary before their
 respective implementation slices. GREEN evidence is the focused Phase A run
 below. Task 1 passed spec and quality review; Task 2 quality review found missing
 legacy-tag dual-write, which `de6a9f5` fixed before reapproval; Task 3 passed spec
-and quality review. No unresolved Critical or Important review finding is known.
+and quality review. Final whole-diff review found dynamic Telegram keys mirrored
+as `featured` and an unbounded migration read; `840820f` and `55d5f79`
+respectively fixed them with RED/GREEN regressions. Final re-review is APPROVED;
+no unresolved Critical or Important finding remains.
 
 Phase A intentionally exposes compatible readers only: revision 052 seeds seven
 categories, backfills the nullable relation without deleting unknown legacy tags,
@@ -74,13 +79,16 @@ therefore that failure is an environment/dialect limitation, not Phase A proof.
 
 Before production migration, perform a read-only row-count preflight for total
 `user_prompts`, rows tagged `trend`, and trend rows that will need
-`trend_category_id` backfill. Revision 052 currently reads unassigned prompt rows
-and updates matching trends individually; if production cardinality is
-unexpectedly large, replace that backfill with a bounded/set-based form before
-deployment. No production query, migration, configuration, pricing, provider,
-payment, or generation was executed during this preparation.
+`trend_category_id` backfill. Revision 052 filters exact trend tags in SQL, reads
+keyset batches of at most 500, performs grouped set-based recognized-key updates,
+and batch-inserts unresolved audit evidence. The PostgreSQL test covers multiple
+1105-row recognized/unresolved batches and an idempotent second upgrade; runtime
+execution remains an exact-head CI gate. No production query, migration,
+configuration, pricing, provider, payment, or generation was executed during
+this preparation.
 
-Release status: **NEEDS_CONFIRMATION**. Phase A is locally review-ready, but the
+Release status: **READY_FOR_PROTECTED_PR**. Phase A is locally and independently
+review-approved, but the
 protected PR has not been opened and no exact-head GitHub CI, native auto-merge,
 production autodeploy, migration/read smoke, public health check, or exact-SHA
 Mini App verification has occurred. Phase B must not start until all of those
