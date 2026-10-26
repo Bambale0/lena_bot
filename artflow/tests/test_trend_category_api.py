@@ -49,7 +49,11 @@ def _prompt(prompt_id: int, category_id: int | None, created_at: datetime | None
         prompt_text="hidden",
         preview_url=f"https://cdn.test/{prompt_id}.mp4",
         model="video-model",
-        tags=["trend", "trend-video"],
+        tags=[
+            "trend",
+            "trend-video",
+            *(["trend-category:portrait"] if category_id is None else []),
+        ],
         trend_user_fields=[],
         trend_category_id=category_id,
         trend_category_record=None,
@@ -132,9 +136,35 @@ async def test_shelves_use_two_bounded_queries_not_one_query_per_category():
     assert page.next_cursor is None
 
     preview_sql = str(
-        session.statements[1].compile(dialect=postgresql.dialect())
+        session.statements[1].compile(
+            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+        )
     ).upper()
     assert "CREATED_AT DESC NULLS LAST" in preview_sql
+    assert "USER_PROMPTS.TREND_CATEGORY_ID IS NULL" in preview_sql
+    assert "TREND-CATEGORY:" in preview_sql
+
+    shelf_sql = str(
+        session.statements[0].compile(
+            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+        )
+    ).upper()
+    assert "USER_PROMPTS.TREND_CATEGORY_ID IS NULL" in shelf_sql
+    assert "TREND-CATEGORY:" in shelf_sql
+
+
+@pytest.mark.asyncio
+async def test_shelf_preview_keeps_legacy_tag_prompt_created_during_rolling_deploy():
+    category = _category(2, "portrait", 1)
+    legacy = _prompt(21, None, datetime(2026, 10, 26, 12, tzinfo=UTC))
+    session = _ScriptedSession([(category, 1)], [(legacy, 1)])
+
+    page = await get_public_category_shelves(
+        session, limit=1, cursor=None, preview_limit=5
+    )
+
+    assert page.items[0].trend_count == 1
+    assert [item.id for item in page.items[0].previews] == [21]
 
 
 @pytest.mark.asyncio
@@ -243,7 +273,9 @@ async def test_folder_cursor_paginates_null_timestamps_without_duplicates():
     assert third.next_cursor is None
 
     first_sql = str(
-        first_session.statements[1].compile(dialect=postgresql.dialect())
+        first_session.statements[1].compile(
+            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+        )
     ).upper()
     second_sql = str(
         second_session.statements[1].compile(dialect=postgresql.dialect())
@@ -252,6 +284,8 @@ async def test_folder_cursor_paginates_null_timestamps_without_duplicates():
         third_session.statements[1].compile(dialect=postgresql.dialect())
     ).upper()
     assert "CREATED_AT DESC NULLS LAST" in first_sql
+    assert "USER_PROMPTS.TREND_CATEGORY_ID IS NULL" in first_sql
+    assert "TREND-CATEGORY:PORTRAIT" in first_sql
     assert "CREATED_AT IS NULL" in second_sql
     assert "CREATED_AT IS NULL" in third_sql
     assert "USER_PROMPTS.ID <" in third_sql

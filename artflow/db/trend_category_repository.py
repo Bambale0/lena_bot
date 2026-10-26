@@ -112,8 +112,18 @@ def _public_prompt_filters():
     return (
         UserPrompt.status == PromptStatus.approved,
         UserPrompt.is_public.is_(True),
-        UserPrompt.trend_category_id.is_not(None),
         UserPrompt.tags.any("trend"),
+    )
+
+
+def _prompt_matches_category():
+    """Resolve both current foreign keys and compatibility-window legacy tags."""
+    return or_(
+        UserPrompt.trend_category_id == TrendCategory.id,
+        and_(
+            UserPrompt.trend_category_id.is_(None),
+            UserPrompt.tags.any(literal(TREND_CATEGORY_PREFIX) + TrendCategory.key),
+        ),
     )
 
 
@@ -252,16 +262,9 @@ async def get_visible_trends(
     """Return the bounded legacy trend list after category visibility filtering."""
     if not 1 <= limit <= 200:
         raise ValueError("Trend limit is out of range")
-    category_match = or_(
-        UserPrompt.trend_category_id == TrendCategory.id,
-        and_(
-            UserPrompt.trend_category_id.is_(None),
-            UserPrompt.tags.any(literal(TREND_CATEGORY_PREFIX) + TrendCategory.key),
-        ),
-    )
     statement = (
         select(UserPrompt, TrendCategory)
-        .join(TrendCategory, category_match)
+        .join(TrendCategory, _prompt_matches_category())
         .where(
             UserPrompt.status == PromptStatus.approved,
             UserPrompt.is_public.is_(True),
@@ -297,11 +300,13 @@ async def get_public_category_shelves(
 
     counts = (
         select(
-            UserPrompt.trend_category_id.label("category_id"),
+            TrendCategory.id.label("category_id"),
             func.count(UserPrompt.id).label("trend_count"),
         )
+        .select_from(TrendCategory)
+        .join(UserPrompt, _prompt_matches_category())
         .where(*_public_prompt_filters())
-        .group_by(UserPrompt.trend_category_id)
+        .group_by(TrendCategory.id)
         .subquery()
     )
     statement = (
@@ -328,15 +333,16 @@ async def get_public_category_shelves(
     selected = rows[:limit]
     category_ids = [int(category.id) for category, _count in selected]
     previews_by_category: dict[int, list[UserPrompt]] = {item: [] for item in category_ids}
+    category_ids_by_key = {str(category.key): int(category.id) for category, _count in selected}
 
     if category_ids:
         ranked = (
             select(
                 UserPrompt.id.label("prompt_id"),
-                UserPrompt.trend_category_id.label("category_id"),
+                TrendCategory.id.label("category_id"),
                 func.row_number()
                 .over(
-                    partition_by=UserPrompt.trend_category_id,
+                    partition_by=TrendCategory.id,
                     order_by=(
                         desc(UserPrompt.created_at).nulls_last(),
                         desc(UserPrompt.id),
@@ -344,7 +350,9 @@ async def get_public_category_shelves(
                 )
                 .label("preview_rank"),
             )
-            .where(*_public_prompt_filters(), UserPrompt.trend_category_id.in_(category_ids))
+            .select_from(TrendCategory)
+            .join(UserPrompt, _prompt_matches_category())
+            .where(*_public_prompt_filters(), TrendCategory.id.in_(category_ids))
             .subquery()
         )
         preview_statement = (
@@ -354,7 +362,11 @@ async def get_public_category_shelves(
             .order_by(ranked.c.category_id, ranked.c.preview_rank)
         )
         for prompt, _rank in (await session.execute(preview_statement)).all():
-            previews_by_category[int(prompt.trend_category_id)].append(prompt)
+            category_id = getattr(prompt, "trend_category_id", None)
+            if category_id is None:
+                category_id = category_ids_by_key.get(_legacy_category_key(prompt) or "")
+            if category_id in previews_by_category:
+                previews_by_category[int(category_id)].append(prompt)
 
     items = [
         TrendCategoryShelf(
@@ -397,7 +409,13 @@ async def get_public_category_trends(
         select(UserPrompt)
         .where(
             *_public_prompt_filters(),
-            UserPrompt.trend_category_id == category.id,
+            or_(
+                UserPrompt.trend_category_id == category.id,
+                and_(
+                    UserPrompt.trend_category_id.is_(None),
+                    UserPrompt.tags.any(f"{TREND_CATEGORY_PREFIX}{category.key}"),
+                ),
+            ),
         )
         .order_by(desc(UserPrompt.created_at).nulls_last(), desc(UserPrompt.id))
         .limit(limit + 1)
