@@ -426,7 +426,7 @@ function TrendAdminForm({ client, categories, onCreated }: { client: MiniAppApi;
       <div className="flex items-center justify-between gap-2">
         <div>
           <h2 className="text-sm font-bold">Добавить тренд</h2>
-          <p className="text-[10px] text-muted-foreground">Категория «С животными» теперь поддерживается напрямую.</p>
+          <p className="text-[10px] text-muted-foreground">Выберите папку из актуального каталога.</p>
         </div>
         <Button variant="ghost" size="icon" className="size-8 min-h-8" onClick={() => setOpen(false)} aria-label="Закрыть форму">
           <X className="size-4" />
@@ -728,6 +728,7 @@ function TrendsScreen({ filter, loading, onFilterChange, onRefresh }: TrendsScre
 
   return <div className="trend-shelves-page">
     <header className="trend-shelves-header"><div><p>Готовые сценарии</p><h1>Тренды по категориям</h1><span>Откройте папку или сразу повторите понравившийся пример.</span></div><Button variant="outline" size="icon" disabled={loading || shelfLoading} onClick={refresh} aria-label="Обновить тренды"><RefreshCw className={loading || shelfLoading ? "animate-spin" : ""} /></Button></header>
+    <details className="apix-help max-w-xl"><summary>Как повторить тренд</summary><p className="pb-2">Выберите пример, добавьте свои материалы, настройте доступные параметры и подтвердите стоимость перед запуском.</p></details>
     <div className="trend-kind-filters">{filters.map(({ value, label, icon: Icon }) => <button key={value} className={filter === value ? "active" : ""} onClick={() => onFilterChange(value)}><Icon />{label}</button>)}</div>
     {isAdmin ? <div className="trend-admin-tools"><CategoryManager client={client} onChanged={refresh} /><TrendAdminForm client={client} categories={shelves} onCreated={refresh} /></div> : null}
     {shelfLoading && !shelves.length ? <div className="trend-shelf-skeleton" aria-label="Загружаем категории"><i /><i /><i /></div> : null}

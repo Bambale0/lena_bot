@@ -40,9 +40,10 @@ def test_animals_category_roundtrips_through_backend_tags() -> None:
     assert payload["category_emoji"] == "🦁"
 
 
-def test_production_trends_screen_exposes_and_submits_animals_category() -> None:
+def test_production_trends_screen_submits_server_managed_categories() -> None:
     source = (ROOT / "webapp" / "src" / "features" / "trends-screen.tsx").read_text(encoding="utf-8")
-    assert '{ value: "animals", label: "С животными", emoji: "🦁" }' in source
-    assert "setCategory(\"animals\")" in source
+    assert "categories.map((item)" in source
+    assert "setCategory(categories[0]?.key || \"\")" in source
     assert "category," in source
-    assert 'category === "animals" ? "🦁 Опубликовать в «С животными»"' in source
+    assert 'value={category} onChange={(event) => setCategory(event.target.value)}' in source
+    assert 'value="animals"' not in source
