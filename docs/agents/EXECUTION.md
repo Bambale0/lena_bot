@@ -1,5 +1,28 @@
 # APIX execution ledger
 
+## 2026-10-26 — Seedance repeat aspect ratio and resolution
+
+- Baseline: current `origin/main` at task start (`216e2fd7`).
+- User outcome: every Seedance 2.5 repeat exposes aspect-ratio and resolution choices before launch; an explicit choice is used for quote and generation.
+- Current-state audit: Telegram exact-repeat keyboards remove both controls, Mini App disables both selects, and both server paths restore the creator values over the draft.
+- Safe default: when the user does not change either field, keep the creator's stored aspect ratio and resolution.
+- Scope: Telegram bot and shared site/Mini App repeat surfaces; provider schema, prices, prompt privacy, references, payments, migrations, and admin settings remain unchanged.
+- Test seams: Telegram keyboard/state restoration unit tests, FastAPI quote/launch test, Mini App Playwright repeat journey, focused lint/type/syntax checks.
+- Steps:
+  1. [x] Reproduce the missing/disabled controls and server overwrite from current code.
+  2. [x] Add regression assertions for explicit aspect-ratio and resolution overrides.
+  3. [x] Implement typed overrides in bot, API, and Mini App.
+  4. [x] Run focused backend and frontend checks.
+  5. [x] Review the final diff and record delivery evidence.
+- Verification:
+  - Telegram/FSM and keyboard suites: `204 passed`.
+  - Feed repeat API/prelaunch/security suites: `179 passed`.
+  - Web unit suite: `148 passed`; TypeScript check and production Vite build passed.
+  - Playwright exact-repeat journey: `4 passed` across iPhone SE, iPhone 13, Pixel 5, and Desktop.
+  - Focused Ruff, Python compileall, and `git diff --check`: passed.
+- Review: no unresolved correctness, security, privacy, pricing, or compatibility findings. Invalid overrides fail before provider submission; unchanged repeats retain creator settings.
+- Rollout: no migration, mutable configuration, admin, or provider-contract change. Delivery remains through the protected `main` PR and production autodeploy.
+
 ## 2026-10-25 — production trend repeat recovery
 
 - Baseline: `8e0384f5d6885153508a184fd33ea8464d809e5d` (`origin/main`).

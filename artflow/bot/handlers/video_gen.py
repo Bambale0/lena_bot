@@ -475,8 +475,14 @@ def _video_params_reply_markup(model_key: str, data: dict):
     )
     if _is_feed_video_use(data) and data.get("feed_use_has_original_recipe"):
         allowed = {"vpar_next", "vpar_back", "menu:main", "vid_nav:back"}
+        editable_prefixes = ("vpar_dur:", "vpar_ratio:", "vpar_res:")
         markup.inline_keyboard = [
-            [button for button in row if button.callback_data in allowed or str(button.callback_data).startswith("vpar_dur:")]
+            [
+                button
+                for button in row
+                if button.callback_data in allowed
+                or str(button.callback_data).startswith(editable_prefixes)
+            ]
             for row in markup.inline_keyboard
         ]
     if _feed_source_duration_locked(model_key, data):
@@ -846,7 +852,15 @@ async def _prepare_feed_video_inputs(
             data.update(restored)
             creator_inputs = original_feed_video_inputs(source) or {}
             for field, choices in (("resolution", "resolutions"), ("aspect_ratio", "aspect_ratios")):
-                if creator_inputs.get(field) in caps.get(choices, []):
+                allowed = caps.get(choices, [])
+                override = data.get(f"{field}_override")
+                if override is not None:
+                    if override not in allowed:
+                        raise FeedRemixUnavailable(
+                            "Выбранный формат или разрешение больше недоступны. Открой параметры повтора заново."
+                        )
+                    data[field] = override
+                elif creator_inputs.get(field) in allowed:
                     data[field] = creator_inputs[field]
             default_duration = restored.get("duration", creator_inputs.get("duration", data.get("duration", 5)))
             try:
@@ -1490,6 +1504,8 @@ async def cb_video_model(
         duration=default_duration,
         aspect_ratio=default_ratio,
         resolution=default_resolution,
+        aspect_ratio_override=None,
+        resolution_override=None,
         grok_mode=chosen_grok_mode if caps.get("mode_options") else None,
         wan_audio=True,
     )
@@ -2071,7 +2087,7 @@ async def cb_vpar_ratio(call: CallbackQuery, state: FSMContext) -> None:
     if not await _accept_video_parameter(call, state):
         return
     ratio = call.data.removeprefix("vpar_ratio:")  # type: ignore[union-attr]
-    await state.update_data(aspect_ratio=ratio)
+    await state.update_data(aspect_ratio=ratio, aspect_ratio_override=ratio)
     data = await state.get_data()
     await call.message.edit_reply_markup(  # type: ignore[union-attr]
         reply_markup=_video_params_reply_markup(data["model_key"], data)
@@ -2084,7 +2100,7 @@ async def cb_vpar_res(call: CallbackQuery, state: FSMContext) -> None:
     if not await _accept_video_parameter(call, state):
         return
     res = call.data.split(":")[1]  # type: ignore[union-attr]
-    await state.update_data(resolution=res)
+    await state.update_data(resolution=res, resolution_override=res)
     data = await state.get_data()
     await call.message.edit_reply_markup(  # type: ignore[union-attr]
         reply_markup=_video_params_reply_markup(data["model_key"], data)
