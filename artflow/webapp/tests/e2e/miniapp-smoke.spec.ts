@@ -83,6 +83,20 @@ async function mockApi(page: import("@playwright/test").Page) {
   await page.route("**/api/v1/models/music", (route) => route.fulfill({ json: [{ key: "suno-v5", display_name: "Suno 5", credits: 10, modes: ["text"] }] }));
   await page.route("**/api/v1/history?**", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/feed?**", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/trend-categories?**", (route) => route.fulfill({ json: {
+    items: [
+      { key: "portrait", title: "Портреты", sort_order: 0, trend_count: 1, preview_items: [trends[0]] },
+      { key: "photo-video", title: "Фото → видео", sort_order: 1, trend_count: 1, preview_items: [trends[1]] },
+    ],
+    has_more: false,
+    next_cursor: null,
+  } }));
+  await page.route("**/api/v1/trend-categories/portrait/trends?**", (route) => route.fulfill({ json: {
+    category: { key: "portrait", title: "Портреты", sort_order: 0 }, items: [trends[0]], has_more: false, next_cursor: null,
+  } }));
+  await page.route("**/api/v1/trend-categories/photo-video/trends?**", (route) => route.fulfill({ json: {
+    category: { key: "photo-video", title: "Фото → видео", sort_order: 1 }, items: [trends[1]], has_more: false, next_cursor: null,
+  } }));
   await page.route("**/api/v1/trends?**", (route) => route.fulfill({ json: trends }));
   await page.route("**/api/v1/trends/101", (route) => route.fulfill({ json: trends[0] }));
   await page.route("**/api/v1/trends/101/checkout", (route) => route.fulfill({ json: {
@@ -239,10 +253,10 @@ test("one-photo trend waits for explicit launch without exposing generation cont
   await page.goto("/?tgWebAppData=test");
   await page.getByRole("tab", { name: "Тренды" }).click();
   await expect(page.getByText("Кинопортрет").first()).toBeVisible();
-  const portraitFilter = page.getByRole("button", { name: "✨ Портреты", exact: true });
-  await expect(portraitFilter).toBeVisible();
-  await portraitFilter.click();
-  await page.getByRole("button", { name: /Повторить/ }).first().click();
+  const portraitFolder = page.getByRole("button", { name: "Смотреть все: Портреты", exact: true });
+  await expect(portraitFolder).toBeVisible();
+  await portraitFolder.click();
+  await page.getByRole("button", { name: "Повторить: Кинопортрет", exact: true }).click();
 
   const dialog = page.locator("#apix-trend-runner-root").getByRole("dialog", { name: /Кинопортрет/ });
   await expect(dialog).toBeVisible();
@@ -282,8 +296,7 @@ test("retrying a trend after a lost response keeps the same request key", async 
 
   await page.goto("/?tgWebAppData=test");
   await page.getByRole("tab", { name: "Тренды" }).click();
-  await page.getByRole("button", { name: "✨ Портреты", exact: true }).click();
-  await page.getByRole("button", { name: /Повторить/ }).first().click();
+  await page.getByRole("button", { name: "Повторить: Кинопортрет", exact: true }).click();
   const dialog = page.locator("#apix-trend-runner-root").getByRole("dialog", { name: /Кинопортрет/ });
   await expect(dialog.getByText("1.5 💋", { exact: true })).toBeVisible();
   await dialog.locator("input[type=file]").setInputFiles({
@@ -306,8 +319,7 @@ test("trend runner shows a useful message for an empty server error", async ({ p
 
   await page.goto("/?tgWebAppData=test");
   await page.getByRole("tab", { name: "Тренды" }).click();
-  await page.getByRole("button", { name: "✨ Портреты", exact: true }).click();
-  await page.getByRole("button", { name: /Повторить/ }).first().click();
+  await page.getByRole("button", { name: "Повторить: Кинопортрет", exact: true }).click();
   const dialog = page.locator("#apix-trend-runner-root").getByRole("dialog", { name: /Кинопортрет/ });
   await dialog.locator("input[type=file]").setInputFiles({
     name: "face.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
@@ -351,8 +363,7 @@ test("stale trend price refreshes checkout and reuses the uploaded photo", async
 
   await page.goto("/?tgWebAppData=test");
   await page.getByRole("tab", { name: "Тренды" }).click();
-  await page.getByRole("button", { name: "✨ Портреты", exact: true }).click();
-  await page.getByRole("button", { name: /Повторить/ }).first().click();
+  await page.getByRole("button", { name: "Повторить: Кинопортрет", exact: true }).click();
   const dialog = page.locator("#apix-trend-runner-root").getByRole("dialog", { name: /Кинопортрет/ });
   await expect(dialog.getByText("1.5 💋", { exact: true })).toBeVisible();
   await dialog.locator("input[type=file]").setInputFiles({

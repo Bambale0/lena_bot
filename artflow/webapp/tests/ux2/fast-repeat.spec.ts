@@ -5,7 +5,7 @@ const photo = { name: "face.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0
 async function prepare(page: Page, initialBalance = 100) {
   const state = { balance: initialBalance, price: 10, actor: 7, admitted: true, quoteCount: 0,
     quotes: [] as any[], runs: [] as any[], payments: 0, receipt: "pending", failQuote: false };
-  const trend = { id: 101, title: "Кинопортрет", kind: "video", preview_url: "", user_fields: [{ key: "name", type: "text", label: "Имя героя", required: true }] };
+  const trend = { id: 101, title: "Кинопортрет", kind: "video", preview_url: "", category: "portrait", category_title: "Портреты", user_fields: [{ key: "name", type: "text", label: "Имя героя", required: true }] };
   const item = { id: 201, model: "video-fixture", gen_type: "video", prompt_hidden: true, prompt: "", author: "Автор", result_url: "https://example.test/clip.mp4", source_has_video_reference: false, original_duration: 5, original_aspect_ratio: "16:9", original_resolution: "720p" };
   await page.addInitScript(() => { window.Telegram = { WebApp: { initData: "test", initDataUnsafe: { user: { id: 123 } }, ready() {}, expand() {}, openLink() {}, HapticFeedback: { impactOccurred() {}, notificationOccurred() {} } } } as any; });
   await page.route("**/telegram-web-app.js", route => route.fulfill({ body: "" }));
@@ -19,6 +19,8 @@ async function prepare(page: Page, initialBalance = 100) {
     if (path.endsWith("/models/image")) return json([{ key: "image-fixture", display_name: "Фото", credits: 5, modes: ["text", "image"], max_refs: 2, aspect_ratios: ["1:1"], counts: [1] }]);
     if (path.endsWith("/models/video")) return json([{ key: "video-fixture", display_name: "Видео", credits: 10, modes: ["text", "image"], max_refs: 1, durations: [5, 10], resolutions: ["720p"], aspect_ratios: ["16:9"] }]);
     if (path.endsWith("/models/music")) return json([{ key: "music-fixture", display_name: "Музыка", credits: 20, modes: ["text"] }]);
+    if (path.endsWith("/trend-categories")) return json({ items: [{ key: "portrait", title: "Портреты", sort_order: 0, trend_count: 1, preview_items: [trend] }], has_more: false, next_cursor: null });
+    if (path.endsWith("/trend-categories/portrait/trends")) return json({ category: { key: "portrait", title: "Портреты", sort_order: 0 }, items: [trend], has_more: false, next_cursor: null });
     if (path.endsWith("/trends")) return json([trend]);
     if (path.endsWith("/trends/101")) return json(trend);
     if (path.endsWith("/feed")) return json([item]);
