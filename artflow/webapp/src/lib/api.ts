@@ -1,6 +1,8 @@
 import { openFeedRemixRunner } from "@/features/feed-remix-runner";
 import type {
   AppLanguage,
+  AdminTrendCategory,
+  AdminTrendCategoryCatalog,
   AssistantMessage,
   BootstrapData,
   FeedItem,
@@ -451,6 +453,38 @@ export class MiniAppApi {
       {},
       signal,
     );
+  }
+
+  getAdminTrendCategories(signal?: AbortSignal): Promise<AdminTrendCategoryCatalog> {
+    return this.request<AdminTrendCategoryCatalog>("/admin/trend-categories", {}, signal);
+  }
+
+  createTrendCategory(title: string, expectedRevision: number): Promise<{ revision: number; category: AdminTrendCategory }> {
+    return this.request("/admin/trend-categories", {
+      method: "POST",
+      body: JSON.stringify({ title, expected_revision: expectedRevision }),
+    });
+  }
+
+  updateTrendCategory(key: string, body: { title?: string; is_visible?: boolean; confirm_populated?: boolean; expected_revision: number }): Promise<{ revision: number; category: AdminTrendCategory }> {
+    return this.request(`/admin/trend-categories/${encodeURIComponent(key)}/update`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  reorderTrendCategories(keys: string[], expectedRevision: number): Promise<AdminTrendCategoryCatalog> {
+    return this.request("/admin/trend-categories/reorder", {
+      method: "POST",
+      body: JSON.stringify({ keys, expected_revision: expectedRevision }),
+    });
+  }
+
+  reassignTrendCategory(key: string, promptId: number, expectedRevision: number): Promise<{ ok: true; prompt_id: number; category_key: string; revision: number }> {
+    return this.request(`/admin/trend-categories/${encodeURIComponent(key)}/reassign`, {
+      method: "POST",
+      body: JSON.stringify({ prompt_id: promptId, expected_revision: expectedRevision }),
+    });
   }
 
   prepareTrend(id: number): Promise<PreparedTrend> {

@@ -66,8 +66,10 @@ def test_frontend_is_category_first_and_keeps_studio_as_action():
     source = open("webapp/src/features/trends-screen.tsx", encoding="utf-8").read()
     shell = open("webapp/src/components/app-shell.tsx", encoding="utf-8").read()
     bot = open("bot/handlers/trends.py", encoding="utf-8").read()
-    assert 'aria-label="Категории трендов"' in source
-    assert 'setCategoryFilter(item.value)' in source
-    assert 'function TrendGroup' in source and 'openTrendRunner(trend)' in source
+    assert 'Тренды по категориям' in source
+    assert 'Смотреть все:' in source and 'trendCategory' in source
+    assert 'function CategoryShelf' in source and 'openTrendRunner(trend)' in source
+    assert 'Управление категориями' in source
     assert 'id: "create"' in shell
     assert 'TrendAdminFSM.category' in bot
+    assert '_show_categories' in bot and '_show_folder' in bot
