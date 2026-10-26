@@ -186,6 +186,16 @@ export interface TrendCategoryItemsPage {
   next_cursor?: string | null;
 }
 
+export interface AdminTrendCategory extends Pick<TrendCategoryShelf, "key" | "title" | "sort_order" | "trend_count"> {
+  is_visible: boolean;
+  published_count: number;
+}
+
+export interface AdminTrendCategoryCatalog {
+  revision: number;
+  items: AdminTrendCategory[];
+}
+
 export interface PreparedTrend extends TrendItem {
   prompt_id: number;
   model: string;

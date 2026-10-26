@@ -33,6 +33,7 @@ async function prepare(page: Page, allowed = true, light = false, extra: { owner
       { id: 102, task_id: "fixture-102", model: "fixture-video", gen_type: "video", status: "reconciliation_required", created_at: "2026-10-09T11:00:00Z" },
       { id: 103, task_id: "fixture-103", model: "fixture-image", gen_type: "image", status: "failed", created_at: "2026-10-09T09:00:00Z" },
     ] });
+    if (path === "/api/v1/trend-categories") return route.fulfill({ json: { items: [], next_cursor: null, has_more: false } });
     if (path === "/api/v1/referrals") return route.fulfill({ json: {} });
     return route.fulfill({ json: [] });
   });
@@ -93,7 +94,7 @@ for (const light of [false, true]) {
       await page.locator("[data-apix-editor-back]").click();
     }
     await page.getByRole("tab", { name: "Тренды", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "Тренды", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Тренды по категориям", exact: true })).toBeVisible();
     await page.getByRole("tab", { name: "Работы", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Мои работы" })).toBeVisible();
     await expect(page.getByRole("tab", { name: "Работы", exact: true })).toHaveAttribute("aria-selected", "true");

@@ -201,6 +201,16 @@ async function mockMiniApp(page: Page, options: MockOptions = {}) {
   const feedBySource = options.feedBySource || {};
   const publicFeed = options.publicFeed || {};
   const trends = options.trends || [];
+  const trendCategories = Array.from(new Set(trends.map(item => String(item.category || "featured")))).map((key, index) => {
+    const items = trends.filter(item => String(item.category || "featured") === key);
+    return {
+      key,
+      title: String(items[0]?.category_title || key),
+      sort_order: index,
+      trend_count: items.length,
+      preview_items: items,
+    };
+  });
   const plans = options.plans || defaultPlans;
   const history = options.history || [];
   const images = options.imageModels || imageModels;
@@ -337,6 +347,20 @@ async function mockMiniApp(page: Page, options: MockOptions = {}) {
       return route.fulfill({ status: 202, json: makeTask(2, "video") });
     }
 
+    if (path === "/api/v1/trend-categories" && method === "GET") {
+      return route.fulfill({ json: { items: trendCategories, has_more: false, next_cursor: null } });
+    }
+    const trendCategoryMatch = path.match(/^\/api\/v1\/trend-categories\/([^/]+)\/trends$/);
+    if (trendCategoryMatch && method === "GET") {
+      const key = decodeURIComponent(trendCategoryMatch[1]);
+      const category = trendCategories.find(item => item.key === key);
+      return route.fulfill(category ? { json: {
+        category: { key: category.key, title: category.title, sort_order: category.sort_order },
+        items: category.preview_items,
+        has_more: false,
+        next_cursor: null,
+      } } : { status: 404, json: { detail: "Category not found" } });
+    }
     if (path === "/api/v1/trends" && method === "GET") return route.fulfill({ json: trends });
     const trendCheckoutMatch = path.match(/^\/api\/v1\/trends\/(\d+)\/checkout$/);
     if (trendCheckoutMatch && method === "GET") {
@@ -696,7 +720,7 @@ registerDomain("12 · Ошибки, пустые данные и валидац�
   let videos: Json[] = videoModels;
 
   if (mode === 0) failures["/api/v1/feed"] = 503;
-  if (mode === 1) failures["/api/v1/trends"] = 502;
+  if (mode === 1) failures["/api/v1/trend-categories"] = 502;
   if (mode === 2) plans = [];
   if (mode === 3) images = [];
   if (mode === 4) videos = [];

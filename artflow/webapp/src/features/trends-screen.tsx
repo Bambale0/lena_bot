@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Film, Flame, ImageIcon, Link2, Plus, RefreshCw, Repeat2, Upload, X } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronUp, Eye, EyeOff, Film, Flame, FolderOpen, ImageIcon, Link2, LoaderCircle, Plus, RefreshCw, Repeat2, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -7,9 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { isPinterestServiceTrend } from "@/features/pinterest-service";
 import { copyTrendLink, openTrendRunner } from "@/features/trend-runner";
-import { MiniAppApi } from "@/lib/api";
+import { ApiError, MiniAppApi } from "@/lib/api";
 import { readTelegramInitData } from "@/lib/telegram";
-import type { ModelInfo, TrendItem, TrendUserField } from "@/lib/types";
+import type { AdminTrendCategory, AdminTrendCategoryCatalog, ModelInfo, TrendCategoryItemsPage, TrendCategoryPage, TrendCategoryShelf, TrendItem, TrendUserField } from "@/lib/types";
 import { cn, safeExternalUrl } from "@/lib/utils";
 
 interface TrendsScreenProps {
@@ -23,22 +23,6 @@ interface TrendsScreenProps {
 }
 
 type TrendKind = "image" | "video";
-type TrendCategory = {
-  value: string;
-  label: string;
-  emoji: string;
-};
-
-const TREND_CATEGORIES: TrendCategory[] = [
-  { value: "featured", label: "Тренды", emoji: "🔥" },
-  { value: "photo-video", label: "Фото → видео", emoji: "🎬" },
-  { value: "portrait", label: "Портреты", emoji: "✨" },
-  { value: "cartoon", label: "Мультфильм", emoji: "🎨" },
-  { value: "animals", label: "С животными", emoji: "🦁" },
-  { value: "holidays", label: "Праздники", emoji: "🎉" },
-  { value: "style", label: "Образы", emoji: "💫" },
-];
-
 const filters = [
   { value: "all" as const, label: "Все", icon: Flame },
   { value: "image" as const, label: "Фото", icon: ImageIcon },
@@ -304,10 +288,10 @@ function TrendGroup({
   );
 }
 
-function TrendAdminForm({ client, onCreated }: { client: MiniAppApi; onCreated: () => void }) {
+function TrendAdminForm({ client, categories, onCreated }: { client: MiniAppApi; categories: Array<Pick<TrendCategoryShelf, "key" | "title">>; onCreated: () => void }) {
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<TrendKind>("image");
-  const [category, setCategory] = useState("animals");
+  const [category, setCategory] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [model, setModel] = useState("");
@@ -331,6 +315,11 @@ function TrendAdminForm({ client, onCreated }: { client: MiniAppApi; onCreated: 
   const durationOptions = useMemo(() => modelDurations(selectedModel), [selectedModel]);
   const durationIndex = Math.max(0, durationOptions.indexOf(duration));
   const selectedDuration = durationOptions[durationIndex] ?? duration;
+
+  useEffect(() => {
+    if (!categories.length) { setCategory(""); return; }
+    if (!categories.some(item => item.key === category)) setCategory(categories[0].key);
+  }, [categories, category]);
 
   useEffect(() => {
     if (!open || imageModels.length || videoModels.length || loadingModels) return;
@@ -411,9 +400,9 @@ function TrendAdminForm({ client, onCreated }: { client: MiniAppApi; onCreated: 
       setDescription("");
       setPromptTemplate("");
       setPreviewUrl("");
-      setCategory("animals");
+      setCategory(categories[0]?.key || "");
       setUserFields([]);
-      toast.success(category === "animals" ? "Тренд добавлен в «С животными»" : "Тренд опубликован");
+      toast.success("Тренд опубликован");
       setOpen(false);
       onCreated();
     } catch (error) {
@@ -437,7 +426,7 @@ function TrendAdminForm({ client, onCreated }: { client: MiniAppApi; onCreated: 
       <div className="flex items-center justify-between gap-2">
         <div>
           <h2 className="text-sm font-bold">Добавить тренд</h2>
-          <p className="text-[10px] text-muted-foreground">Категория «С животными» теперь поддерживается напрямую.</p>
+          <p className="text-[10px] text-muted-foreground">Выберите папку из актуального каталога.</p>
         </div>
         <Button variant="ghost" size="icon" className="size-8 min-h-8" onClick={() => setOpen(false)} aria-label="Закрыть форму">
           <X className="size-4" />
@@ -452,7 +441,7 @@ function TrendAdminForm({ client, onCreated }: { client: MiniAppApi; onCreated: 
       <label className="grid gap-1 text-[10px] font-semibold text-muted-foreground">
         Категория
         <select className="min-h-10 rounded-lg border border-border bg-background px-3 text-xs text-foreground" value={category} onChange={(event) => setCategory(event.target.value)}>
-          {TREND_CATEGORIES.map((item) => <option key={item.value} value={item.value}>{item.emoji} {item.label}</option>)}
+          {categories.map((item) => <option key={item.key} value={item.key}>{item.title}</option>)}
         </select>
       </label>
 
@@ -534,128 +523,275 @@ function TrendAdminForm({ client, onCreated }: { client: MiniAppApi; onCreated: 
       <textarea className="min-h-32 rounded-lg border border-border bg-background p-3 text-xs" value={promptTemplate} onChange={(event) => setPromptTemplate(event.target.value)} placeholder="Скрытый канонический prompt — до 8000 символов" maxLength={8000} />
       <TrendFieldPicker fields={userFields} onChange={setUserFields} />
       <p className="-mt-1 text-[10px] text-muted-foreground">Например, выбери «Число» и «Одежда». Можно использовать <code>{"{{Число}}"}</code> / <code>{"{{Одежда}}"}</code> в prompt, но это не обязательно: backend всё равно добавит выбранные значения как приоритетные изменения.</p>
-      <Button disabled={busy || uploading || loadingModels || !model} onClick={() => void submit()}>{busy ? "Публикую…" : category === "animals" ? "🦁 Опубликовать в «С животными»" : "Опубликовать тренд"}</Button>
+      <Button disabled={busy || uploading || loadingModels || !model || !category} onClick={() => void submit()}>{busy ? "Публикую…" : "Опубликовать тренд"}</Button>
     </Card>
   );
 }
 
-function TrendsScreen({
-  items,
-  filter,
-  loading,
-  onFilterChange,
-  onRefresh,
-}: TrendsScreenProps) {
-  const client = useMemo(() => new MiniAppApi(readTelegramInitData()), []);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [categoryFilter, setCategoryFilter] = useState("all");
-
+function useReducedMotion() {
+  const [reduced, setReduced] = useState(() => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
   useEffect(() => {
-    client.request<{ is_admin?: boolean }>("/me/permissions")
-      .then((user) => setIsAdmin(Boolean(user.is_admin)))
-      .catch(() => setIsAdmin(false));
-  }, [client]);
+    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const update = () => setReduced(query.matches);
+    update(); query.addEventListener?.("change", update);
+    return () => query.removeEventListener?.("change", update);
+  }, []);
+  return reduced;
+}
 
-  const visibleItems = useMemo(() => items.filter((item) => !isPinterestServiceTrend(item)), [items]);
-  const kindFiltered = filter === "all" ? visibleItems : visibleItems.filter((item) => item.kind === filter);
-  const filtered = categoryFilter === "all" ? kindFiltered : kindFiltered.filter((item) => (item.category || "featured") === categoryFilter);
-  const availableCategories = TREND_CATEGORIES.filter((category) => kindFiltered.some((item) => (item.category || "featured") === category.value));
-
+function LiveTrendMedia({ trend }: { trend: TrendItem }) {
+  const frame = useRef<HTMLSpanElement>(null);
+  const video = useRef<HTMLVideoElement>(null);
+  const reduced = useReducedMotion();
+  const [visible, setVisible] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const src = safeExternalUrl(trend.preview_url || "");
   useEffect(() => {
-    if (categoryFilter === "all") return;
-    if (!availableCategories.some((item) => item.value === categoryFilter)) setCategoryFilter("all");
-  }, [availableCategories, categoryFilter]);
+    const node = frame.current;
+    if (!node || trend.kind !== "video" || !src || failed) return;
+    const observer = new IntersectionObserver(([entry]) => setVisible(Boolean(entry?.isIntersecting)), { root: null, threshold: 0.05 });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [failed, src, trend.kind]);
+  useEffect(() => {
+    const node = video.current;
+    if (!node) return;
+    if (visible && !reduced) void node.play().catch(() => undefined);
+    else node.pause();
+  }, [reduced, visible]);
+  if (!src || failed) return <span ref={frame} className="trend-live-fallback"><SparklesFallback kind={trend.kind} /></span>;
+  if (trend.kind === "video") return <span ref={frame} className="trend-live-media">{visible ? <video ref={video} src={src} muted loop playsInline preload="metadata" onError={() => setFailed(true)} /> : null}</span>;
+  return <span ref={frame} className="trend-live-media"><img src={src} alt="" loading="lazy" onError={() => setFailed(true)} /></span>;
+}
 
-  return (
-    <div className="grid gap-3">
-      <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <h1 className="text-lg font-bold tracking-tight sm:text-xl">Тренды</h1>
-            <Badge variant="outline">{filtered.length}</Badge>
-          </div>
-          <details className="apix-help max-w-xl">
-            <summary>Как повторить тренд</summary>
-            <p className="pb-2">Выберите шаблон, загрузите одно фото — upload и генерация запустятся автоматически. Модель, скрытый промпт и provider-параметры остаются на backend.</p>
-          </details>
-        </div>
-        <Button variant="outline" size="icon" className="size-9 min-h-9" disabled={loading} onClick={onRefresh} aria-label="Обновить тренды">
-          <RefreshCw className={loading ? "animate-spin" : ""} />
-        </Button>
-      </div>
+function SparklesFallback({ kind }: { kind: TrendKind }) {
+  return kind === "video" ? <Film aria-hidden="true" /> : <ImageIcon aria-hidden="true" />;
+}
 
-      {isAdmin ? <TrendAdminForm client={client} onCreated={onRefresh} /> : null}
-
-      <div className="flex gap-1 overflow-x-auto pb-0.5">
-        {filters.map(({ value, label, icon: Icon }) => (
-          <button
-            key={value}
-            type="button"
-            className={cn(
-              "apix-focus-ring flex min-h-8 shrink-0 items-center gap-1.5 rounded-lg border px-3 text-xs font-semibold transition",
-              filter === value
-                ? "border-primary/40 bg-primary/15 text-primary"
-                : "border-border bg-card/55 text-muted-foreground",
-            )}
-            onClick={() => onFilterChange(value)}
-          >
-            <Icon className="size-3.5" />
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {availableCategories.length ? (
-        <div className="flex gap-1 overflow-x-auto pb-0.5" aria-label="Категории трендов">
-          <button
-            type="button"
-            className={cn("apix-focus-ring min-h-8 shrink-0 rounded-lg border px-3 text-[10px] font-semibold", categoryFilter === "all" ? "border-primary/40 bg-primary/15 text-primary" : "border-border bg-card/55 text-muted-foreground")}
-            onClick={() => setCategoryFilter("all")}
-          >
-            Все категории
-          </button>
-          {availableCategories.map((item) => (
-            <button
-              key={item.value}
-              type="button"
-              className={cn("apix-focus-ring min-h-8 shrink-0 rounded-lg border px-3 text-[10px] font-semibold", categoryFilter === item.value ? "border-primary/40 bg-primary/15 text-primary" : "border-border bg-card/55 text-muted-foreground")}
-              onClick={() => setCategoryFilter(item.value)}
-            >
-              {item.emoji} {item.label}
-            </button>
-          ))}
-        </div>
-      ) : null}
-
-      {filtered.length ? (
-        <div className="grid gap-4">
-          {TREND_CATEGORIES.map((category) => (
-            <TrendGroup
-              key={category.value}
-              title={category.label}
-              emoji={category.emoji}
-              items={filtered.filter((item) => (item.category || "featured") === category.value)}
-              isAdmin={isAdmin}
-              client={client}
-              onUpdated={onRefresh}
-            />
-          ))}
-          <TrendGroup
-            title="Другие"
-            emoji="✨"
-            items={filtered.filter((item) => !TREND_CATEGORIES.some((category) => category.value === (item.category || "featured")))}
-            isAdmin={isAdmin}
-            client={client}
-            onUpdated={onRefresh}
-          />
-        </div>
-      ) : (
-        <div className="grid min-h-28 place-items-center rounded-xl border border-dashed border-border text-center text-xs text-muted-foreground">
-          {loading ? "Загружаем тренды…" : "В этой категории пока нет трендов"}
-        </div>
-      )}
+function ShelfTrendTile({ trend, isAdmin, client, onUpdated, adminCatalog, onAdminCatalog }: { trend: TrendItem; isAdmin: boolean; client: MiniAppApi; onUpdated: () => void; adminCatalog: AdminTrendCategoryCatalog | null; onAdminCatalog: (catalog: AdminTrendCategoryCatalog) => void }) {
+  const [editingFields, setEditingFields] = useState(false);
+  const [movingCategory, setMovingCategory] = useState(false);
+  const [userFields, setUserFields] = useState<TrendUserField[]>([]);
+  const [savingFields, setSavingFields] = useState(false);
+  const [targetCategory, setTargetCategory] = useState("");
+  const [moving, setMoving] = useState(false);
+  const openFields = () => {
+    setUserFields((trend.user_fields || []).map(field => trendFieldFromLabel(field.label || field.key)).slice(0, 6));
+    setEditingFields(true);
+  };
+  const saveFields = async () => {
+    if (savingFields) return;
+    setSavingFields(true);
+    try {
+      await client.request<TrendItem>(`/admin/trends/${trend.id}/update`, { method: "POST", body: JSON.stringify({ user_fields: userFields }) });
+      toast.success("Поля тренда сохранены"); setEditingFields(false); onUpdated();
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Не удалось сохранить поля"); }
+    finally { setSavingFields(false); }
+  };
+  const openCategoryMove = () => {
+    const firstTarget = adminCatalog?.items.find(item => item.key !== trend.category)?.key || adminCatalog?.items[0]?.key || "";
+    setTargetCategory(firstTarget);
+    setMovingCategory(true);
+  };
+  const moveCategory = async () => {
+    if (!adminCatalog || !targetCategory || targetCategory === trend.category || moving) return;
+    setMoving(true);
+    try {
+      await client.reassignTrendCategory(targetCategory, trend.id, adminCatalog.revision);
+      onAdminCatalog(await client.getAdminTrendCategories());
+      toast.success("Тренд перенесён в другую категорию"); setMovingCategory(false); onUpdated();
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) {
+        try { onAdminCatalog(await client.getAdminTrendCategories()); } catch { /* Keep the original actionable error. */ }
+        toast.error("Категории уже изменились. Список обновлён — повторите перенос.");
+      } else toast.error(error instanceof Error ? error.message : "Не удалось перенести тренд");
+    } finally { setMoving(false); }
+  };
+  return <article className="trend-live-tile">
+    <button type="button" className="trend-live-open" aria-label={`Повторить: ${trend.title}`} onClick={() => openTrendRunner(trend)}>
+      <LiveTrendMedia trend={trend} />
+      <span className="trend-live-copy"><strong>{trend.title}</strong><small>{trend.description || (trend.kind === "video" ? "Видео" : "Фото")}</small><span><Repeat2 size={14} /> Повторить</span></span>
+    </button>
+    <div className="trend-live-actions">
+      <button type="button" aria-label={`Скопировать ссылку: ${trend.title}`} onClick={async () => {
+        try { await copyTrendLink(trend); toast.success("Ссылка скопирована"); }
+        catch (error) { toast.error(error instanceof Error ? error.message : "Не удалось скопировать ссылку"); }
+      }}><Link2 size={14} /> Поделиться</button>
+      {isAdmin ? <button type="button" onClick={() => editingFields ? setEditingFields(false) : openFields()}>{editingFields ? "Закрыть" : "Поля"}</button> : null}
+      {isAdmin && adminCatalog ? <button type="button" aria-label={`Перенести ${trend.title}`} onClick={() => movingCategory ? setMovingCategory(false) : openCategoryMove()}>{movingCategory ? "Закрыть" : "Категория"}</button> : null}
     </div>
-  );
+    {isAdmin && editingFields ? <div className="trend-live-editor"><TrendFieldPicker fields={userFields} onChange={setUserFields} /><Button disabled={savingFields} onClick={() => void saveFields()}>{savingFields ? "Сохраняю…" : "Сохранить поля"}</Button></div> : null}
+    {isAdmin && movingCategory && adminCatalog ? <div className="trend-live-category-editor"><label>Перенести в<select aria-label={`Новая категория для ${trend.title}`} value={targetCategory} onChange={event => setTargetCategory(event.target.value)}>{adminCatalog.items.map(item => <option key={item.key} value={item.key} disabled={item.key === trend.category}>{item.title}</option>)}</select></label><Button disabled={moving || !targetCategory || targetCategory === trend.category} onClick={() => void moveCategory()}>{moving ? "Переношу…" : "Перенести"}</Button></div> : null}
+  </article>;
+}
+
+function CategoryShelf({ shelf, filter, onOpen, isAdmin, client, onUpdated, adminCatalog, onAdminCatalog }: { shelf: TrendCategoryShelf; filter: TrendsScreenProps["filter"]; onOpen: () => void; isAdmin: boolean; client: MiniAppApi; onUpdated: () => void; adminCatalog: AdminTrendCategoryCatalog | null; onAdminCatalog: (catalog: AdminTrendCategoryCatalog) => void }) {
+  const previews = filter === "all" ? shelf.preview_items : shelf.preview_items.filter(item => item.kind === filter);
+  return <section className="trend-category-shelf" data-category-key={shelf.key}>
+    <div className="trend-category-heading"><div><h2>{shelf.title}</h2><p>{shelf.trend_count} {shelf.trend_count === 1 ? "пример" : "примеров"}</p></div>
+      <button type="button" aria-label={`Смотреть все: ${shelf.title}`} onClick={onOpen}>Смотреть все <FolderOpen size={16} /></button></div>
+    {previews.length ? <div className="trend-live-rail">{previews.slice(0, 5).map(trend => <ShelfTrendTile key={trend.id} trend={trend} isAdmin={isAdmin} client={client} onUpdated={onUpdated} adminCatalog={adminCatalog} onAdminCatalog={onAdminCatalog} />)}</div> : <button type="button" className="trend-shelf-open-filtered" onClick={onOpen}>В первых примерах нет этого формата — открыть всю папку</button>}
+  </section>;
+}
+
+function CategoryManager({ client, onChanged, catalog, onCatalog }: { client: MiniAppApi; onChanged: () => void; catalog: AdminTrendCategoryCatalog | null; onCatalog: (catalog: AdminTrendCategoryCatalog) => void }) {
+  const [open, setOpen] = useState(false);
+  const [title, setTitle] = useState("");
+  const [renames, setRenames] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [attempted, setAttempted] = useState(false);
+  const [error, setError] = useState("");
+  const [confirmKey, setConfirmKey] = useState<string | null>(null);
+  const load = async () => {
+    setBusy(true); setError("");
+    try {
+      const next = await client.getAdminTrendCategories();
+      setRenames(current => Object.fromEntries(next.items.map(item => {
+        const previous = catalog?.items.find(row => row.key === item.key)?.title;
+        const draft = current[item.key];
+        return [item.key, draft !== undefined && previous !== undefined && draft !== previous ? draft : item.title];
+      })));
+      onCatalog(next);
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Не удалось загрузить категории"); }
+    finally { setBusy(false); }
+  };
+  useEffect(() => { if (open && !catalog && !attempted) { setAttempted(true); void load(); } }, [open, catalog, attempted]);
+  const mutationError = (caught: unknown) => {
+    setError(caught instanceof ApiError && caught.status === 409 ? "Каталог изменился. Черновик сохранён — обновите список и повторите." : caught instanceof Error ? caught.message : "Изменение не сохранено");
+  };
+  const create = async () => {
+    if (!catalog || busy || !title.trim()) return;
+    setBusy(true); setError("");
+    try {
+      const result = await client.createTrendCategory(title.trim(), catalog.revision);
+      onCatalog({ revision: result.revision, items: [...catalog.items, result.category] });
+      setRenames(current => ({ ...current, [result.category.key]: result.category.title })); setTitle(""); onChanged();
+    } catch (caught) { mutationError(caught); } finally { setBusy(false); }
+  };
+  const update = async (item: AdminTrendCategory, patch: { title?: string; is_visible?: boolean; confirm_populated?: boolean }) => {
+    if (!catalog || busy) return;
+    setBusy(true); setError("");
+    try {
+      const result = await client.updateTrendCategory(item.key, { ...patch, expected_revision: catalog.revision });
+      onCatalog({ revision: result.revision, items: catalog.items.map(row => row.key === item.key ? { ...row, ...result.category } : row) });
+      setRenames(current => ({ ...current, [item.key]: result.category.title }));
+      setConfirmKey(null); onChanged();
+    } catch (caught) { mutationError(caught); } finally { setBusy(false); }
+  };
+  const move = async (index: number, offset: number) => {
+    if (!catalog || busy) return;
+    const target = index + offset;
+    if (target < 0 || target >= catalog.items.length) return;
+    const items = [...catalog.items]; [items[index], items[target]] = [items[target], items[index]];
+    setBusy(true); setError("");
+    try { const next = await client.reorderTrendCategories(items.map(item => item.key), catalog.revision); onCatalog(next); onChanged(); }
+    catch (caught) { mutationError(caught); } finally { setBusy(false); }
+  };
+  if (!open) return <Button variant="outline" className="w-full sm:w-auto" onClick={() => { setAttempted(false); setOpen(true); }}>Управление категориями</Button>;
+  return <Card className="trend-category-manager">
+    <div className="trend-manager-title"><div><h2>Категории трендов</h2><p>Версия {catalog?.revision ?? "—"}</p></div><Button size="icon" variant="ghost" aria-label="Закрыть управление категориями" onClick={() => setOpen(false)}><X /></Button></div>
+    {error && <div role="alert" className="trend-manager-error">{error} <button onClick={() => void load()}>Обновить</button></div>}
+    <div className="trend-manager-create"><label>Название новой категории<input aria-label="Название новой категории" value={title} maxLength={80} onChange={event => setTitle(event.target.value)} /></label><Button disabled={busy || !catalog || !title.trim()} onClick={() => void create()}>Создать категорию</Button></div>
+    {busy && !catalog ? <p><LoaderCircle className="inline animate-spin" /> Загружаем…</p> : null}
+    <div className="trend-manager-list">{catalog?.items.map((item, index) => <div className="trend-manager-row" key={item.key}>
+      <div className="trend-manager-order"><button aria-label={`Поднять ${item.title}`} disabled={busy || index === 0} onClick={() => void move(index, -1)}><ChevronUp /></button><button aria-label={`Опустить ${item.title}`} disabled={busy || index === catalog.items.length - 1} onClick={() => void move(index, 1)}><ChevronDown /></button></div>
+      <label><span>{item.trend_count} всего · {item.published_count} опубликовано</span><input aria-label={`Название ${item.title}`} value={renames[item.key] ?? item.title} maxLength={80} onChange={event => setRenames(current => ({ ...current, [item.key]: event.target.value }))} /></label>
+      <div className="trend-manager-actions"><Button variant="outline" disabled={busy || !(renames[item.key] || "").trim() || renames[item.key] === item.title} onClick={() => void update(item, { title: renames[item.key] })}>Переименовать</Button><Button variant="outline" aria-label={`${item.is_visible ? "Скрыть" : "Показать"} ${item.title}`} onClick={() => item.is_visible && item.trend_count ? setConfirmKey(item.key) : void update(item, { is_visible: !item.is_visible })}>{item.is_visible ? <EyeOff /> : <Eye />}{item.is_visible ? "Скрыть" : "Показать"}</Button></div>
+      {confirmKey === item.key && <div className="trend-hide-confirm"><p>Скрыть папку с {item.trend_count} примерами? Новые запуски сразу станут недоступны.</p><Button variant="destructive" onClick={() => void update(item, { is_visible: false, confirm_populated: true })}>Подтвердить скрытие</Button><Button variant="outline" onClick={() => setConfirmKey(null)}>Отмена</Button></div>}
+    </div>)}</div>
+  </Card>;
+}
+
+function TrendsScreen({ filter, loading, onFilterChange, onRefresh }: TrendsScreenProps) {
+  const client = useMemo(() => new MiniAppApi(readTelegramInitData()), []);
+  const initialFolder = typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("trendCategory") || "";
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [shelves, setShelves] = useState<TrendCategoryShelf[]>([]);
+  const [shelfCursor, setShelfCursor] = useState<string | null>(null);
+  const [shelfMore, setShelfMore] = useState(false);
+  const [shelfLoading, setShelfLoading] = useState(true);
+  const [shelfError, setShelfError] = useState("");
+  const [folderKey, setFolderKey] = useState(initialFolder);
+  const [folder, setFolder] = useState<TrendCategoryItemsPage | null>(null);
+  const [folderLoading, setFolderLoading] = useState(false);
+  const [folderError, setFolderError] = useState("");
+  const [adminCatalog, setAdminCatalog] = useState<AdminTrendCategoryCatalog | null>(null);
+  const shelfScroll = useRef(0);
+  const openedFromShelf = useRef(false);
+
+  const loadShelves = async (append = false) => {
+    setShelfLoading(true); setShelfError("");
+    try {
+      const page = await client.getTrendCategories(append ? shelfCursor || undefined : undefined);
+      setShelves(current => append ? [...current, ...page.items] : page.items);
+      setShelfCursor(page.next_cursor || null); setShelfMore(page.has_more);
+    } catch (caught) { setShelfError(caught instanceof Error ? caught.message : "Не удалось загрузить категории"); }
+    finally { setShelfLoading(false); }
+  };
+  useEffect(() => { void loadShelves(false); }, []);
+  useEffect(() => {
+    client.request<{ is_admin?: boolean }>("/me/permissions").then(user => setIsAdmin(Boolean(user.is_admin))).catch(() => setIsAdmin(false));
+  }, [client]);
+  const loadAdminCatalog = async () => {
+    if (!isAdmin) return;
+    try { setAdminCatalog(await client.getAdminTrendCategories()); }
+    catch { /* The category manager exposes an explicit retry with the server error. */ }
+  };
+  useEffect(() => { if (isAdmin) void loadAdminCatalog(); }, [client, isAdmin]);
+  useEffect(() => {
+    const sync = () => { openedFromShelf.current = false; setFolderKey(new URLSearchParams(window.location.search).get("trendCategory") || ""); };
+    window.addEventListener("popstate", sync); return () => window.removeEventListener("popstate", sync);
+  }, []);
+  useEffect(() => {
+    if (!folderKey) { setFolder(null); return; }
+    let active = true; setFolderLoading(true); setFolderError(""); setFolder(null);
+    client.getTrendCategoryItems(folderKey).then(page => { if (active) setFolder(page); }).catch(caught => { if (active) setFolderError(caught instanceof Error ? caught.message : "Не удалось открыть папку"); }).finally(() => { if (active) setFolderLoading(false); });
+    return () => { active = false; };
+  }, [client, folderKey]);
+  const openFolder = (key: string) => {
+    const main = document.querySelector<HTMLElement>(".apix-shell > main"); shelfScroll.current = main?.scrollTop || window.scrollY;
+    const url = new URL(window.location.href); url.searchParams.set("trendCategory", key); history.pushState({}, "", url); openedFromShelf.current = true; setFolderKey(key);
+  };
+  const closeFolder = () => {
+    if (openedFromShelf.current) { openedFromShelf.current = false; history.back(); }
+    else { const url = new URL(window.location.href); url.searchParams.delete("trendCategory"); history.replaceState({}, "", url); setFolderKey(""); }
+    requestAnimationFrame(() => { const main = document.querySelector<HTMLElement>(".apix-shell > main"); if (main) main.scrollTop = shelfScroll.current; else window.scrollTo({ top: shelfScroll.current }); });
+  };
+  const loadMoreFolder = async () => {
+    if (!folder || folderLoading || !folder.has_more) return;
+    setFolderLoading(true); setFolderError("");
+    try { const next = await client.getTrendCategoryItems(folder.category.key, folder.next_cursor || undefined); setFolder({ ...next, items: [...folder.items, ...next.items] }); }
+    catch (caught) { setFolderError(caught instanceof Error ? caught.message : "Не удалось загрузить следующую страницу"); }
+    finally { setFolderLoading(false); }
+  };
+  const refresh = () => { onRefresh(); void loadShelves(false); void loadAdminCatalog(); if (folderKey) { setFolderKey(""); requestAnimationFrame(() => setFolderKey(folderKey)); } };
+  const visibleShelves = shelves.filter(shelf => shelf.key.toLocaleLowerCase("ru-RU") !== "pinterest").map(shelf => ({ ...shelf, preview_items: shelf.preview_items.filter(item => !isPinterestServiceTrend(item)) }));
+  const folderItems = (folder?.items || []).filter(item => !isPinterestServiceTrend(item) && (filter === "all" || item.kind === filter));
+
+  if (folderKey) return <div className="trend-folder-page">
+    <button type="button" className="trend-folder-back" aria-label="Назад к категориям" onClick={closeFolder}><ArrowLeft /> Назад к категориям</button>
+    <header><p>Папка трендов</p><h1>{folder?.category.title || "Загружаем…"}</h1><span>Выберите пример, добавьте свои материалы и подтвердите стоимость.</span></header>
+    <div className="trend-kind-filters">{filters.map(({ value, label, icon: Icon }) => <button key={value} className={filter === value ? "active" : ""} onClick={() => onFilterChange(value)}><Icon />{label}</button>)}</div>
+    {folderLoading && !folder ? <div className="trend-state"><LoaderCircle className="animate-spin" /> Загружаем папку…</div> : null}
+    {folderError && !folder ? <div className="trend-state" role="alert"><p>{folderError}</p><Button onClick={() => { setFolderKey(""); requestAnimationFrame(() => setFolderKey(folderKey)); }}>Повторить</Button></div> : null}
+    {folder && !folderItems.length ? <div className="trend-state"><FolderOpen /><p>В этой папке пока нет подходящих примеров.</p></div> : null}
+    {folderItems.length ? <div className="trend-folder-grid">{folderItems.map(item => <ShelfTrendTile key={item.id} trend={item} isAdmin={isAdmin} client={client} onUpdated={refresh} adminCatalog={adminCatalog} onAdminCatalog={setAdminCatalog} />)}</div> : null}
+    {folderError && folder ? <div className="trend-page-error" role="alert">{folderError}</div> : null}
+    {folder?.has_more ? <Button className="trend-load-more" variant="outline" disabled={folderLoading} onClick={() => void loadMoreFolder()}>{folderLoading ? "Загружаем…" : "Показать ещё"}</Button> : null}
+  </div>;
+
+  return <div className="trend-shelves-page">
+    <header className="trend-shelves-header"><div><p>Готовые сценарии</p><h1>Тренды по категориям</h1><span>Откройте папку или сразу повторите понравившийся пример.</span></div><Button variant="outline" size="icon" disabled={loading || shelfLoading} onClick={refresh} aria-label="Обновить тренды"><RefreshCw className={loading || shelfLoading ? "animate-spin" : ""} /></Button></header>
+    <details className="apix-help max-w-xl"><summary>Как повторить тренд</summary><p className="pb-2">Выберите пример, добавьте свои материалы, настройте доступные параметры и подтвердите стоимость перед запуском.</p></details>
+    <div className="trend-kind-filters">{filters.map(({ value, label, icon: Icon }) => <button key={value} className={filter === value ? "active" : ""} onClick={() => onFilterChange(value)}><Icon />{label}</button>)}</div>
+    {isAdmin ? <div className="trend-admin-tools"><CategoryManager client={client} onChanged={refresh} catalog={adminCatalog} onCatalog={setAdminCatalog} /><TrendAdminForm client={client} categories={adminCatalog?.items || []} onCreated={refresh} /></div> : null}
+    {shelfLoading && !shelves.length ? <div className="trend-shelf-skeleton" aria-label="Загружаем категории"><i /><i /><i /></div> : null}
+    {shelfError && !shelves.length ? <div className="trend-state" role="alert"><p>{shelfError}</p><Button onClick={() => void loadShelves(false)}>Попробовать снова</Button></div> : null}
+    {!shelfLoading && !shelfError && !visibleShelves.length ? <div className="trend-state"><FolderOpen /><p>Категории пока пусты. Можно создать работу по своей идее.</p></div> : null}
+    <div className="trend-shelves-list">{visibleShelves.map(shelf => <CategoryShelf key={shelf.key} shelf={shelf} filter={filter} onOpen={() => openFolder(shelf.key)} isAdmin={isAdmin} client={client} onUpdated={refresh} adminCatalog={adminCatalog} onAdminCatalog={setAdminCatalog} />)}</div>
+    {shelfError && shelves.length ? <div className="trend-page-error" role="alert">{shelfError}</div> : null}
+    {shelfMore ? <Button variant="outline" className="trend-load-more" disabled={shelfLoading} onClick={() => void loadShelves(true)}>{shelfLoading ? "Загружаем…" : "Показать ещё категории"}</Button> : null}
+  </div>;
 }
 
 export { TrendsScreen };

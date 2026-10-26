@@ -48,6 +48,11 @@ async function mockApi(page: import("@playwright/test").Page) {
   await page.route("**/api/v1/models/music", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/history?**", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/feed?**", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/trend-categories?**", (route) => route.fulfill({ json: {
+    items: [{ key: "portrait", title: "Портреты", sort_order: 0, trend_count: 1, preview_items: trends }],
+    has_more: false,
+    next_cursor: null,
+  } }));
   await page.route("**/api/v1/trends?**", (route) => route.fulfill({ json: trends }));
   await page.route("**/api/v1/services/pinterest", (route) => route.fulfill({ json: pinterestService }));
   await page.route("**/api/v1/plans", (route) => route.fulfill({ json: [] }));

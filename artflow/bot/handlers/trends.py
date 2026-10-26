@@ -46,6 +46,8 @@ from db.prompt_repository import (
 )
 from db.trend_category_repository import (
     filter_public_prompt_library_items,
+    get_public_category_shelves,
+    get_public_category_trends,
     get_visible_trend_category,
     list_visible_trend_categories,
     public_prompt_library_item_is_visible,
@@ -54,6 +56,8 @@ from db.trend_category_repository import (
 
 router = Router(name="trends")
 MAX_BOT_PREVIEW_BYTES = 20 * 1024 * 1024
+CATEGORY_PAGE_SIZE = 8
+FOLDER_TREND_LIMIT = 48
 
 
 class TrendAdminFSM(StatesGroup):
@@ -103,6 +107,81 @@ def _catalog_kb(prompt: UserPrompt, *, index: int, total: int, is_admin: bool):
             InlineKeyboardButton(text="🎬 Видео-тренд", callback_data="trends:add:video"),
         )
         builder.row(InlineKeyboardButton(text="🗑 Убрать тренд", callback_data=f"trends:archive:{prompt.id}"))
+    builder.row(InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"))
+    return builder.as_markup()
+
+
+def _category_kb(categories, *, page: int, is_admin: bool):
+    builder = InlineKeyboardBuilder()
+    total_pages = max(1, (len(categories) + CATEGORY_PAGE_SIZE - 1) // CATEGORY_PAGE_SIZE)
+    safe_page = min(max(page, 0), total_pages - 1)
+    start = safe_page * CATEGORY_PAGE_SIZE
+    for category in categories[start : start + CATEGORY_PAGE_SIZE]:
+        builder.row(
+            InlineKeyboardButton(
+                text=f"📁 {str(category.title)[:56]}",
+                callback_data=f"trends:folder:{category.key}:{safe_page}",
+            )
+        )
+    if total_pages > 1:
+        buttons = []
+        if safe_page > 0:
+            buttons.append(InlineKeyboardButton(text="◀️", callback_data=f"trends:categories:{safe_page - 1}"))
+        buttons.append(InlineKeyboardButton(text=f"{safe_page + 1}/{total_pages}", callback_data="trends:noop"))
+        if safe_page + 1 < total_pages:
+            buttons.append(InlineKeyboardButton(text="▶️", callback_data=f"trends:categories:{safe_page + 1}"))
+        builder.row(*buttons)
+    if is_admin:
+        builder.row(
+            InlineKeyboardButton(text="➕ Фото-тренд", callback_data="trends:add:image"),
+            InlineKeyboardButton(text="🎬 Видео-тренд", callback_data="trends:add:video"),
+        )
+    builder.row(InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"))
+    return builder.as_markup()
+
+
+def _folder_kb(
+    prompt: UserPrompt,
+    *,
+    index: int,
+    total: int,
+    category_key: str,
+    category_page: int,
+    folder_page: int,
+    has_more: bool,
+    is_admin: bool,
+):
+    builder = InlineKeyboardBuilder()
+    has_previous = index > 0 or folder_page > 0
+    has_next = index + 1 < total or has_more
+    if has_previous or has_next:
+        buttons = []
+        if has_previous:
+            previous_page = folder_page if index > 0 else folder_page - 1
+            previous_index = index - 1 if index > 0 else FOLDER_TREND_LIMIT - 1
+            buttons.append(
+                InlineKeyboardButton(
+                    text="◀️",
+                    callback_data=f"trends:fn:{category_key}:{category_page}:{previous_page}:{previous_index}",
+                )
+            )
+        buttons.append(InlineKeyboardButton(text=f"{index + 1}/{total}", callback_data="trends:noop"))
+        if has_next:
+            next_page = folder_page if index + 1 < total else folder_page + 1
+            next_index = index + 1 if index + 1 < total else 0
+            buttons.append(
+                InlineKeyboardButton(
+                    text="▶️",
+                    callback_data=f"trends:fn:{category_key}:{category_page}:{next_page}:{next_index}",
+                )
+            )
+        builder.row(
+            *buttons,
+        )
+    builder.row(InlineKeyboardButton(text="🔥 Повторить шаблон", callback_data=f"trends:use:{prompt.id}"))
+    if is_admin:
+        builder.row(InlineKeyboardButton(text="🗑 Убрать тренд", callback_data=f"trends:archive:{prompt.id}:{category_key}:{category_page}"))
+    builder.row(InlineKeyboardButton(text="← Категории", callback_data=f"trends:categories:{category_page}"))
     builder.row(InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"))
     return builder.as_markup()
 
@@ -177,14 +256,167 @@ async def _show(
     await safe_edit_message(holder, caption, reply_markup=markup)
 
 
+async def _show_categories(
+    holder: Message,
+    session: AsyncSession,
+    user: User | None,
+    *,
+    page: int,
+    edit: bool = True,
+) -> None:
+    categories = []
+    cursor = None
+    seen_cursors: set[str] = set()
+    while True:
+        category_page = await get_public_category_shelves(
+            session, limit=24, cursor=cursor, preview_limit=1
+        )
+        categories.extend(item.category for item in category_page.items)
+        if not category_page.has_more or not category_page.next_cursor:
+            break
+        if category_page.next_cursor in seen_cursors:
+            raise RuntimeError("Trend category pagination repeated a cursor")
+        seen_cursors.add(category_page.next_cursor)
+        cursor = category_page.next_cursor
+    if not categories:
+        text = "🔥 <b>Тренды</b>\n\nПока нет доступных категорий."
+        markup = _empty_kb(_is_admin(user))
+        if edit:
+            await safe_edit_message(holder, text, reply_markup=markup)
+        else:
+            await holder.answer(text, reply_markup=markup, parse_mode="HTML")
+        return
+    total_pages = max(1, (len(categories) + CATEGORY_PAGE_SIZE - 1) // CATEGORY_PAGE_SIZE)
+    safe_page = min(max(page, 0), total_pages - 1)
+    text = "🔥 <b>Тренды по категориям</b>\n\nВыбери папку — внутри можно листать живые примеры и сразу повторить понравившийся."
+    markup = _category_kb(categories, page=safe_page, is_admin=_is_admin(user))
+    if edit:
+        await safe_edit_message(holder, text, reply_markup=markup)
+    else:
+        await holder.answer(text, reply_markup=markup, parse_mode="HTML")
+
+
+async def _show_folder(
+    holder: Message,
+    session: AsyncSession,
+    user: User | None,
+    *,
+    category_key: str,
+    category_page: int,
+    folder_page: int,
+    index: int,
+) -> None:
+    safe_folder_page = max(folder_page, 0)
+    folder = await get_public_category_trends(
+        session,
+        key=category_key,
+        limit=FOLDER_TREND_LIMIT,
+        cursor=None,
+        offset=safe_folder_page * FOLDER_TREND_LIMIT,
+    )
+    if folder is None:
+        await safe_edit_message(
+            holder,
+            "🔥 <b>Категория недоступна</b>\n\nОна была скрыта или перемещена.",
+            reply_markup=InlineKeyboardBuilder()
+            .row(InlineKeyboardButton(text="← Категории", callback_data=f"trends:categories:{category_page}"))
+            .as_markup(),
+        )
+        return
+    if not folder.items:
+        await safe_edit_message(
+            holder,
+            f"📁 <b>{html.escape(str(folder.category.title))}</b>\n\nВ этой папке пока нет опубликованных трендов.",
+            reply_markup=InlineKeyboardBuilder()
+            .row(InlineKeyboardButton(text="← Категории", callback_data=f"trends:categories:{category_page}"))
+            .as_markup(),
+        )
+        return
+    safe_index = index % len(folder.items)
+    prompt = folder.items[safe_index]
+    caption = _caption(prompt, index=safe_index, total=len(folder.items))
+    caption = f"📁 <b>{html.escape(str(folder.category.title))}</b>\n\n{caption}"
+    markup = _folder_kb(
+        prompt,
+        index=safe_index,
+        total=len(folder.items),
+        category_key=str(folder.category.key),
+        category_page=category_page,
+        folder_page=safe_folder_page,
+        has_more=folder.has_more,
+        is_admin=_is_admin(user),
+    )
+    media = _media_source(prompt.preview_url)
+    try:
+        if trend_kind(prompt) == "video" and media:
+            if getattr(holder, "video", None) or getattr(holder, "photo", None):
+                await holder.edit_media(InputMediaVideo(media=media, caption=caption, parse_mode="HTML"), reply_markup=markup)
+            else:
+                await holder.answer_video(media, caption=caption, reply_markup=markup)
+            return
+        if media:
+            if getattr(holder, "photo", None) or getattr(holder, "video", None):
+                await holder.edit_media(InputMediaPhoto(media=media, caption=caption, parse_mode="HTML"), reply_markup=markup)
+            else:
+                await holder.answer_photo(media, caption=caption, reply_markup=markup)
+            return
+    except Exception:
+        pass
+    await safe_edit_message(holder, caption, reply_markup=markup)
+
+
 @router.message(Command("trends"))
 @router.callback_query(F.data == "menu:trends")
 async def open_trends(event: Message | CallbackQuery, session: AsyncSession, state: FSMContext, db_user: User | None = None) -> None:
     await state.clear()
     holder = event.message if isinstance(event, CallbackQuery) else event
-    await _show(holder, session, db_user, 0)  # type: ignore[arg-type]
+    await _show_categories(holder, session, db_user, page=0, edit=isinstance(event, CallbackQuery))  # type: ignore[arg-type]
     if isinstance(event, CallbackQuery):
         await safe_answer_callback(event)
+
+
+@router.callback_query(F.data.startswith("trends:categories:"))
+async def navigate_trend_categories(call: CallbackQuery, session: AsyncSession, db_user: User | None = None) -> None:
+    raw_page = str(call.data or "").rsplit(":", 1)[-1]
+    page = int(raw_page) if raw_page.isascii() and raw_page.isdecimal() else 0
+    await _show_categories(call.message, session, db_user, page=page)  # type: ignore[arg-type]
+    await safe_answer_callback(call)
+
+
+@router.callback_query(F.data.startswith("trends:folder:"))
+async def open_trend_folder(call: CallbackQuery, session: AsyncSession, db_user: User | None = None) -> None:
+    parts = str(call.data or "").split(":")
+    if len(parts) != 4 or not parts[3].isascii() or not parts[3].isdecimal():
+        await call.answer("Категория недоступна", show_alert=True)
+        return
+    await _show_folder(
+        call.message,  # type: ignore[arg-type]
+        session,
+        db_user,
+        category_key=parts[2],
+        category_page=int(parts[3]),
+        folder_page=0,
+        index=0,
+    )
+    await safe_answer_callback(call)
+
+
+@router.callback_query(F.data.startswith("trends:fn:"))
+async def navigate_trend_folder(call: CallbackQuery, session: AsyncSession, db_user: User | None = None) -> None:
+    parts = str(call.data or "").split(":")
+    if len(parts) != 6 or not all(part.isascii() and part.isdecimal() for part in parts[3:]):
+        await call.answer("Тренд недоступен", show_alert=True)
+        return
+    await _show_folder(
+        call.message,  # type: ignore[arg-type]
+        session,
+        db_user,
+        category_key=parts[2],
+        category_page=int(parts[3]),
+        folder_page=int(parts[4]),
+        index=int(parts[5]),
+    )
+    await safe_answer_callback(call)
 
 
 @router.callback_query(F.data.startswith("trends:nav:"))
@@ -469,20 +701,25 @@ async def confirm_trend(call: CallbackQuery, state: FSMContext, session: AsyncSe
     await approve_prompt(session, prompt.id)
     await state.clear()
     await call.message.answer("✅ Тренд опубликован.")
-    await _show(call.message, session, db_user, 0)
+    await _show_categories(call.message, session, db_user, page=0)  # type: ignore[arg-type]
     await safe_answer_callback(call)
 
 
 @router.callback_query(F.data.startswith("trends:archive:"), IsAdmin())
 async def archive_trend(call: CallbackQuery, session: AsyncSession, db_user: User) -> None:
-    trend_id = int(call.data.rsplit(":", 1)[1])  # type: ignore[union-attr]
+    parts = str(call.data or "").split(":")
+    if len(parts) not in {3, 5} or not parts[2].isascii() or not parts[2].isdecimal():
+        await call.answer("Тренд не найден", show_alert=True)
+        return
+    trend_id = int(parts[2])
     prompt = await get_prompt_by_id(session, trend_id)
     if not is_trend_prompt(prompt):
         await call.answer("Тренд не найден", show_alert=True)
         return
     await deactivate_prompt(session, trend_id)
     await call.answer("Тренд скрыт")
-    await _show(call.message, session, db_user, 0)  # type: ignore[arg-type]
+    category_page = int(parts[4]) if len(parts) == 5 and parts[4].isascii() and parts[4].isdecimal() else 0
+    await _show_categories(call.message, session, db_user, page=category_page)  # type: ignore[arg-type]
 
 
 @router.callback_query(F.data == "trends:cancel", IsAdmin())
