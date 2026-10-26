@@ -31,6 +31,7 @@ from core.trends import (
     TREND_TAG,
     build_trend_tags,
     is_trend_prompt,
+    mirror_trend_category_tag,
     trend_kind,
     trend_user_fields,
 )
@@ -441,6 +442,9 @@ async def confirm_trend(call: CallbackQuery, state: FSMContext, session: AsyncSe
         await call.answer("Эта категория больше недоступна", show_alert=True)
         return
     settings_payload["category"] = category.key
+    trend_tags = mirror_trend_category_tag(
+        build_trend_tags(kind, settings_payload), category.key
+    )
     prompt = await create_prompt(
         session,
         author_id=db_user.id,
@@ -450,7 +454,7 @@ async def confirm_trend(call: CallbackQuery, state: FSMContext, session: AsyncSe
         prompt_text=data["prompt_template"],
         preview_url=data["preview_url"],
         model=data["model"],
-        tags=build_trend_tags(kind, settings_payload),
+        tags=trend_tags,
         is_public=True,
         trend_category_id=int(category.id),
     )

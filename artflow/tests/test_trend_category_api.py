@@ -361,13 +361,13 @@ async def test_web_admin_update_preserves_unresolved_legacy_category(monkeypatch
 async def test_telegram_admin_create_dual_writes_category_relation_and_tag(monkeypatch):
     from bot.handlers import trends as bot_trends
 
-    category = _category(6, "animals", 4)
+    category = _category(8, "cat_dynamic", 7)
     prompt = SimpleNamespace(id=71)
     create = AsyncMock(return_value=prompt)
     state = AsyncMock()
     state.get_data.return_value = {
         "kind": "image",
-        "category": "animals",
+        "category": "cat_dynamic",
         "title": "Animal trend",
         "description": "",
         "prompt_template": "hidden",
@@ -398,5 +398,6 @@ async def test_telegram_admin_create_dual_writes_category_relation_and_tag(monke
         db_user=SimpleNamespace(id=1),
     )
 
-    assert create.await_args.kwargs["trend_category_id"] == 6
-    assert "trend-category:animals" in create.await_args.kwargs["tags"]
+    assert create.await_args.kwargs["trend_category_id"] == 8
+    assert "trend-category:cat_dynamic" in create.await_args.kwargs["tags"]
+    assert "trend-category:featured" not in create.await_args.kwargs["tags"]
