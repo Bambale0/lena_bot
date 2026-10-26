@@ -51,6 +51,7 @@ test("black lilac foundation: palette, five destinations and full profile works"
   await page.goto("/?ux=3");
   await expect(page.locator('[data-ui-version="3"]')).toBeVisible();
   await expect(page.locator("body")).toHaveCSS("background-color", "rgb(0, 0, 0)");
+  await expect(page.locator("body")).not.toHaveCSS("background-image", "none");
   const nav = page.getByRole("navigation", { name: "Основная навигация" });
   await expect(nav.getByRole("tab", { name: "Проекты", exact: true })).toHaveCount(0);
   await expect(nav.getByRole("button", { name: "Пополнить", exact: true })).toBeVisible();
@@ -63,6 +64,8 @@ test("black lilac foundation: palette, five destinations and full profile works"
     await page.screenshot({ path: info.outputPath(`black-lilac-home-${width}.png`), fullPage: true });
   }
   await nav.getByRole("tab", { name: "Профиль", exact: true }).click();
+  await expect(page.locator(".studio-profile-hero")).toHaveCSS("border-top-left-radius", "26px");
+  await expect(page.locator(".studio-profile-hero")).toHaveCSS("border-top-right-radius", "10px");
   await expect(page.getByRole("region", { name: "Баланс профиля" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Пополнить баланс", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Быстрые действия", exact: true })).toBeVisible();
