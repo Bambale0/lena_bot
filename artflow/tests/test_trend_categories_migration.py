@@ -10,6 +10,7 @@ from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from alembic.script import ScriptDirectory
 from sqlalchemy import inspect, text
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -45,6 +46,32 @@ def test_trend_category_models_expose_catalog_relation_and_public_folder_index()
     )
 
 
+def test_pending_backfill_query_is_database_filtered_and_bounded() -> None:
+    migration = importlib.import_module("db.migrations.versions.052_trend_categories")
+    prompt_table = migration.sa.table(
+        "user_prompts",
+        migration.sa.column("id", migration.sa.Integer()),
+        migration.sa.column("tags", migration.sa.ARRAY(migration.sa.Text())),
+        migration.sa.column("trend_category_id", migration.sa.Integer()),
+    )
+    query = migration._pending_trend_prompts_query(
+        prompt_table,
+        after_id=41,
+        batch_size=500,
+    )
+    sql = str(
+        query.compile(
+            dialect=postgresql.dialect(),
+            compile_kwargs={"literal_binds": True},
+        )
+    )
+    assert "'trend' = ANY (user_prompts.tags)" in sql
+    assert "user_prompts.trend_category_id IS NULL" in sql
+    assert "user_prompts.id > 41" in sql
+    assert "ORDER BY user_prompts.id" in sql
+    assert "LIMIT 500" in sql
+
+
 def _exercise_migration(connection) -> None:
     connection.execute(text("CREATE TABLE users (id integer PRIMARY KEY)"))
     connection.execute(
@@ -65,7 +92,26 @@ def _exercise_migration(connection) -> None:
             "(id,author_id,title,description,category,prompt_text,tags,status) VALUES "
             "(1,1,'Known','Known','photo','secret',ARRAY['trend','trend-category:animals']::text[],'approved'),"
             "(2,1,'Unknown','Unknown','photo','secret',ARRAY['trend','trend-category:legacy-special']::text[],'approved'),"
-            "(3,1,'No category','No category','photo','secret',ARRAY['trend']::text[],'approved')"
+            "(3,1,'No category','No category','photo','secret',ARRAY['trend']::text[],'approved'),"
+            "(4,1,'Ordinary','Ordinary','photo','secret',ARRAY['not-trend','trend-category:animals']::text[],'approved')"
+        )
+    )
+    connection.execute(
+        text(
+            "INSERT INTO user_prompts "
+            "(id,author_id,title,description,category,prompt_text,tags,status) "
+            "SELECT 1000+n,1,'Known batch','Known batch','photo','secret',"
+            "ARRAY['trend','trend-category:animals']::text[],'approved' "
+            "FROM generate_series(1,1105) AS n"
+        )
+    )
+    connection.execute(
+        text(
+            "INSERT INTO user_prompts "
+            "(id,author_id,title,description,category,prompt_text,tags,status) "
+            "SELECT 3000+n,1,'Unknown batch','Unknown batch','photo','secret',"
+            "ARRAY['trend','trend-category:legacy-batch']::text[],'approved' "
+            "FROM generate_series(1,1105) AS n"
         )
     )
 
@@ -84,23 +130,37 @@ def _exercise_migration(connection) -> None:
     assigned = connection.execute(
         text(
             "SELECT p.id,c.key,p.tags FROM user_prompts p "
-            "JOIN trend_categories c ON c.id=p.trend_category_id ORDER BY p.id"
+            "JOIN trend_categories c ON c.id=p.trend_category_id "
+            "WHERE p.id <= 4 ORDER BY p.id"
         )
     ).all()
     assert assigned[0][1] == "animals"
     assert assigned[1][1] == DEFAULT_TREND_CATEGORY
     assert "trend-category:legacy-special" in assigned[1][2]
     assert assigned[2][1] == DEFAULT_TREND_CATEGORY
+    assert len(assigned) == 3
+    assert connection.execute(
+        text("SELECT trend_category_id FROM user_prompts WHERE id=4")
+    ).scalar_one() is None
     unresolved = connection.execute(
         text(
             "SELECT action,category_key,target_prompt_id,before_state,after_state "
-            "FROM trend_category_audit WHERE action='legacy_unresolved'"
+            "FROM trend_category_audit WHERE action='legacy_unresolved' AND target_prompt_id=2"
         )
     ).one()
     assert unresolved[0:3] == ("legacy_unresolved", "legacy-special", 2)
     assert unresolved[3]["legacy_category_key"] == "legacy-special"
     assert unresolved[4]["assigned_category_key"] == DEFAULT_TREND_CATEGORY
-    assert connection.execute(text("SELECT count(*) FROM trend_category_audit")).scalar_one() == 1
+    assert connection.execute(text("SELECT count(*) FROM trend_category_audit")).scalar_one() == 1106
+    assert connection.execute(
+        text("SELECT count(*) FROM user_prompts WHERE trend_category_id IS NOT NULL")
+    ).scalar_one() == 2213
+    assert connection.execute(
+        text(
+            "SELECT count(*) FROM user_prompts WHERE id > 3000 "
+            "AND tags @> ARRAY['trend-category:legacy-batch']::text[]"
+        )
+    ).scalar_one() == 1105
     assert connection.execute(text("SELECT revision FROM trend_category_catalog_state WHERE id=1")).scalar_one() == 1
     assert "ix_user_prompts_trend_category_public_created_id" in {
         item["name"] for item in inspect(connection).get_indexes("user_prompts")

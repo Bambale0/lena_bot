@@ -31,6 +31,7 @@ CATEGORY_SEED: tuple[tuple[str, str], ...] = (
 )
 TREND_TAG = "trend"
 CATEGORY_PREFIX = "trend-category:"
+BACKFILL_BATCH_SIZE = 500
 
 
 def _normalized_tags(raw: Any) -> list[str]:
@@ -50,6 +51,26 @@ def _category_key(tags: list[str]) -> str | None:
 
 def _table_names(bind) -> set[str]:
     return set(sa.inspect(bind).get_table_names())
+
+
+def _pending_trend_prompts_query(
+    prompt_table: sa.Table,
+    *,
+    after_id: int,
+    batch_size: int = BACKFILL_BATCH_SIZE,
+) -> sa.Select:
+    """Select only pending trend rows and keep migration memory bounded."""
+
+    return (
+        sa.select(prompt_table.c.id, prompt_table.c.tags)
+        .where(
+            prompt_table.c.trend_category_id.is_(None),
+            prompt_table.c.id > after_id,
+            sa.literal(TREND_TAG) == sa.any_(prompt_table.c.tags),
+        )
+        .order_by(prompt_table.c.id)
+        .limit(batch_size)
+    )
 
 
 def upgrade() -> None:
@@ -207,44 +228,68 @@ def upgrade() -> None:
     )
     fallback_id = category_ids[DEFAULT_CATEGORY_KEY]
     known_keys = set(category_ids)
-    prompts = bind.execute(
-        sa.select(prompt_table.c.id, prompt_table.c.tags).where(
-            prompt_table.c.trend_category_id.is_(None)
-        )
-    ).all()
-    for prompt_id, raw_tags in prompts:
-        tags = _normalized_tags(raw_tags)
-        if TREND_TAG not in tags:
-            continue
-        legacy_key = _category_key(tags)
-        resolved_key = legacy_key if legacy_key in known_keys else DEFAULT_CATEGORY_KEY
-        bind.execute(
-            prompt_table.update()
-            .where(prompt_table.c.id == prompt_id)
-            .values(trend_category_id=category_ids[resolved_key])
-        )
-        if legacy_key and legacy_key not in known_keys:
-            already_recorded = bind.execute(
-                sa.select(audit_table.c.id).where(
-                    audit_table.c.action == "legacy_unresolved",
-                    audit_table.c.target_prompt_id == prompt_id,
+    after_id = 0
+    while True:
+        prompts = bind.execute(
+            _pending_trend_prompts_query(
+                prompt_table,
+                after_id=after_id,
+                batch_size=BACKFILL_BATCH_SIZE,
+            )
+        ).all()
+        if not prompts:
+            break
+
+        prompt_ids_by_key: dict[str, list[int]] = {}
+        unresolved: list[tuple[int, str]] = []
+        for prompt_id, raw_tags in prompts:
+            tags = _normalized_tags(raw_tags)
+            legacy_key = _category_key(tags)
+            resolved_key = legacy_key if legacy_key in known_keys else DEFAULT_CATEGORY_KEY
+            prompt_ids_by_key.setdefault(resolved_key, []).append(int(prompt_id))
+            if legacy_key and legacy_key not in known_keys:
+                unresolved.append((int(prompt_id), legacy_key))
+
+        for resolved_key, prompt_ids in prompt_ids_by_key.items():
+            bind.execute(
+                prompt_table.update()
+                .where(
+                    prompt_table.c.id.in_(prompt_ids),
+                    prompt_table.c.trend_category_id.is_(None),
                 )
-            ).scalar_one_or_none()
-            if already_recorded is None:
+                .values(trend_category_id=category_ids[resolved_key])
+            )
+
+        if unresolved:
+            unresolved_ids = [prompt_id for prompt_id, _ in unresolved]
+            recorded_ids = set(
                 bind.execute(
-                    audit_table.insert().values(
-                        category_id=fallback_id,
-                        category_key=legacy_key[:32],
-                        target_prompt_id=prompt_id,
-                        action="legacy_unresolved",
-                        source="migration",
-                        actor_tg_id=None,
-                        actor_operator=None,
-                        catalog_revision=1,
-                        before_state={"legacy_category_key": legacy_key},
-                        after_state={"assigned_category_key": DEFAULT_CATEGORY_KEY},
+                    sa.select(audit_table.c.target_prompt_id).where(
+                        audit_table.c.action == "legacy_unresolved",
+                        audit_table.c.target_prompt_id.in_(unresolved_ids),
                     )
-                )
+                ).scalars()
+            )
+            audit_rows = [
+                {
+                    "category_id": fallback_id,
+                    "category_key": legacy_key[:32],
+                    "target_prompt_id": prompt_id,
+                    "action": "legacy_unresolved",
+                    "source": "migration",
+                    "actor_tg_id": None,
+                    "actor_operator": None,
+                    "catalog_revision": 1,
+                    "before_state": {"legacy_category_key": legacy_key},
+                    "after_state": {"assigned_category_key": DEFAULT_CATEGORY_KEY},
+                }
+                for prompt_id, legacy_key in unresolved
+                if prompt_id not in recorded_ids
+            ]
+            if audit_rows:
+                bind.execute(audit_table.insert(), audit_rows)
+
+        after_id = int(prompts[-1][0])
 
 
 def downgrade() -> None:
