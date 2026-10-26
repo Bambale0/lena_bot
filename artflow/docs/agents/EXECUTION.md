@@ -1,5 +1,38 @@
 # Execution ledger — Studio capability completion (2026-10-24)
 
+## Active 2026-10-26 — WAN native edit, P1 reward settlement release
+
+- Base production main at preflight: `179d7a01e5a6328d9cb0642fa8fe9523e12fbafe`.
+  Isolated PR branch: `fix/wan3-neironych-native-edit-20261026`, PR #306.
+  Original commit: `d10fe0731ed7c3398dbbb6378c6bc4120804dec9`.
+- Scope: repair native Standard WAN Edit route and actual-output settlement
+  without changing admin pricing/routes, KIE-only incompatibilities or
+  downstream acceptance semantics. No migration, manual SQL or paid test.
+- Review P1 verified: Mini App prompt royalties were committed immediately
+  from all reserved credits, while completion refunded unused duration. This
+  could exceed net customer charge and create undeserved account credits.
+  Additionally, existing use_prompt/add_credits helpers commit independent
+  transactions, so they are unsafe inside atomic generation settlement.
+- Fix: retain prompt use count on successful launch, mark pending author and
+  referrer rewards in stored WAN billing, and pay from final bounded settled
+  charge under the same Generation lock/transaction as result, customer
+  refund, credit_ledger and notification. No payout on provider failure,
+  no repeated payout for concurrent callbacks; a sub-one-credit charge
+  cannot trigger a one-credit author bonus. Generation source id is included
+  in reward ledger. Existing fixed-price model reward policy unaffected.
+- Tests: new real disposable PostgreSQL schema reproduces RED P1, GREEN with
+  deferred accounting (5 competing callbacks); successful completion/refund,
+  race against failure, mid-reward ledger error rollback and retry, and
+  no reward on failed generation. SQLite atomic rollback, routing and
+  Mini App quote tests retained. Focused 45 passed / 0 failed; final full backend after fractional-credit test exit 0.
+- Release gates: [x] complete full-suite Ruff/pytest/provider checks (exit 0; provider 100 contracts);
+  [ ] publish amended PR HEAD; [ ] reviewer P1 addressed and resolved;
+  [ ] exact-head required GitHub CI green; [ ] protected squash auto-merge;
+  [ ] exact main SHA CI and Production Autodeploy; [ ] production
+  running-container/version/health/errors verified read-only;
+  [ ] final report and monitoring cleanup. No manual production restart.
+
+
 ## Active 2026-10-25 — Release remaining audited backend capabilities
 
 PR302 merged through protected native auto-merge at f8779fb6c377479c456c512568982ccd3f20b94b, but exact-main CI40211783118 stopped deployment:392smoke passed,274/275Studio passed; held-preflight test read the intentional pre-response transactionId:null before response identity55. Backend/PostgreSQL,bot,provider and300journeys passed; Production Autodeploy was SKIPPED, not released. Separate test-only follow-up c534da5 deterministically reproduces the race with a held invoice response, then waits for persisted55 before releasing global preflight. Original exact identity, raw marker preservation, one POST and pending UI assertions remain; explicit zero-generation assertion added. Focused1/1 and full44fastrepeat/build/diff checks pass. No product, timeout, retry or backend change. Independent scoped review APPROVED with no findings (postmerge-ci-review.md); protected follow-up CI/main autodeploy/live verification remain mandatory. This is a new CI maintenance task, not a second final product fix wave; no blind rerun or manual deploy bypass. Cost if diagnosis is wrong: further investigation before any product change, never accepting null as a finished invoice.
@@ -2071,3 +2104,14 @@ absence of new photo-prompt Neironych submissions after the cutover.
 Steps: [x] root-cause and production preflight; [x] RED/green operator control;
 [ ] full relevant gates and review; [ ] PR/exact-head CI/auto-merge/deploy;
 [ ] audited production switch and live verification.
+
+## 2026-10-26 — WAN 3.0 native edit and duration settlement (active)
+- Baseline origin/main 4508acfaaca1a7d900d62dae65e2c53fe16bd8ba, branch fix/wan3-neironych-native-edit-20261026, isolated worktree.
+- Evidence: 29 edit KIE tasks and 2 Neironych non-edit tasks in preceding 24h. Current contract blocks native edit. Live Neironych guide documents omni_reference_task_type=edit, reference_videos, omission of duration/aspect_ratio/size; Prime edit unsupported.
+- Intent: route compatible edits to native Wan3, preserve requested duration contract via KIE for incompatible edits, settle actual verified duration with atomic exactly-once refund and ledger. No new DB schema; admin controls remain source of pricing and routing.
+- Plan: failing contract and billing tests, provider adapter, settlement, regression, docs, PR, auto-deploy only through approved CI. No paid smoke without per-test approval.
+
+- Implementation complete in worktree: native WAN Standard edit body with explicit task type and no duration/ratio; verified-source quote upper bound; original KIE semantics for incompatible requests/Prime; owned MP4 probe; row-locked exactly-once post-completion ledger and partial credit return. No migrations or new configuration values.
+- Test evidence before PR: full backend pytest command exited 0 (26 Oct 2026, 28.58 seconds) with expected skips; WAN/provider/recovery and financial suite exited 0; two real PostgreSQL race tests on disposable schema exited 0 (parallel callback/poll and completion/failure). Read-only provider-contract inventory valid, product readiness OK for 100 public contracts. Ruff, compileall and git diff --check passed. Synthetic credentials only.
+- Product surfaces checked: site=shared backend; mini_app=shared backend; telegram_bot=shared backend. No new UI branch; no user-facing code hardcode. Observability: safe generation ID, changed billable seconds, refund credits, overage seconds; no prompt/key in logs.
+- Remaining release gates: CI checks on exact PR head, reviewed merge, production autodeploy health and authorized paid edit smoke. No paid request performed and no live billing/customer data mutated by this branch.

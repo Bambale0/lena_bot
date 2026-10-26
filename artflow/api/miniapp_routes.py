@@ -492,13 +492,16 @@ async def _mark_prompt_used_after_generation(
     *,
     prompt_id: int | None,
     user_id: int,
-    credits_spent: float,
+    credits_spent: float | None,
 ) -> None:
     if prompt_id is None:
         return
     try:
         from db.prompt_repository import use_prompt
-        await use_prompt(session, prompt_id, user_id, credits_spent=int(credits_spent))
+        await use_prompt(
+            session, prompt_id, user_id,
+            credits_spent=int(credits_spent) if credits_spent is not None else None,
+        )
     except Exception as exc:
         logger.warning(
             "Failed to mark prompt used after generation prompt=%s user=%s: %s",
@@ -506,6 +509,24 @@ async def _mark_prompt_used_after_generation(
             user_id,
             exc,
         )
+
+
+def _defer_wan_prompt_reward(
+    input_params: dict[str, Any], *, prompt_id: int | None, is_wan: bool,
+) -> bool:
+    """Attach an auditable deferred royalty intent to an unsettled WAN quote."""
+    billing = input_params.get("wan30_billing")
+    if (
+        not is_wan
+        or not isinstance(billing, dict)
+        or billing.get("settled") is not False
+        or not isinstance(prompt_id, int)
+        or isinstance(prompt_id, bool)
+        or prompt_id <= 0
+    ):
+        return False
+    billing["prompt_reward_deferred"] = True
+    return True
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -3554,6 +3575,12 @@ async def create_video_generation(
         raise PreSubmitRejection(status_code=402, detail="Failed to spend credits")
 
     normalized.update(prompt_meta)
+    # The reserved WAN amount may be partially refunded after video verification.
+    # Count the library use on submission, but defer its author/referral awards
+    # until final billing, under the same Generation lock as the refund.
+    defer_wan_prompt_rewards = _defer_wan_prompt_reward(
+        normalized, prompt_id=prompt_meta["prompt_id"], is_wan=wan_quote is not None,
+    )
     normalized["billing_output_seconds"] = billing_seconds.output
     normalized["billing_reference_seconds"] = billing_seconds.references
     normalized["billing_total_seconds"] = billing_seconds.billable
@@ -3638,7 +3665,7 @@ async def create_video_generation(
         session,
         prompt_id=getattr(prompt_source, "id", None),
         user_id=user.id,
-        credits_spent=total_credits,
+        credits_spent=None if defer_wan_prompt_rewards else total_credits,
     )
 
     await session.refresh(gen)

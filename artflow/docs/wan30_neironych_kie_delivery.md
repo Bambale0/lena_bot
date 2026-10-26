@@ -20,11 +20,18 @@ remain intact.
 Prime's native contract requires 4–30s, 16:9/1:1/9:16, sound enabled, no
 seed or start/end frames; audio references require visual references.
 Unsupported native options use the existing KIE standby with the original
-model and settings. This includes file/link inputs, disabled safety,
-fixed-ratio frame input, and edit operations: native Wan edit forbids a
-fixed output duration, so it cannot preserve APIX's quoted duration.
-Normal Wan retains 2–30s and silent output support. No unsupported option
-is silently discarded or translated into a different paid operation.
+model and settings. This includes file/link inputs, disabled safety and
+fixed-ratio frame input. **WAN 3.0 Standard edit** supports native Neironych
+omni_reference_task_type="edit" with reference_videos, but must omit
+duration, aspect_ratio and size from the native body. Neironych derives
+those controls from the first source clip. APIX selects this native edit route
+only when its independently measured source length differs from the selected
+whole-second output duration by less than one second, and the requested
+aspect ratio is adaptive. A materially different selected duration or an
+explicit output ratio stays on KIE, preserving the customer's request. WAN
+3.0 Prime edit is KIE-only because the verified native Prime contract does
+not support edit. No unsupported option is silently discarded.
+Normal Wan retains 2–30s and silent output support.
 
 Definite admission rejections may use KIE. 5xx, timeout, unknown acceptance
 and an unavailable catalog may NOT create a second paid task. Already
@@ -82,10 +89,10 @@ silent fallback to an inactive or cheaper base tariff.
 ## Known deliberate limit
 
 KIE supports automatic duration=-1 in the lower-level validated
-contract. It is NOT offered as a paid UI choice yet: charging a
-30-second reserve without an exactly-once actual-duration refund
-would overcharge shorter outputs. Ordinary fixed durations 2-30 sec
-are fully supported; automatic duration needs separate settlement work.
+contract. The paid UI does not yet expose it, despite backend settlement
+now supporting verified actual output duration for already accepted
+automatic-duration jobs. This requires a separate UI rollout and provider
+compatibility confirmation. Fixed durations 2-30 sec are fully supported.
 
 ## Release / rollback
 
@@ -151,3 +158,58 @@ post-merge credential/control-plane findings were discovered before deploy.
 Main workflow `39921456846` was cancelled before production rollout. The
 follow-up release must include both review fixes and migration 048; no manual
 production checkout/build/configuration was used.
+
+
+## Native WAN 3.0 Edit: duration settlement (26 October 2026)
+
+- Website Studio, Telegram Mini App, text Telegram bot, and feed repeat use
+  the existing shared typed request / quote / provider adapter. No duplicate
+  routing policy or frontend price constant was added. site: shared;
+  mini_app: shared; telegram_bot: shared.
+- Upload source duration is independently read with ffprobe from an APIX-owned
+  clip. The existing authenticated database route remains primary Neironych,
+  standby KIE, controlled by admin. Prime and incompatible Standard edits
+  continue to KIE with their original explicitly selected duration.
+- For a compatible Standard edit the quote reserves whole seconds from
+  source video length + the larger of source-derived output length and selected
+  duration; values are limited by the existing 30-second shared cap. The
+  reserve is the maximum amount the customer may be charged.
+- Native edit has a provider-selected output length, even though the user
+  chose the nearest whole-second duration. wan30_billing.settled=false
+  marks edit reservations for completion-time settlement. KIE edit fallback
+  also settles actual output duration without raising the customer's cost.
+- The callback/poll completion only marks the generation done after a
+  provider MP4 is permanently copied into APIX and validated. A second
+  ffprobe reads actual output seconds from that owned MP4, and final billable
+  seconds are ceil(measured_input_video_seconds + measured_output_seconds).
+  The actual credits are capped by the original customer-approved reserve.
+  If fewer credits were used, the remainder is refunded. The generation's
+  credits_spent, settlement marker, user balance, and credit_ledger
+  wan30_duration_refund row are committed atomically under a generation row
+  lock together with any Telegram completion notice.
+- For a public Mini App prompt attached to an unsettled WAN quote, the use
+  counter is incremented when submission succeeds, but the author and L2/L3
+  referral rewards are **not** issued from the original reserve. A durable
+  prompt_reward_deferred marker records the intent with the validated quote.
+  Upon successful completion the author/referrals receive existing
+  configured-share rewards based only on the final measured customer charge.
+  A fractional charge below one credit does not mint a minimum one-credit
+  author reward. Prompt deactivation after admission does not invalidate a
+  previously accepted generation; a removed prompt/author skips the reward
+  while still completing the job and delivering the customer's refund.
+- Deferred royalty credit updates, per-generation ledger rows, the customer
+  duration refund, settled prompt-reward audit and generation status are
+  committed in the SAME row-locked transaction. The helper must not call
+  standalone wallet operations that commit halfway. Duplicate notifications
+  cannot pay royalties twice; failed generations pay no deferred royalties.
+- Duplicate webhooks, delayed polling, provider timeouts, ledger failures and
+  callback/timeout races must not cause second paid POSTs, extra debits or
+  duplicate refunds or royalties. If output duration exceeds the reserved cap,
+  log overage_seconds for operator review without charging more.
+- Already accepted jobs remain on their recorded provider. Existing KIE-only
+  routes and incompatible modes remain stable; no migration or manual SQL.
+- Provider reference: https://api.xn--e1aikcel5c5a.online/guide?lang=ru
+- Tests: tests/test_wan30_neironych_edit_settlement.py,
+  tests/test_wan30_routing.py and the existing Wan/financial regression suite.
+  Paid smoke is not part of the unit tests and requires explicit
+  authorization for each paid request. Only reviewed main CI may deploy.

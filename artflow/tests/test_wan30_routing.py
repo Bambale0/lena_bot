@@ -126,3 +126,91 @@ async def test_admin_disabled_standby_never_posts_to_kie_on_rejection():
         await submit_wan30(req(), neironych_model_id="wan-3", fetch_neironych_models=AsyncMock(return_value=["wan-3"]),
                            send_neironych=AsyncMock(side_effect=rejection), send_kie=kie, allow_kie=False)
     kie.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_native_wan3_edit_routes_once_with_explicit_provider_edit_contract():
+    from api.wan30_contract import Wan30Request
+
+    request = Wan30Request(
+        model="wan/3-0-video", mode="edit", prompt="Make @Video 1 warmer",
+        duration=10, aspect_ratio="adaptive", resolution="720p",
+        reference_video_urls=("https://example.test/source.mp4",),
+        reference_video_durations=(10.56,),
+    )
+    models = AsyncMock(return_value=["wan-3"])
+    native = AsyncMock(return_value="native-edit-id")
+    kie = AsyncMock()
+    result = await submit_wan30(
+        request,
+        neironych_model_id="wan-3",
+        fetch_neironych_models=models,
+        send_neironych=native,
+        send_kie=kie,
+    )
+    assert result == Wan30Submitted("neironych:native-edit-id", "neironych")
+    assert native.await_count == 1
+    assert native.await_args.args[0] == {
+        "model": "wan-3", "prompt": "Make @Video 1 warmer",
+        "resolution": "720p", "generate_audio": True,
+        "omni_reference_task_type": "edit",
+        "reference_videos": [{"url": "https://example.test/source.mp4"}],
+    }
+    kie.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model,duration,ratio", [
+    ("wan/3-0-video", 15, "adaptive"),
+    ("wan/3-0-video", 10, "9:16"),
+    ("wan/3-0-video-prime", 10, "adaptive"),
+])
+async def test_wan_edit_incompatible_native_contract_keeps_original_kie_payload(model, duration, ratio):
+    from api.wan30_contract import Wan30Request
+
+    request = Wan30Request(
+        model=model, mode="edit", prompt="Warm @Video 1",
+        duration=duration, aspect_ratio=ratio,
+        reference_video_urls=("https://example.test/source.mp4",),
+        reference_video_durations=(10.56,),
+    )
+    native = AsyncMock()
+    models = AsyncMock()
+    kie = AsyncMock(return_value="kie-native-unsupported")
+    result = await submit_wan30(
+        request, neironych_model_id="wan-3-prime" if model.endswith("prime") else "wan-3",
+        fetch_neironych_models=models,
+        send_neironych=native,
+        send_kie=kie,
+    )
+    assert result == Wan30Submitted("kie-native-unsupported", "kieai")
+    models.assert_not_awaited()
+    native.assert_not_awaited()
+    assert kie.await_args.args[0]["input"]["duration"] == duration
+    assert kie.await_args.args[0]["input"]["aspect_ratio"] == ratio
+    assert kie.await_args.args[0]["input"]["reference_video_urls"] == [
+        "https://example.test/source.mp4",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_native_wan_edit_unknown_submission_never_double_posts_to_kie():
+    from api.wan30_contract import Wan30Request
+
+    request = Wan30Request(
+        model="wan/3-0-video", mode="edit", prompt="Change @Video 1",
+        duration=10, aspect_ratio="adaptive",
+        reference_video_urls=("https://example.test/source.mp4",),
+        reference_video_durations=(10.56,),
+    )
+    kie = AsyncMock()
+    with pytest.raises(NeironychSubmissionUnknown):
+        await submit_wan30(
+            request, neironych_model_id="wan-3",
+            fetch_neironych_models=AsyncMock(return_value=["wan-3"]),
+            send_neironych=AsyncMock(side_effect=NeironychSubmissionUnknown(
+                "d4496f2e-37d8-4b87-bba2-330374892b49", "native-edit-uuid",
+            )),
+            send_kie=kie,
+        )
+    kie.assert_not_awaited()

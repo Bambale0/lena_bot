@@ -11,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db import repository as repo
-from db.models import PromptCategory, PromptLike, PromptStatus, UserPrompt
+from db.models import PromptCategory, PromptLike, PromptStatus, User, UserPrompt
 
 logger = logging.getLogger(__name__)
 
@@ -295,6 +295,85 @@ async def apply_prompt_rewards(
         l3_reward,
     )
     return {"author": author_reward, "l2": l2_reward, "l3": l3_reward}
+
+
+async def apply_deferred_prompt_rewards(
+    session: AsyncSession,
+    *,
+    prompt_id: int,
+    using_user_id: int,
+    final_credits: float,
+    generation_id: int,
+) -> dict[str, int]:
+    """Credit public-prompt royalties from the actual WAN charge, without commit.
+
+    Caller owns the Generation row lock and transaction. In particular, never
+    use repo.add_credits here: that helper commits while completion/refund is
+    still in progress, breaking exactly-once accounting.
+    """
+    if not math.isfinite(final_credits) or final_credits < 0:
+        raise ValueError("Invalid settled prompt charge")
+    if not isinstance(prompt_id, int) or isinstance(prompt_id, bool) or prompt_id <= 0:
+        raise ValueError("Invalid deferred prompt identity")
+
+    rewards = {"author": 0, "l2": 0, "l3": 0}
+    prompt = await get_prompt_by_id(session, prompt_id)
+    if prompt is None:
+        # A prompt can be removed or unpublished after an accepted generation.
+        # The user must still receive the completed video and credit refund.
+        logger.warning("Deferred WAN prompt reward missing prompt=%s gen=%s", prompt_id, generation_id)
+        return rewards
+    if prompt.author_id == using_user_id:
+        return rewards
+    author = await repo.get_user_by_id(session, prompt.author_id)
+    if author is None:
+        logger.warning("Deferred WAN prompt author missing prompt=%s gen=%s", prompt_id, generation_id)
+        return rewards
+
+    # Legacy prompt royalties use integer credits, including a 1-credit
+    # minimum author reward. A fractional settled charge below 1 credit must
+    # never mint 1+ credits for an author.
+    spend_units = math.floor(final_credits)
+    if spend_units <= 0:
+        return rewards
+    proposed = {
+        "author": min(spend_units, max(1, math.floor(spend_units * PROMPT_AUTHOR_SHARE))),
+        "l2": math.floor(spend_units * PROMPT_REF_L2_SHARE),
+        "l3": math.floor(spend_units * PROMPT_REF_L3_SHARE),
+    }
+    if sum(proposed.values()) > final_credits + 1e-6:
+        raise ValueError("Deferred prompt reward exceeds actual WAN charge")
+    recipients = {
+        "author": author.id,
+        "l2": author.referrer_id,
+        "l3": author.referrer_l2_id,
+    }
+    for tier, recipient_id in recipients.items():
+        amount = proposed[tier]
+        if not recipient_id or amount <= 0:
+            continue
+        balance = (await session.execute(
+            update(User)
+            .where(User.id == recipient_id)
+            .values(credits=User.credits + amount)
+            .returning(User.credits)
+        )).scalar_one_or_none()
+        if balance is None:
+            raise RuntimeError("Deferred WAN prompt royalty recipient is missing")
+        await repo._insert_credit_ledger(
+            session, user_id=recipient_id, delta=float(amount),
+            balance_after=float(balance), entry_type=f"prompt_reward_{tier}",
+            # Preserve legacy prompt-ledger identity for author reports;
+            # correlate exact once-per-generation payment in its audit note.
+            source_type="prompt", source_id=str(prompt_id),
+            note=f"Deferred WAN prompt reward generation={generation_id}",
+        )
+        rewards[tier] = amount
+    logger.info(
+        "Deferred WAN prompt reward settled gen=%s prompt=%s author=%s l2=%s l3=%s",
+        generation_id, prompt_id, rewards["author"], rewards["l2"], rewards["l3"],
+    )
+    return rewards
 
 
 async def use_prompt(

@@ -1803,24 +1803,97 @@ async def finish_generation(
     if expected_task_id is not None:
         conditions.append(Generation.task_id == expected_task_id)
 
+    # One lock serializes final delivery with failure refunds and parallel
+    # poll/webhook completions. WAN edit's duration refund, credit ledger,
+    # settled marker, and done/notice transition must share this transaction.
+    locked = (await session.execute(
+        select(Generation).where(*conditions).with_for_update()
+        .execution_options(populate_existing=True)
+    )).scalar_one_or_none()
+    if (locked is None
+            or locked.status not in (GenerationStatus.pending, GenerationStatus.processing)
+            or (expected_task_id is not None and locked.task_id != expected_task_id)):
+        await session.commit()
+        return None
+
     fields: dict[str, object] = {
         "status": GenerationStatus.done,
         "result_url": result_url,
         "result_urls": json.dumps(clean_urls, ensure_ascii=False),
         "finished_at": datetime.now(timezone.utc),
     }
+    params = parse_input_params(locked.input_params)
+    wan_billing = params.get("wan30_billing")
+    if (getattr(locked, "model", None) in {"wan/3-0-video", "wan/3-0-video-prime"}
+            and isinstance(wan_billing, dict)
+            and wan_billing.get("settled") is False):
+        from api.wan30_settlement import (
+            calculate_wan30_settlement,
+            probe_wan30_output_seconds,
+        )
+
+        actual_seconds = await probe_wan30_output_seconds(result_url)
+        settled = calculate_wan30_settlement(
+            wan_billing, output_seconds=actual_seconds,
+            credits_spent=float(locked.credits_spent or 0),
+        )
+        if settled.overage_seconds:
+            # Never charge more than the customer explicitly approved.
+            logger.error(
+                "WAN duration exceeded customer reserve gen=%s overage_seconds=%s",
+                gen_id, settled.overage_seconds,
+            )
+        if settled.refund_credits:
+            balance_result = await session.execute(
+                update(User)
+                .where(User.id == locked.user_id)
+                .values(credits=User.credits + settled.refund_credits)
+                .returning(User.credits)
+            )
+            balance_after = balance_result.scalar_one_or_none()
+            if balance_after is None:
+                raise RuntimeError("WAN settlement user is missing")
+            await _insert_credit_ledger(
+                session,
+                user_id=locked.user_id,
+                delta=settled.refund_credits,
+                balance_after=float(balance_after),
+                entry_type="wan30_duration_refund",
+                source_type="generation",
+                source_id=str(gen_id),
+                note="wan30:verified_output_duration",
+            )
+        params["wan30_billing"] = {
+            **wan_billing,
+            "settled": True,
+            "actual_output_seconds": settled.output_seconds,
+            "actual_output_billable_seconds": settled.output_billable_seconds,
+            "final_billable_seconds": settled.billable_seconds,
+            "final_credits": settled.final_credits,
+            "refunded_credits": settled.refund_credits,
+            "overage_seconds": settled.overage_seconds,
+        }
+        fields["credits_spent"] = settled.final_credits
+        if wan_billing.get("prompt_reward_deferred") is True:
+            from db.prompt_repository import apply_deferred_prompt_rewards
+
+            royalties = await apply_deferred_prompt_rewards(
+                session,
+                prompt_id=params.get("prompt_id"),
+                using_user_id=locked.user_id,
+                final_credits=settled.final_credits,
+                generation_id=gen_id,
+            )
+            params["wan30_billing"]["prompt_rewards_settled"] = True
+            params["wan30_billing"]["prompt_rewards"] = royalties
+        logger.info(
+            "WAN duration settled gen=%s billable_seconds=%s refund_credits=%s overage_seconds=%s",
+            gen_id, settled.billable_seconds, settled.refund_credits, settled.overage_seconds,
+        )
     if queue_neironych_video_notice:
-        # Lock and set the pending notification in the SAME commit as completion:
-        # a crash immediately after this commit must not lose Telegram delivery.
-        locked = (await session.execute(
-            select(Generation).where(*conditions).with_for_update()
-            .execution_options(populate_existing=True)
-        )).scalar_one_or_none()
-        if locked is None:
-            await session.commit()
-            return None
-        params = parse_input_params(locked.input_params)
         params[NEIRONYCH_VIDEO_NOTICE_KEY] = _new_neironych_video_notice("done")
+    if queue_neironych_video_notice or (
+            isinstance(wan_billing, dict) and wan_billing.get("settled") is False):
         fields["input_params"] = json.dumps(params, ensure_ascii=False)
 
     result = await session.execute(
