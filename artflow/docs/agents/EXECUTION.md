@@ -2,25 +2,89 @@
 
 ## Active 2026-10-26 — Trend category shelves
 
-Baseline `179d7a01e5a6328d9cb0642fa8fe9523e12fbafe`; branch
-`feat/admin-trend-categories-20261026`. The user approved database-backed trend
-category folders with 3–5 live tiles, full-folder browsing, and administrator
-create/rename/reorder/hide/publish/reassign controls. Existing hardcoded backend,
-web, and Telegram category lists must converge on one source of truth without
-losing legacy trends or changing pricing/provider/payment behavior. Mobile
-Telegram WebView is primary; site, Mini App, and text bot parity is required.
+Baseline `179d7a01e5a6328d9cb0642fa8fe9523e12fbafe`; Phase A implementation head
+`103107dc6adc6374158b6adfe7bc354c754f1006`; branch
+`feat/admin-trend-categories-20261026`. The approved design and decision log is
+[trend category shelves](trend-category-shelves-20261026.md); the binding staged
+plan is [trend category shelves plan](../plans/2026-10-26-trend-category-shelves.md).
+Mobile Telegram WebView is primary; site, Mini App, and text bot parity remains
+required. Pricing, provider routing, payments, and paid generation are outside
+this change.
 
-Approved design and decision log:
-[trend category shelves](trend-category-shelves-20261026.md). Implementation has
-not started. Structured design review disposition is APPROVED after resolving
-visibility, rollback, bounded-query, migration, concurrency, audit, navigation,
-and novice-state objections. Binding implementation plan:
-[trend category shelves plan](../plans/2026-10-26-trend-category-shelves.md).
-Next gates: RED tests,
-incremental backend/migration/API/UI/bot slices, responsive and network/console
-verification, independent review, protected PR, exact-head CI, native auto-merge,
-production autodeploy, and exact-SHA live smoke. No paid generation or live
-configuration mutation is needed for verification.
+Phase A implementation commits are `8c40d17` (expand-only revision 052, catalog,
+relation, audit and backfill), `3a7156d` (bounded shelf/folder reads and typed
+clients), `de6a9f5` (review-driven dual-write repair), and `103107d`
+(hidden-category admission plus the final `FOR SHARE` pre-claim recheck). The
+preceding approved design commit is `080efe3`. RED tests were introduced for the
+schema/backfill, bounded read contracts, and hide/run boundary before their
+respective implementation slices. GREEN evidence is the focused Phase A run
+below. Task 1 passed spec and quality review; Task 2 quality review found missing
+legacy-tag dual-write, which `de6a9f5` fixed before reapproval; Task 3 passed spec
+and quality review. No unresolved Critical or Important review finding is known.
+
+Phase A intentionally exposes compatible readers only: revision 052 seeds seven
+categories, backfills the nullable relation without deleting unknown legacy tags,
+adds bounded catalog/folder queries and cursor validation, keeps existing writers
+in sync with stable category tags, blocks hidden categories across public entry
+points, lets already-claimed idempotent work remain retrievable, and teaches the
+bot/admin picker plus web client types to consume dynamic metadata. Custom
+category mutation endpoints and the new shelf/folder UI are **not** enabled;
+those remain Phase B after Phase A production verification.
+
+Local release-preparation evidence on Windows, using repository-maintained CI
+commands and the pinned environments:
+
+- Ruff: `python -m ruff check .` — passed.
+- Provider inventory/readiness/smoke manifests — 100 contracts validated; the
+  provider pytest bundle passed `474`, with one existing Starlette deprecation
+  warning. Validation was dry/non-charging.
+- Exact bot-navigation CI bundle — `371 passed`, one existing Starlette warning.
+- Focused trend/migration/API/admin/visibility/reliability/routes set —
+  `182 passed, 1 skipped`, one existing warning. The skip is the disposable
+  PostgreSQL migration smoke because `APIX_TEST_POSTGRES_URL` is unavailable.
+- Full backend with `PYTHONUTF8=1`, CI placeholders, disabled repository addopts,
+  and a controlled `--basetemp` — `3827 passed, 87 skipped, 7 failed, 4 errors`,
+  four warnings in 57.53s. The seven failures and four setup errors are existing
+  Windows-only limitations: four Bash/Unix production-env tests, one
+  Bash/OpenSSL nginx-config test, two symlink-privilege failures
+  (`WinError 1314`), and four oversized parametrized temp-path setup errors. No
+  Phase A test failed. Warnings are existing Starlette/anyio deprecations and two
+  unawaited `AsyncMock` warnings.
+- Web unit tests — `148 passed`; TypeScript `tsc --noEmit` — passed; Vite build —
+  passed (`1674` modules) with only the existing approximately 760 kB chunk-size
+  warning.
+- Playwright Mini App smoke — `56 passed` across iPhone SE, iPhone 13, Pixel 5,
+  and desktop. Focused Studio/UX2 consumer-completion plus fast-repeat coverage —
+  `70 passed`, including preview viewport/reduced-motion behavior and repeat
+  duration/quote/top-up/idempotency. The local `npm` launcher was absent from
+  `PATH`, so the pinned Node runtime invoked unit/type/build and Playwright
+  directly against a temporary local Vite preview; no browser failure occurred.
+
+Migration head is `052_trend_categories`. The dedicated migration test is defined
+to exercise an idempotent double upgrade, all seven seeds,
+known/unknown/no-category backfill, unresolved audit evidence, revision state,
+and the composite access index on a disposable PostgreSQL database; it was
+skipped locally because that database was unavailable. PostgreSQL DDL for the
+three new tables and composite index, plus representative shelf, ranked-preview,
+folder, and `FOR SHARE` visibility queries, compiled successfully with SQLAlchemy's
+PostgreSQL dialect. A real PostgreSQL migration run is still required in Linux CI.
+The repository's full SQLite Alembic chain cannot reach revision 052 because the
+pre-existing revision 001 uses PostgreSQL cast syntax (`::generationtype`);
+therefore that failure is an environment/dialect limitation, not Phase A proof.
+
+Before production migration, perform a read-only row-count preflight for total
+`user_prompts`, rows tagged `trend`, and trend rows that will need
+`trend_category_id` backfill. Revision 052 currently reads unassigned prompt rows
+and updates matching trends individually; if production cardinality is
+unexpectedly large, replace that backfill with a bounded/set-based form before
+deployment. No production query, migration, configuration, pricing, provider,
+payment, or generation was executed during this preparation.
+
+Release status: **NEEDS_CONFIRMATION**. Phase A is locally review-ready, but the
+protected PR has not been opened and no exact-head GitHub CI, native auto-merge,
+production autodeploy, migration/read smoke, public health check, or exact-SHA
+Mini App verification has occurred. Phase B must not start until all of those
+Phase A gates pass.
 
 ## Active 2026-10-25 — Release remaining audited backend capabilities
 
