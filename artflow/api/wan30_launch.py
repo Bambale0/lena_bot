@@ -158,7 +158,9 @@ class Wan30Quote:
                 "rate": self.rate,
                 "reserved_credits": self.credits,
                 "mode": self.request.mode,
-                "settled": self.request.duration != -1,
+                # Edit output length is provider-chosen; fixed selected seconds
+                # remain a reserved maximum, not a final charge.
+                "settled": self.request.duration != -1 and self.request.mode != "edit",
             },
         }
 
