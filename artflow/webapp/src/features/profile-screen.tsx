@@ -98,8 +98,8 @@ function ProfileScreen({
 
       <nav className="studio-profile-sections" aria-label="Разделы профиля">
         <SectionButton active={section === "works"} icon={Sparkles} onClick={() => setSection("works")}>Работы</SectionButton>
-        <SectionButton active={section === "partner"} icon={Users} onClick={() => setSection("partner")}>Партнёры</SectionButton>
-        <SectionButton active={section === "history"} icon={History} onClick={() => setSection("history")}>История</SectionButton>
+        <SectionButton active={section === "partner"} icon={Users} onClick={() => setSection("partner")}>Партнёрский кабинет</SectionButton>
+        <SectionButton active={section === "history"} icon={History} onClick={() => setSection("history")}>История задач</SectionButton>
       </nav>
 
       {section === "works" ? (
