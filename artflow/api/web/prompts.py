@@ -34,6 +34,10 @@ from db.prompt_repository import (
     use_prompt,
 )
 from db.session import get_session
+from db.trend_category_repository import (
+    filter_public_prompt_library_items,
+    public_prompt_library_item_is_visible,
+)
 
 router = APIRouter(tags=["web"])
 
@@ -190,6 +194,10 @@ async def prompts(
         items = await get_approved_prompts(session, category=prompt_category, offset=offset, limit=limit)
         total = await count_approved_prompts(session, category=prompt_category)
 
+    before_filter = len(items)
+    items = await filter_public_prompt_library_items(session, items)
+    total = max(0, total - (before_filter - len(items)))
+
     return ok(
         {
             "total": total,
@@ -208,7 +216,9 @@ async def prompt_detail(
 ) -> dict:
     prompt = await get_prompt_by_id(session, prompt_id)
     is_owner = bool(user and prompt and getattr(prompt, "author_id", None) == user.id)
-    if not (_is_public_approved(prompt) or is_owner or _is_admin(user)):
+    if not (_is_public_approved(prompt) or is_owner or _is_admin(user)) or not await public_prompt_library_item_is_visible(
+        session, prompt
+    ):
         return error_response(404, "Prompt not found")
     return ok(PromptCard.from_prompt(prompt, current_user_id=getattr(user, "id", None)).model_dump())
 
@@ -222,13 +232,17 @@ async def prompt_like(
     if user is None:
         return error_response(401, "Authentication required")
     current = await get_prompt_by_id(session, prompt_id)
-    if not _is_public_approved(current):
+    if not _is_public_approved(current) or not await public_prompt_library_item_is_visible(
+        session, current, lock=True
+    ):
         return error_response(404, "Prompt not found")
 
     prompt, like_status = await like_prompt(session, prompt_id, user.id)
     if like_status == "duplicate":
         prompt = await get_prompt_by_id(session, prompt_id)
-    if not _is_public_approved(prompt):
+    if not _is_public_approved(prompt) or not await public_prompt_library_item_is_visible(
+        session, prompt
+    ):
         return error_response(404, "Prompt not found")
     return ok({"status": like_status, "prompt": PromptCard.from_prompt(prompt, current_user_id=user.id).model_dump()})
 
@@ -241,6 +255,11 @@ async def prompt_use(
 ) -> dict:
     if user is None:
         return error_response(401, "Authentication required")
+    current = await get_prompt_by_id(session, prompt_id)
+    if not _is_public_approved(current) or not await public_prompt_library_item_is_visible(
+        session, current, lock=True
+    ):
+        return error_response(404, "Prompt not found")
     try:
         prompt, rewards = await use_prompt(session, prompt_id, user.id)
     except ValueError:

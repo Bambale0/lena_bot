@@ -963,6 +963,7 @@ async def test_webapp_prompt_use_marks_prompt_usage(client, monkeypatch) -> None
 
     prompt.status = PromptStatus.approved
     use_prompt = AsyncMock(return_value=(prompt, {"author": 0, "l2": 0, "l3": 0}))
+    monkeypatch.setattr("db.prompt_repository.get_prompt_by_id", AsyncMock(return_value=prompt))
     monkeypatch.setattr("db.prompt_repository.use_prompt", use_prompt)
 
     response = await client.post("/api/v1/prompts/7/use")
@@ -1500,6 +1501,108 @@ async def test_library_prompt_id_uses_server_recipe_and_preserves_rewards(client
     use_prompt.assert_awaited_once()
     assert use_prompt.await_args.args[1:] == (44, 1)
     assert use_prompt.await_args.kwargs["credits_spent"] == 4
+
+
+@pytest.mark.asyncio
+async def test_hidden_trend_category_race_blocks_generic_image_before_charge(client, monkeypatch) -> None:
+    from db.models import PromptCategory, PromptStatus
+
+    prompt = SimpleNamespace(
+        id=45,
+        title="Hidden trend",
+        description="",
+        category=PromptCategory.photo,
+        tags=["trend", "trend-category:portrait"],
+        trend_category_id=3,
+        trend_user_fields=[],
+        uses_count=0,
+        likes=0,
+        status=PromptStatus.approved,
+        is_public=True,
+        prompt_text="hidden image recipe",
+        model="nano-banana-pro",
+        preview_url=None,
+        author_id=2,
+        created_at=datetime.now(timezone.utc),
+    )
+    visibility = AsyncMock(side_effect=[SimpleNamespace(id=3), None])
+    charge = AsyncMock(return_value=SimpleNamespace(allowed=False, charged_credits=0))
+    monkeypatch.setattr("db.prompt_repository.get_prompt_by_id", AsyncMock(return_value=prompt))
+    monkeypatch.setattr(
+        "api.miniapp_routes.get_visible_trend_category_for_prompt",
+        visibility,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "api.miniapp_routes.repo.resolve_image_model_cost",
+        AsyncMock(return_value=SimpleNamespace(credits=4)),
+    )
+    monkeypatch.setattr("api.miniapp_routes.repo.count_user_active_generations", AsyncMock(return_value=0))
+    monkeypatch.setattr("api.miniapp_routes.repo.charge_image_generation", charge)
+
+    response = await client.post(
+        "/api/v1/generate/image",
+        json={"model": "nano-banana-pro", "prompt": "visible", "prompt_id": prompt.id},
+    )
+
+    assert response.status_code == 404, response.text
+    assert visibility.await_count == 2
+    assert visibility.await_args_list[-1].kwargs["lock"] is True
+    charge.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_hidden_trend_category_race_blocks_generic_video_before_charge(client, monkeypatch) -> None:
+    from db.models import PromptCategory, PromptStatus
+
+    prompt = SimpleNamespace(
+        id=46,
+        title="Hidden video trend",
+        description="",
+        category=PromptCategory.art,
+        tags=["trend", "trend-video", "trend-category:portrait"],
+        trend_category_id=3,
+        trend_user_fields=[],
+        uses_count=0,
+        likes=0,
+        status=PromptStatus.approved,
+        is_public=True,
+        prompt_text="hidden video recipe",
+        model="midjourney-video",
+        preview_url=None,
+        author_id=2,
+        created_at=datetime.now(timezone.utc),
+    )
+    visibility = AsyncMock(side_effect=[SimpleNamespace(id=3), None])
+    spend = AsyncMock(return_value=False)
+    monkeypatch.setattr("db.prompt_repository.get_prompt_by_id", AsyncMock(return_value=prompt))
+    monkeypatch.setattr(
+        "api.miniapp_routes.get_visible_trend_category_for_prompt",
+        visibility,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "api.miniapp_routes.repo.get_model_cost",
+        AsyncMock(return_value=SimpleNamespace(credits=4, is_active=True)),
+    )
+    monkeypatch.setattr("api.miniapp_routes.repo.count_user_active_generations", AsyncMock(return_value=0))
+    monkeypatch.setattr("api.miniapp_routes.repo.spend_credits", spend)
+
+    response = await client.post(
+        "/api/v1/generate/video",
+        json={
+            "model": "midjourney-video",
+            "prompt": "visible",
+            "prompt_id": prompt.id,
+            "mode": "image",
+            "image_url": "https://example.test/source.jpg",
+        },
+    )
+
+    assert response.status_code == 404, response.text
+    assert visibility.await_count == 2
+    assert visibility.await_args_list[-1].kwargs["lock"] is True
+    spend.assert_not_awaited()
 
 
 @pytest.mark.asyncio

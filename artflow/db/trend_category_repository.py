@@ -11,6 +11,7 @@ from sqlalchemy import and_, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import attributes
 
+from core.trends import is_trend_prompt
 from db.models import PromptStatus, TrendCategory, UserPrompt
 
 MAX_CATEGORY_CURSOR_LENGTH = 512
@@ -203,6 +204,38 @@ async def get_visible_trend_category_for_prompt(
     category = row[0]
     attributes.set_committed_value(prompt, "trend_category_record", category)
     return category
+
+
+async def public_prompt_library_item_is_visible(
+    session: AsyncSession,
+    prompt: UserPrompt | None,
+    *,
+    lock: bool = False,
+) -> bool:
+    """Keep ordinary prompts public while enforcing the trend category switch."""
+    if prompt is None:
+        return False
+    if not is_trend_prompt(prompt):
+        return True
+    return await get_visible_trend_category_for_prompt(session, prompt, lock=lock) is not None
+
+
+async def filter_public_prompt_library_items(
+    session: AsyncSession,
+    prompts: Sequence[UserPrompt],
+) -> list[UserPrompt]:
+    """Remove hidden-category trends without changing ordinary prompt ordering."""
+    items = list(prompts)
+    trends = [prompt for prompt in items if is_trend_prompt(prompt)]
+    if not trends:
+        return items
+    visible_trends = await hydrate_visible_trend_categories(session, trends)
+    visible_ids = {int(prompt.id) for prompt in visible_trends}
+    return [
+        prompt
+        for prompt in items
+        if not is_trend_prompt(prompt) or int(prompt.id) in visible_ids
+    ]
 
 
 async def get_public_category_shelves(

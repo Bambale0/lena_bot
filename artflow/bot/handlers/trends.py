@@ -45,8 +45,10 @@ from db.prompt_repository import (
     get_prompts_by_tag,
 )
 from db.trend_category_repository import (
+    filter_public_prompt_library_items,
     get_visible_trend_category,
     list_visible_trend_categories,
+    public_prompt_library_item_is_visible,
     require_existing_trend_category,
 )
 
@@ -134,6 +136,7 @@ async def _show(
     trend_id: int | None = None,
 ) -> None:
     items = await get_prompts_by_tag(session, TREND_TAG, limit=80)
+    items = await filter_public_prompt_library_items(session, items)
     if not items:
         await safe_edit_message(
             holder,
@@ -199,7 +202,12 @@ async def trends_noop(call: CallbackQuery) -> None:
 async def use_trend(call: CallbackQuery, session: AsyncSession, state: FSMContext, db_user: User, bot: Bot) -> None:
     trend_id = int(call.data.rsplit(":", 1)[1])  # type: ignore[union-attr]
     prompt = await get_prompt_by_id(session, trend_id)
-    if not is_trend_prompt(prompt) or not prompt.is_public or getattr(prompt.status, "value", prompt.status) != "approved":
+    if (
+        not is_trend_prompt(prompt)
+        or not prompt.is_public
+        or getattr(prompt.status, "value", prompt.status) != "approved"
+        or not await public_prompt_library_item_is_visible(session, prompt)
+    ):
         await call.answer("Тренд уже скрыт", show_alert=True)
         return
     # All surfaces use the same server-side resolver, reference upload,

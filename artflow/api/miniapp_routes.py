@@ -187,6 +187,11 @@ from db.models import (
 )
 from db.payment_reporting import net_paid_amount_expr
 from db.session import get_session
+from db.trend_category_repository import (
+    filter_public_prompt_library_items,
+    get_visible_trend_category_for_prompt,
+    public_prompt_library_item_is_visible,
+)
 from payments.checkout_options import crypto_amount_usdt, payment_options_for_plan
 
 MUSIC_MODEL_KEY = "suno/v5.5"
@@ -200,6 +205,18 @@ router = APIRouter(prefix="/api/v1", tags=["miniapp"])
 
 class PreSubmitRejection(HTTPException):
     """A generation rejected before any provider submission or paid task exists."""
+
+
+async def _require_visible_trend_category(
+    session: AsyncSession,
+    prompt: UserPrompt | None,
+    *,
+    lock: bool = False,
+) -> None:
+    if is_trend_prompt(prompt) and await get_visible_trend_category_for_prompt(
+        session, prompt, lock=lock
+    ) is None:
+        raise HTTPException(status_code=404, detail="Prompt not found or not public")
 
 
 @router.get("/health", operation_id="miniapp_health_get")
@@ -2959,6 +2976,7 @@ async def create_image_generation(
         prompt_source = await get_prompt_by_id(session, body.prompt_id)
         if not _is_prompt_public_approved(prompt_source):
             raise HTTPException(status_code=404, detail="Prompt not found or not public")
+        await _require_visible_trend_category(session, prompt_source)
         user_prompt = prompt_source.prompt_text
         if is_trend_prompt(prompt_source):
             if trend_kind(prompt_source) != "image":
@@ -3007,6 +3025,7 @@ async def create_image_generation(
         active = await repo.count_user_active_generations(session, user.id)
         if active >= MAX_CONCURRENT:
             raise PreSubmitRejection(status_code=429, detail="Too many concurrent generations")
+        await _require_visible_trend_category(session, prompt_source, lock=True)
         charge = await repo.charge_image_generation(
             session,
             user_id=user.id,
@@ -3073,6 +3092,7 @@ async def create_image_generation(
     if active >= MAX_CONCURRENT:
         raise PreSubmitRejection(status_code=429, detail="Too many concurrent generations")
 
+    await _require_visible_trend_category(session, prompt_source, lock=True)
     charge = await repo.charge_image_generation(
         session,
         user_id=user.id,
@@ -3239,7 +3259,12 @@ async def create_image_generation(
 
 # ── video generation ──────────────────────────────────────────────────────────
 
-async def _video_prompt_and_source(body: VideoGenRequest, session: AsyncSession) -> tuple[str, Any]:
+async def _video_prompt_and_source(
+    body: VideoGenRequest,
+    session: AsyncSession,
+    *,
+    require_visible_category: bool = True,
+) -> tuple[str, Any]:
     user_prompt = body.prompt
     prompt_source = None
     if body.prompt_id is not None:
@@ -3248,6 +3273,8 @@ async def _video_prompt_and_source(body: VideoGenRequest, session: AsyncSession)
         prompt_source = await get_prompt_by_id(session, body.prompt_id)
         if not _is_prompt_public_approved(prompt_source):
             raise HTTPException(status_code=404, detail="Prompt not found or not public")
+        if require_visible_category:
+            await _require_visible_trend_category(session, prompt_source)
         user_prompt = prompt_source.prompt_text
         if is_trend_prompt(prompt_source):
             if trend_kind(prompt_source) != "video":
@@ -3470,8 +3497,30 @@ async def create_video_generation(
     if body.model in KLING4_MODELS:
         await require_kling4_access(session, user)
         from api.kling4_checkout import create_kling4_generation
-        prompt, _ = await _video_prompt_and_source(body, session)
-        gen = await create_kling4_generation(body, prompt, session, user, surface=surface, callback_url=_kie_callback_url())
+        from db.kling4_repository import canonical_intent
+        from db.models import Kling4Intent
+
+        existing_intent = await session.get(Kling4Intent, canonical_intent(body.intent_id))
+        prompt, prompt_source = await _video_prompt_and_source(
+            body,
+            session,
+            require_visible_category=existing_intent is None,
+        )
+
+        async def require_visible_category_for_admission() -> None:
+            await _require_visible_trend_category(session, prompt_source, lock=True)
+
+        gen = await create_kling4_generation(
+            body,
+            prompt,
+            session,
+            user,
+            surface=surface,
+            callback_url=_kie_callback_url(),
+            admission_guard=(
+                require_visible_category_for_admission if existing_intent is None else None
+            ),
+        )
         return _gen_out(gen)
     user_prompt, prompt_source = await _video_prompt_and_source(body, session)
 
@@ -3495,6 +3544,7 @@ async def create_video_generation(
         active = await repo.count_user_active_generations(session, user.id)
         if active >= MAX_CONCURRENT:
             raise PreSubmitRejection(status_code=429, detail="Too many concurrent generations")
+        await _require_visible_trend_category(session, prompt_source, lock=True)
         ok = await repo.spend_credits(session, user.id, model_cost.credits)
         if not ok:
             raise PreSubmitRejection(status_code=402, detail="Failed to spend credits")
@@ -3570,6 +3620,7 @@ async def create_video_generation(
     if active >= MAX_CONCURRENT:
         raise PreSubmitRejection(status_code=429, detail="Too many concurrent generations")
 
+    await _require_visible_trend_category(session, prompt_source, lock=True)
     ok = await repo.spend_credits(session, user.id, total_credits)
     if not ok:
         raise PreSubmitRejection(status_code=402, detail="Failed to spend credits")
@@ -5186,6 +5237,10 @@ async def list_prompts(
         prompts = await get_approved_prompts(session, category=cat, limit=limit, offset=(page - 1) * limit)
         total = await count_approved_prompts(session, category=cat)
 
+    before_filter = len(prompts)
+    prompts = await filter_public_prompt_library_items(session, prompts)
+    total = max(0, total - (before_filter - len(prompts)))
+
     return {
         "total": total,
         "page": page,
@@ -5219,7 +5274,9 @@ async def get_prompt(
     from db.prompt_repository import get_prompt_by_id
 
     p = await get_prompt_by_id(session, prompt_id)
-    if not _can_view_prompt(p, user):
+    if not _can_view_prompt(p, user) or not await public_prompt_library_item_is_visible(
+        session, p
+    ):
         raise HTTPException(status_code=404, detail="Prompt not found")
     return _prompt_out(p)
 
@@ -5233,13 +5290,17 @@ async def like_prompt_web(
     from db.prompt_repository import get_prompt_by_id, like_prompt
 
     current = await get_prompt_by_id(session, prompt_id)
-    if not _is_prompt_public_approved(current):
+    if not _is_prompt_public_approved(current) or not await public_prompt_library_item_is_visible(
+        session, current, lock=True
+    ):
         raise HTTPException(status_code=404, detail="Prompt not found")
 
     prompt, like_status = await like_prompt(session, prompt_id, user.id)
     if like_status == "duplicate":
         current = await get_prompt_by_id(session, prompt_id)
-        if not _is_prompt_public_approved(current):
+        if not _is_prompt_public_approved(current) or not await public_prompt_library_item_is_visible(
+            session, current
+        ):
             raise HTTPException(status_code=404, detail="Prompt not found")
         return {"status": "duplicate", "likes": current.likes}
     if like_status == "missing" or not _is_prompt_public_approved(prompt):
@@ -5256,7 +5317,9 @@ async def get_prompt_share_link(
     from db.prompt_repository import get_prompt_by_id
 
     prompt = await get_prompt_by_id(session, prompt_id)
-    if not _is_prompt_public_approved(prompt):
+    if not _is_prompt_public_approved(prompt) or not await public_prompt_library_item_is_visible(
+        session, prompt
+    ):
         raise HTTPException(status_code=404, detail="Prompt not found")
     link = _telegram_start_link(build_start_payload(ref_code=user.referral_code, target_kind="prompt", target_id=prompt_id))
     return {"link": link, "prompt_id": prompt_id}
@@ -5269,7 +5332,13 @@ async def use_prompt_web(
     user: User = Depends(get_miniapp_user),
 ) -> dict:
     """Mark a prompt as used when it is loaded into the web studio."""
-    from db.prompt_repository import use_prompt
+    from db.prompt_repository import get_prompt_by_id, use_prompt
+
+    current = await get_prompt_by_id(session, prompt_id)
+    if not _is_prompt_public_approved(current) or not await public_prompt_library_item_is_visible(
+        session, current, lock=True
+    ):
+        raise HTTPException(status_code=404, detail="Prompt not found or not public")
 
     try:
         prompt, rewards = await use_prompt(session, prompt_id, user.id)

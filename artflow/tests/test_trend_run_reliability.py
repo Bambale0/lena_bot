@@ -481,6 +481,10 @@ async def test_legacy_trend_accepts_canonical_runtime_model_during_prompt_resolu
         trend_user_fields=[],
     )
     monkeypatch.setattr("db.prompt_repository.get_prompt_by_id", AsyncMock(return_value=prompt))
+    monkeypatch.setattr(
+        "api.miniapp_routes.get_visible_trend_category_for_prompt",
+        AsyncMock(return_value=SimpleNamespace(id=1, key="featured")),
+    )
     body = VideoGenRequest(
         model="bytedance/seedance-2-5",
         prompt="hidden",

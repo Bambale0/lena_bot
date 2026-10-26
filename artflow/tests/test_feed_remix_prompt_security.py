@@ -1156,6 +1156,11 @@ async def test_api_image_session_attests_only_direct_user_input(api_launch, monk
     if hidden_trend:
         source = SimpleNamespace(id=17, tags=["trend"], model=None, prompt_text=SECRET, is_public=True, status=PromptStatus.approved)
         monkeypatch.setattr("db.prompt_repository.get_prompt_by_id", AsyncMock(return_value=source))
+        monkeypatch.setattr(
+            api_launch.routes,
+            "get_visible_trend_category_for_prompt",
+            AsyncMock(return_value=SimpleNamespace(id=1, key="featured")),
+        )
     body = api_launch.routes.ImageGenRequest(model="nano-banana-2", prompt="my own new prompt", prompt_id=17 if hidden_trend else None)
     await api_launch.routes.create_image_generation(body, api_launch.session, api_launch.user)
     created = api_launch.routes.repo.create_image_session.await_args.kwargs

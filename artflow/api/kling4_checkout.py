@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 
 from fastapi import HTTPException
 from pydantic import ValidationError
@@ -87,7 +88,16 @@ def quote_response(body, data, quote, user):
     )
 
 
-async def create_kling4_generation(body, prompt, session, user, *, surface, callback_url):
+async def create_kling4_generation(
+    body,
+    prompt,
+    session,
+    user,
+    *,
+    surface,
+    callback_url,
+    admission_guard: Callable[[], Awaitable[None]] | None = None,
+):
     await require_kling4_access(session, user)
     intent_id = canonical_intent(body.intent_id)
     # A completed/uncertain intent is safe to read after a restart or tariff change.
@@ -144,6 +154,8 @@ async def create_kling4_generation(body, prompt, session, user, *, surface, call
         billing_tariff_key=quote.tariff_key,
     )
     await require_kling4_access(session, user)
+    if admission_guard is not None:
+        await admission_guard()
     gen, fresh = await reserve_kling4(
         session,
         user_id=user.id,
