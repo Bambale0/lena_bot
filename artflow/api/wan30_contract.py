@@ -171,9 +171,17 @@ def validate_wan30_request(request: Wan30Request) -> tuple[str, float]:
 
 
 def wan30_max_billable_seconds(request: Wan30Request) -> float:
-    _mode, video_seconds = validate_wan30_request(request)
-    # Auto reserves the full 30 s combined provider limit, including video input.
-    return float(WAN30_MAX_DURATION if request.duration == -1 else request.duration + video_seconds)
+    mode, video_seconds = validate_wan30_request(request)
+    # Native edit derives output length from the first source clip. Reserve the
+    # higher of that measured length and the customer's selected fixed length,
+    # then return any excess after verified completion. Applies to KIE fallback
+    # too so quote/settlement never depend on an unannounced provider choice.
+    if request.duration == -1:
+        return float(WAN30_MAX_DURATION)
+    output = float(request.duration)
+    if mode == "edit" and wan30_supported_by_neironych(request):
+        output = max(output, float(request.reference_video_durations[0]))
+    return output + video_seconds
 
 
 def build_kie_wan30_payload(request: Wan30Request) -> dict:
@@ -204,10 +212,16 @@ def build_kie_wan30_payload(request: Wan30Request) -> dict:
 
 def wan30_supported_by_neironych(request: Wan30Request) -> bool:
     mode, _ = validate_wan30_request(request)
-    # Current native edit derives output length from the input clip and forbids
-    # duration. Keep fixed-duration quoted edits on KIE to preserve the order.
+    # Wan3 native edit inherits source duration and aspect ratio; it does not
+    # accept explicit duration/ratio. Prime has no native edit contract. Preserve
+    # materially different selected output settings by using KIE standby.
     if mode == "edit":
-        return False
+        if request.model != "wan/3-0-video" or request.aspect_ratio != "adaptive":
+            return False
+        if request.duration != -1 and abs(
+            request.duration - request.reference_video_durations[0]
+        ) >= 1.0:
+            return False
     if request.model == "wan/3-0-video-prime" and (
         request.duration < 4
         or request.aspect_ratio not in {"16:9", "1:1", "9:16"}
@@ -241,15 +255,21 @@ def build_neironych_wan30_payload(request: Wan30Request, *, provider_model: str)
     if not provider_model or not provider_model.strip():
         raise ValueError("Neironych Wan model ID must be verified from /v1/models")
     validate_wan30_request(request)
+    mode = wan30_mode(request)
     result = {
         "model": provider_model,
         "prompt": request.prompt,
-        "duration": request.duration,
         "resolution": request.resolution.lower(),
     }
+    if mode == "edit":
+        # Verified Neironych guide: edit is selected explicitly, and duration,
+        # aspect_ratio and size must be omitted (the input clip supplies them).
+        result["omni_reference_task_type"] = "edit"
+    else:
+        result["duration"] = request.duration
     if request.model != "wan/3-0-video-prime":
         result["generate_audio"] = request.audio
-    if not request.first_frame_url:
+    if mode != "edit" and not request.first_frame_url:
         result["aspect_ratio"] = request.aspect_ratio
     if request.first_frame_url:
         result["start_image"] = {"url": request.first_frame_url}

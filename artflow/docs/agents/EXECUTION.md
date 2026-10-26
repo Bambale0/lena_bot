@@ -2071,3 +2071,14 @@ absence of new photo-prompt Neironych submissions after the cutover.
 Steps: [x] root-cause and production preflight; [x] RED/green operator control;
 [ ] full relevant gates and review; [ ] PR/exact-head CI/auto-merge/deploy;
 [ ] audited production switch and live verification.
+
+## 2026-10-26 — WAN 3.0 native edit and duration settlement (active)
+- Baseline origin/main 4508acfaaca1a7d900d62dae65e2c53fe16bd8ba, branch fix/wan3-neironych-native-edit-20261026, isolated worktree.
+- Evidence: 29 edit KIE tasks and 2 Neironych non-edit tasks in preceding 24h. Current contract blocks native edit. Live Neironych guide documents omni_reference_task_type=edit, reference_videos, omission of duration/aspect_ratio/size; Prime edit unsupported.
+- Intent: route compatible edits to native Wan3, preserve requested duration contract via KIE for incompatible edits, settle actual verified duration with atomic exactly-once refund and ledger. No new DB schema; admin controls remain source of pricing and routing.
+- Plan: failing contract and billing tests, provider adapter, settlement, regression, docs, PR, auto-deploy only through approved CI. No paid smoke without per-test approval.
+
+- Implementation complete in worktree: native WAN Standard edit body with explicit task type and no duration/ratio; verified-source quote upper bound; original KIE semantics for incompatible requests/Prime; owned MP4 probe; row-locked exactly-once post-completion ledger and partial credit return. No migrations or new configuration values.
+- Test evidence before PR: full backend pytest command exited 0 (26 Oct 2026, 28.58 seconds) with expected skips; WAN/provider/recovery and financial suite exited 0; two real PostgreSQL race tests on disposable schema exited 0 (parallel callback/poll and completion/failure). Read-only provider-contract inventory valid, product readiness OK for 100 public contracts. Ruff, compileall and git diff --check passed. Synthetic credentials only.
+- Product surfaces checked: site=shared backend; mini_app=shared backend; telegram_bot=shared backend. No new UI branch; no user-facing code hardcode. Observability: safe generation ID, changed billable seconds, refund credits, overage seconds; no prompt/key in logs.
+- Remaining release gates: CI checks on exact PR head, reviewed merge, production autodeploy health and authorized paid edit smoke. No paid request performed and no live billing/customer data mutated by this branch.
