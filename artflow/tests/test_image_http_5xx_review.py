@@ -10,7 +10,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session
 
-from api import neironych_image_adapter, nexus_image_adapter
+from api import image_http_failure, neironych_image_adapter, nexus_image_adapter
 from api.image_http_failure import settle_image_http_5xx
 from api.nexusapi_client import NexusApiError
 from db import repository as repo
@@ -59,7 +59,9 @@ def image_review_db(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_nexus_pro_5xx_refund_and_late_outcome_are_auditable(image_review_db):
+async def test_nexus_pro_5xx_refund_and_late_outcome_are_auditable(image_review_db, monkeypatch):
+    admin_alert = AsyncMock()
+    monkeypatch.setattr(image_http_failure, "send_admin_alert_once", admin_alert, raising=False)
     with Session(image_review_db, expire_on_commit=False) as session:
         db = LocalAsyncSession(session)
         result = await settle_image_http_5xx(
@@ -95,6 +97,7 @@ async def test_nexus_pro_5xx_refund_and_late_outcome_are_auditable(image_review_
         assert marker["resolved_by_admin_tg_id"] == 123
         assert session.get(User, 77).credits == 11.5
         assert len(list(session.scalars(select(CreditLedgerEntry)))) == 1
+        admin_alert.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -177,14 +180,14 @@ async def test_refunded_neironych_image_poll_records_late_supplier_result(monkey
     alert = AsyncMock()
     monkeypatch.setattr(scheduler.neironych_image_adapter, "fetch_nano_banana21_status", fetch)
     monkeypatch.setattr(scheduler.repo, "record_late_image_provider_outcome", record)
-    monkeypatch.setattr(scheduler, "send_admin_alert_once", alert)
+    monkeypatch.setattr(scheduler, "send_admin_alert_once", alert, raising=False)
 
     assert await scheduler.reconcile_refunded_neironych_images_once() == 1
     fetch.assert_awaited_once_with(request_id)
     assert record.await_args.kwargs == {
         "provider": "neironych", "provider_task_id": task_id, "succeeded": True,
     }
-    alert.assert_awaited_once()
+    alert.assert_not_awaited()
 
 
 @pytest.mark.asyncio

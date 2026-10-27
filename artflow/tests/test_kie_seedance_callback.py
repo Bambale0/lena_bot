@@ -311,3 +311,60 @@ async def test_supplier_review_list_denies_unauthenticated_requests():
     )
     assert result.status_code in (401, 403)
     session.execute.assert_not_awaited()
+
+@pytest.mark.asyncio
+async def test_signed_kie_late_refund_callback_records_review_without_admin_alert(
+    kie_transaction_db, monkeypatch,
+):
+    import httpx
+
+    import main
+
+    monkeypatch.setattr(c.settings, "KIE_WEBHOOK_HMAC_KEY", "synthetic-hmac-private")
+    monkeypatch.setattr(main.settings, "KIE_WEBHOOK_SECRET", "synthetic-webhook-secret")
+    admin_alert = AsyncMock(side_effect=AssertionError("supplier review should not notify admins"))
+    monkeypatch.setattr(main, "send_admin_alert_once", admin_alert, raising=False)
+
+    with Session(kie_transaction_db, expire_on_commit=False) as session:
+        db = LocalAsyncSession(session)
+        assert await repo.register_kie_video_callback(db, 73, surface="miniapp")
+        assert await repo.mark_kie_video_submission_unknown(db, 73)
+        assert await repo.fail_generation_and_refund(
+            db, 73, "synthetic timeout", expected_task_id="kie-submit:73",
+            provider_review={
+                "state": "pending",
+                "original_task_id": "kie-submit:73",
+                "refunded_at": datetime.now(timezone.utc).isoformat(),
+                "last_provider_status": "unknown",
+                "checks": 0,
+            },
+        ) == (True, 40.0)
+
+        class SessionContext:
+            async def __aenter__(self):
+                return db
+
+            async def __aexit__(self, *_args):
+                return False
+
+        monkeypatch.setattr(main, "AsyncSessionLocal", SessionContext)
+        url = c.callback_url_for_generation(
+            "http://test/webhook/kie?secret=synthetic-webhook-secret", 73,
+        )
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=main.app), base_url="http://test",
+        ) as client:
+            response = await client.post(
+                url, json={"task_id": "late-provider-task", "data": {"state": "completed"}},
+            )
+
+        assert response.status_code == 200
+        review = repo.parse_input_params(session.get(Generation, 73).input_params)[
+            repo.SEEDANCE_REFUND_PROVIDER_REVIEW_KEY
+        ]
+        assert review["state"] == "remote_completed_pending_finance"
+        assert session.get(User, 42).credits == 140
+        assert len(list(session.scalars(select(CreditLedgerEntry)))) == 1
+        admin_alert.assert_not_awaited()
+
+

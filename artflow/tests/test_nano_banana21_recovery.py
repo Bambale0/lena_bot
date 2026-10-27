@@ -257,6 +257,34 @@ async def test_lost_response_callback_binds_and_finishes_once(webhook_state, sur
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("terminal", ["completed", "failed"])
+async def test_refunded_nexus_callback_records_outcome_without_admin_telegram(
+    webhook_state, monkeypatch, terminal,
+):
+    state = webhook_state
+    state.gen.status = GenerationStatus.failed
+    state.gen.task_id = "nexus:accepted"
+    state.canonical.return_value["status"] = terminal
+    record = AsyncMock(return_value=True)
+    admin_alert = AsyncMock(side_effect=AssertionError("routine supplier review must be silent"))
+    monkeypatch.setattr(repo, "record_late_image_provider_outcome", record)
+    monkeypatch.setattr(main, "send_admin_alert_once", admin_alert, raising=False)
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=main.app), base_url="http://test"
+    ) as client:
+        response = await client.post(callback_url(), json={"task_id": "accepted"})
+
+    assert response.status_code == 200
+    record.assert_awaited_once_with(
+        state.session, state.gen.id, provider="nexus",
+        provider_task_id="nexus:accepted", succeeded=terminal == "completed",
+    )
+    admin_alert.assert_not_awaited()
+    state.refund.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_webhook_corrupt_result_binds_task_for_poll_recovery_without_refund(webhook_state):
     state = webhook_state
     state.mirror.side_effect = ValueError("corrupt raster")

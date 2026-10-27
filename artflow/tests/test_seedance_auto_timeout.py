@@ -412,7 +412,7 @@ async def test_post_refund_supplier_review_records_late_completion_without_chang
     })
     commits=[]
     admin_alert = AsyncMock(return_value=True)
-    monkeypatch.setattr(scheduler, "send_admin_alert_once", admin_alert)
+    monkeypatch.setattr(scheduler, "send_admin_alert_once", admin_alert, raising=False)
 
     class ReviewSession(_Session):
         async def execute(self, _query):
@@ -436,13 +436,7 @@ async def test_post_refund_supplier_review_records_late_completion_without_chang
     assert commits==[True] and gen.status==GenerationStatus.failed
     assert json.loads(gen.input_params)["refund_applied"] is True
     no_refund.assert_not_awaited()
-    admin_alert.assert_awaited_once()
-    message = admin_alert.await_args.kwargs["message"]
-    if remote_status == "failed":
-        assert admin_alert.await_args.kwargs["title"] == "Seedance: ошибка подтверждена после возврата"
-        assert "завершите сверку" not in message
-    else:
-        assert "завершите сверку" in message
+    admin_alert.assert_not_awaited()
 
 
 
@@ -550,15 +544,12 @@ async def test_supplier_review_expiry_escalates_for_administrator(monkeypatch):
     monkeypatch.setattr(scheduler,"_final_neironych_provider_status",
                         AsyncMock(return_value=("unknown",None)))
     alert=AsyncMock(return_value=True)
-    monkeypatch.setattr(scheduler,"send_admin_alert_once",alert)
+    monkeypatch.setattr(scheduler,"send_admin_alert_once",alert, raising=False)
     assert await scheduler._review_refunded_provider_task(gen.id)
     review=json.loads(gen.input_params)["seedance_refund_provider_review"]
     assert review["state"]=="needs_admin_resolution"
     assert review["escalated_at"]
-    alert.assert_awaited_once()
-    assert alert.await_args.kwargs["title"] == "Seedance: нужна сверка после возврата"
-    assert "Нейроныч статус unknown" in alert.await_args.kwargs["message"]
-    assert "Кредиты пользователю возвращены" in alert.await_args.kwargs["message"]
+    alert.assert_not_awaited()
 
 
 @pytest.mark.asyncio

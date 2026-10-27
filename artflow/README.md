@@ -68,6 +68,13 @@ Changes reach `main` through a reviewed PR with native squash auto-merge. On a s
 
 Secrets belong in the production `.env` and must not be committed. For configuration names and examples, use [.env.example](.env.example). The public health checks are `/health` and `/api/v1/health`.
 
+Supplier-cost reconciliation for failed image HTTP 5xx, delayed Nexus callbacks and refunded Seedance tasks (Neironych or Kie) continues silently:
+provider outcomes, unresolved-liability states and credit-ledger changes stay available in
+the protected admin API and structured logs. These routine supplier-review transitions,
+including late outcomes and manual-resolution markers, **do not send Telegram admin alerts**.
+Alerts about actual provider credit shortages, anti-fraud, and backup notifications are unchanged.
+Customer completion/failure notifications are unchanged.
+
 Audit follow-up: [verified fixes and explicitly open blockers](docs/audits/2026-10-16-remediation.md). The full pytest suite and payment findings are not closed by this release.
 
 ## Seedance admission incident
