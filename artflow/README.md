@@ -68,7 +68,7 @@ Changes reach `main` through a reviewed PR with native squash auto-merge. On a s
 
 Secrets belong in the production `.env` and must not be committed. For configuration names and examples, use [.env.example](.env.example). The public health checks are `/health` and `/api/v1/health`.
 
-Supplier-cost reconciliation for failed image HTTP 5xx and refunded Seedance tasks continues silently:
+Supplier-cost reconciliation for failed image HTTP 5xx, delayed Nexus callbacks and refunded Seedance tasks (Neironych or Kie) continues silently:
 provider outcomes, unresolved-liability states and credit-ledger changes stay available in
 the protected admin API and structured logs. These routine supplier-review transitions,
 including late outcomes and manual-resolution markers, **do not send Telegram admin alerts**.

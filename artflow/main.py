@@ -104,7 +104,6 @@ from bot.utils.telegram_images import (
     send_original_document_to_chat,
 )
 from bot.utils.telegram_ui import is_benign_telegram_error
-from core.admin_alerts import send_admin_alert_once
 from core.broadcast_scheduler import run_broadcast_scheduler
 from core.config import settings
 from core.db_backup_scheduler import run_database_backup_scheduler
@@ -1776,16 +1775,6 @@ async def kie_webhook(
                         "Nexus late image outcome recorded after refund gen=%s state=%s",
                         gen.id, "done" if late_outcome else "failed",
                     )
-                    try:
-                        await send_admin_alert_once(
-                            alert_key=f"image-late-provider-result:{gen.id}",
-                            title="Изображение: исход провайдера после возврата",
-                            message=f"APIX генерация {gen.id}: Nexus завершил задачу "
-                                    "после возврата. Проверьте расход в admin API.",
-                        )
-                    except Exception as exc:
-                        logger.warning("Nexus image supplier alert deferred gen=%s error=%s",
-                                       gen.id, type(exc).__name__)
             if (gen.status.value == "failed" and apix_generation_id == gen.id
                     and apix_generation_sig and late_outcome is not None):
                 recorded = await repo.record_late_kie_video_callback(
@@ -1797,22 +1786,6 @@ async def kie_webhook(
                         "state=%s customer_balance_unchanged=true",
                         gen.id, "done" if late_outcome else "failed",
                     )
-                    if late_outcome:
-                        # Supplier review stays open until authorized financial
-                        # settlement. The authenticated admin queue is durable.
-                        try:
-                            await send_admin_alert_once(
-                                alert_key=f"seedance-kie-late-finance:{gen.id}",
-                                title="Seedance: результат Kie после возврата",
-                                message=f"APIX генерация {gen.id}: поставщик завершил "
-                                        "задачу после возврата. Проверьте расход и "
-                                        "разрешите задолженность через admin API.",
-                            )
-                        except Exception as exc:
-                            logger.warning(
-                                "Kie late supplier admin alert deferred gen=%s error=%s",
-                                gen.id, type(exc).__name__,
-                            )
             return {"ok": True}
 
         user = await repo.get_user_by_id(session, gen.user_id)
