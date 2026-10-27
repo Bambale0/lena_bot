@@ -60,7 +60,8 @@ test("black lilac foundation: palette, five destinations and full profile works"
     const create = await nav.locator('[data-destination="create"]').boundingBox();
     expect(create!.width).toBeGreaterThanOrEqual(44); expect(create!.height).toBeGreaterThanOrEqual(44);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    await expect(page.locator(".apix-balance-button")).toContainText("Пополнить");
+    await expect(page.locator(".apix-app-header").getByRole("button", { name: "Пополнить", exact: true })).toBeVisible();
+    await expect(page.locator(".apix-balance-button")).toContainText("120");
     await page.screenshot({ path: info.outputPath(`black-lilac-home-${width}.png`), fullPage: true });
   }
   await nav.getByRole("tab", { name: "Профиль", exact: true }).click();
@@ -96,6 +97,67 @@ test("black lilac foundation: palette, five destinations and full profile works"
   await page.locator("[data-apix-editor-back]").click();
   await expect(page.locator(".studio-profile-works")).toBeVisible();
   await expect(page.locator("[data-apix-editor-back]")).toHaveCount(0);
+});
+
+test("luxury home keeps the APIX palette while matching the reference composition", async ({ page }) => {
+  await prepare(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/?ux=3");
+
+  await expect(page.getByRole("button", { name: "Язык: Русский", exact: true })).toBeVisible();
+  const showcase = page.getByRole("region", { name: "Витрина APIX", exact: true });
+  await expect(showcase).toBeVisible();
+  const hero = showcase.getByRole("button", { name: "Создать фото — главный сценарий", exact: true });
+  await expect(hero).toBeVisible();
+  const heroBox = await hero.boundingBox();
+  expect(heroBox!.width / heroBox!.height).toBeGreaterThan(1.45);
+  await expect(showcase.getByRole("button", { name: "По шаблону", exact: true })).toBeVisible();
+  await expect(showcase.getByRole("button", { name: "Открыть помощь", exact: true })).toBeVisible();
+
+  const services = page.getByRole("navigation", { name: "Быстрый запуск", exact: true });
+  const labels = ["Создать фото", "Оживить фото", "Создать музыку", "AI-помощник", "Все нейросети", "Инструменты"];
+  for (const label of labels) await expect(services.getByRole("button", { name: label, exact: true })).toBeVisible();
+  await expect(services.getByRole("button")).toHaveCount(6);
+  const tiles = await services.getByRole("button").evaluateAll(nodes => nodes.map(node => {
+    const box = node.getBoundingClientRect();
+    return { x: box.x, y: box.y, width: box.width, height: box.height };
+  }));
+  expect(new Set(tiles.slice(0, 3).map(tile => Math.round(tile.y))).size).toBe(1);
+  expect(tiles.every(tile => tile.width >= 44 && tile.height >= 44)).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+test("every luxury home launcher opens its real APIX workflow", async ({ page }) => {
+  await prepare(page);
+  await page.goto("/?ux=3");
+  const routes = [
+    ["Создать фото", "Фото"],
+    ["Оживить фото", "Видео"],
+    ["Создать музыку", "Создать музыку"],
+    ["AI-помощник", "AI-помощник"],
+    ["Все нейросети", "Нейросети"],
+    ["Инструменты", "Сервисы"],
+  ] as const;
+  for (const [launcher, heading] of routes) {
+    await page.getByRole("navigation", { name: "Быстрый запуск", exact: true }).getByRole("button", { name: launcher, exact: true }).click();
+    await expect(page.getByRole("heading", { name: heading, exact: true }).first()).toBeVisible();
+    await page.getByRole("navigation", { name: "Основная навигация" }).getByRole("tab", { name: "Главная", exact: true }).click();
+  }
+});
+
+test("luxury home stays usable in compact portrait and phone landscape", async ({ page }) => {
+  await prepare(page);
+  for (const viewport of [{ width: 375, height: 812 }, { width: 844, height: 390 }]) {
+    await page.setViewportSize(viewport);
+    await page.goto("/?ux=3");
+    const header = page.locator(".apix-app-header");
+    await expect(header.getByRole("button", { name: "Пополнить", exact: true })).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Быстрый запуск", exact: true }).getByRole("button")).toHaveCount(6);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    const nav = await page.getByRole("navigation", { name: "Основная навигация" }).boundingBox();
+    expect(nav!.x).toBeGreaterThanOrEqual(0);
+    expect(nav!.x + nav!.width).toBeLessThanOrEqual(viewport.width);
+  }
 });
 
 test("black lilac foundation: phone profile header stays reachable after works scroll and topup cancel", async ({ page }, info) => {
