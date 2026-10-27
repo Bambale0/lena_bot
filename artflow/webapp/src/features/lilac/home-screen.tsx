@@ -20,6 +20,15 @@ const tasks = [
   { tab: "assistant", title: "AI-помощник", text: "Идеи, тексты и помощь с заданием", Icon: Bot },
 ] as const;
 
+const homeLaunchers = [
+  { tab: "photo", title: "Создать фото", Icon: ImageIcon },
+  { tab: "video", title: "Оживить фото", Icon: Film },
+  { tab: "music", title: "Создать музыку", Icon: Music2 },
+  { tab: "assistant", title: "AI-помощник", Icon: Bot },
+  { tab: "models", title: "Все нейросети", Icon: Shapes },
+  { tab: "services", title: "Инструменты", Icon: WandSparkles },
+] as const;
+
 function useReducedMotion(): boolean {
   const [reduced, setReduced] = useState(() => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
   useEffect(() => {
@@ -102,21 +111,43 @@ export function LilacHome({ data, drafts, onNavigate, onTask }: HomeProps) {
   const saved = drafts.filter(hasDraftInput);
   const reducedMotion = useReducedMotion();
   return <div className="lilac-page lilac-home">
-    <header className="lilac-title"><p>Ваша творческая студия</p><h1>Что создадим сегодня?</h1><span>Выберите задачу — с настройками поможем.</span></header>
     {data.user.credits === 0 && <div className="lilac-row"><span><strong>Баланс пока 0</strong><small>Можно выбрать пример и добавить фото. Перед платным запуском пополните баланс.</small></span><button className="lilac-primary" onClick={() => readStudioBalance()?.onOpen()}>Пополнить</button></div>}
-    <div className="lilac-task-grid">
-      {tasks.map(({ tab, title, text, Icon }, index) => <button type="button" key={tab} aria-label={title}
-        className={`lilac-task lilac-task-${index}`} onClick={() => onNavigate(tab)}>
-        {index < 2 && <HomeThumbnail url={index === 0 ? photoPreview : trendPreview} kind={index === 0 ? "image" : "video"} reducedMotion={reducedMotion} />}
-        <span className="lilac-task-icon"><Icon size={25} aria-hidden="true" /></span>
-        <span className="lilac-task-copy"><strong>{title}</strong><span>{text}</span></span><ArrowRight className="lilac-task-arrow" size={19} />
+    <section className="lilac-showcase" aria-label="Витрина APIX">
+      <article className="lilac-showcase-hero" role="group" aria-label="Главный сценарий">
+        <HomeThumbnail url={photoPreview} kind="image" reducedMotion={reducedMotion}
+          fallback={<span className="lilac-hero-fallback" aria-hidden="true"><Sparkles /><i /><i /></span>} />
+        <span className="lilac-showcase-shade" aria-hidden="true" />
+        <header className="lilac-showcase-copy">
+          <span>Ваша творческая студия</span>
+          <h1>Что создадим сегодня?</h1>
+          <p>Добавьте идею или фото — с настройками поможем.</p>
+        </header>
+        <button type="button" className="lilac-showcase-cta" aria-label="Создать фото — главный сценарий" onClick={() => onNavigate("photo")}>
+          Создать <ArrowRight aria-hidden="true" />
+        </button>
+      </article>
+      <div className="lilac-promo-grid">
+        <button type="button" className="lilac-promo lilac-promo-trends" aria-label="По шаблону" onClick={() => onNavigate("trends")}>
+          <HomeThumbnail url={trendPreview} kind="video" reducedMotion={reducedMotion}
+            fallback={<span className="lilac-promo-fallback" aria-hidden="true"><Sparkles /><Orbit /><i /></span>} />
+          <span className="lilac-promo-shade" aria-hidden="true" />
+          <span className="lilac-promo-copy"><small>Готовые сценарии</small><strong>Тренды</strong><span>Повторить образ</span></span>
+        </button>
+        <button type="button" className="lilac-promo lilac-promo-help" aria-label="Открыть помощь" onClick={() => onNavigate("help")}>
+          <span className="lilac-help-orbit" aria-hidden="true"><LifeBuoy /><i /></span>
+          <span className="lilac-promo-copy"><small>APIX Studio</small><strong>Мы рядом</strong><span>Центр помощи</span></span>
+        </button>
+      </div>
+      <span className="lilac-showcase-dots" aria-hidden="true"><i /><i /><i /><i /></span>
+    </section>
+    <nav className="lilac-service-grid" aria-label="Быстрый запуск">
+      {homeLaunchers.map(({ tab, title, Icon }) => <button type="button" key={tab} aria-label={title} onClick={() => onNavigate(tab)}>
+        <span className="lilac-service-icon">{tab === "video"
+          ? <HomeThumbnail url={trendPreview} kind="video" reducedMotion={reducedMotion} fallback={<Icon aria-hidden="true" />} />
+          : <Icon aria-hidden="true" />}</span>
+        <span>{title}</span>
       </button>)}
-    </div>
-    <div className="lilac-shortcuts">
-      <button onClick={() => onNavigate("trends")}><Sparkles /><span>По шаблону</span></button>
-      <button onClick={() => onNavigate("models")} aria-label="Все нейросети"><Shapes /><span>Нейросети</span></button>
-      <button onClick={() => onNavigate("services")}><WandSparkles /><span>Инструменты</span></button>
-    </div>
+    </nav>
     {saved.length > 0 && <section><div className="lilac-section-title"><h2>Продолжить черновик</h2></div>
       {saved.map(draft => <button className="lilac-row" key={draft.kind} onClick={() => onNavigate(draft.kind === "image" ? "photo" : draft.kind)}>
         <span className="lilac-mini-icon"><Orbit /></span><span><strong>{draft.kind === "image" ? "Фото" : draft.kind === "video" ? "Видео" : "Движение"}</strong><small>{draft.prompt.trim() || "Материалы уже добавлены"}</small></span><ArrowRight size={18} />

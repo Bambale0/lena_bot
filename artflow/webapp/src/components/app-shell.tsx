@@ -189,9 +189,10 @@ function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen, ux2 =
         </button>
         )}
 
+        {lilac && <button type="button" className="studio-language-button apix-focus-ring" aria-label={en ? "Language: English" : "Язык: Русский"} onClick={() => navigate("settings")}>{en ? "EN" : "RU"}</button>}
+        {lilac && <button type="button" className="studio-header-topup apix-focus-ring" onClick={onBalanceOpen}>{en ? "Top up" : "Пополнить"}</button>}
         <Button variant="soft" size="sm" className="apix-balance-button min-w-fit shrink-0 justify-self-end px-2.5" onClick={onBalanceOpen} aria-label={lilac ? (en ? "Balance — Top up" : "Баланс — Пополнить") : "Открыть баланс"}>
           <span>{formatKisses(user.credits, { compact: true })}</span>
-          {lilac && <span className="studio-topup-label">{en ? "Top up" : "Пополнить"}</span>}
         </Button>
         {!lilac && user.miniapp_ux2_available === true && onNewStudio && <button type="button" className="lilac-launch apix-focus-ring" aria-label="Открыть новую студию APIX" disabled={previewBusy} onClick={onNewStudio}>
           <Sparkles size={20} /><span><strong>{previewBusy ? "Проверяем доступ…" : "Новая студия APIX"}</strong><small>Для администратора · полный функционал</small></span><Plus size={18} />

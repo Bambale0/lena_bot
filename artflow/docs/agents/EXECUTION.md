@@ -2216,3 +2216,53 @@ Steps: [x] root-cause and production preflight; [x] RED/green operator control;
 - Mini App now renders server-backed category shelves with viewport-scoped live media, explicit folder entry, pagination, broken-media fallback and admin-only catalog controls. Telegram opens category folders first, pages eight folders at a time, keeps callback payloads below 64 bytes and restores the originating folder page.
 - Local evidence: Ruff passed; 93 focused backend/category/repeat tests passed; web typecheck/build passed; 148 unit tests passed; 72 maintained browser journeys passed across live category, black/lilac, completion and duration flows. Screenshots at 320/390/768/1280 were inspected. No paid generation or mutable production control was used.
 - Remaining gates: push PR, exact-head required checks and review, native squash merge, Production Autodeploy, then verify exact SHA, migrations, health, public build marker and read-only category endpoints.
+
+## 2026-10-27 — black/lilac luxury media-studio home
+
+- Baseline `44a55debba0a1c027910c0595ea6690de683c4b3`; branch
+  `feat/lilac-luxury-home-v4`. The requested visual reference is a mobile luxury
+  AI studio: compact brand/balance header, one dominant media hero, two promo
+  panels, six large service launchers and a floating five-item bottom bar. APIX
+  keeps its established black/lilac palette, product names and real routes.
+- Existing implementation already has authenticated balance/top-up, five-item
+  navigation with a central Create action, viewport-scoped live media, real
+  image/video/music/assistant/motion/tools routes, drafts, trends and recent
+  work. The gap is composition and visual hierarchy, not backend capability.
+- Acceptance: reproduce the reference composition at 390px without copying its
+  gold branding or inventing functions; keep all launchers at least 44px,
+  keyboard focus, safe areas, reduced motion, no horizontal page overflow and
+  live-media fallback. Existing labels and all generation/payment/admin flows
+  remain intact. Verify 320/390/768/1280 widths and the real click-through to
+  every launcher.
+- Scope/parity: `mini_app` visual refresh; `site` uses separate entry styling and
+  is unchanged; `telegram_bot` has no visual composition equivalent and is not
+  applicable. No API, schema, migration, price, balance, provider, permission,
+  admin configuration, secret or observability change. Rollback is the single
+  frontend release commit.
+- Skills/guidance: UI UX Pro Max, `.agents` frontend-design, TDD and webapp-testing.
+  Direction: **Lilac Noir Studio** (luxury/refined with one restrained futuristic
+  accent); anchor is the cinematic hero plus luminous nested-square launcher
+  grid. DFII discussion score 16/19 (impact 5, fit 4, feasibility 5,
+  performance 4, consistency risk 2).
+- Steps: 1. [x] current source/contracts/tests/CI/brand preflight; 2. [x] RED home
+  composition and routing tests; 3. [x] implement semantic React/CSS vertical
+  slice; 4. [x] unit/typecheck/build/browser/accessibility/visual checks and open
+  code review; 5. [ ] PR, exact-head required CI, native auto-merge, Production
+  Autodeploy, exact-SHA/public health and public asset verification.
+- Local evidence: TypeScript and Vite production build passed; 148 unit tests
+  passed; all 284 maintained UX2 browser journeys passed in 6.9 minutes. The
+  suite covers 320/375/390/768/1280 portrait widths and 844x390 phone landscape,
+  real routing for all six launchers, balance/top-up, live MP4 viewport behavior,
+  reduced motion, fullscreen safe areas, keyboard focus and no page overflow.
+  The 390px screenshot was inspected after the final build. Review found no new
+  correctness, security, permission, billing or provider issue; no paid request
+  or mutable production control was used.
+- Review removed an unsupported customer-facing `24/7` help SLA copied from the
+  visual reference. The promo keeps its real help route and neutral `Центр
+  помощи` copy; no availability promise is invented outside the control plane.
+- PR #312 first exact-head webapp run exposed one stale device-matrix selector:
+  the new six-button semantic quick-launch navigation was correctly included in
+  an unscoped `navigation` query that previously assumed only the five-button
+  bottom bar. The smoke now addresses both navigation regions by accessible
+  name; its four iPhone SE/iPhone 13/Pixel 5/Desktop cases pass locally. Product
+  behavior was unchanged by this test correction.
