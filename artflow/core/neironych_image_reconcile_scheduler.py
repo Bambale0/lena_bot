@@ -13,7 +13,6 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 from api import neironych_image_adapter
 from api.nexus_image_adapter import NEXUS_IMAGE_MODEL_MAP
-from core.admin_alerts import send_admin_alert_once
 from core.config import settings
 from db import repository as repo
 from db.models import Generation, GenerationStatus, GenerationType
@@ -165,16 +164,6 @@ async def reconcile_refunded_neironych_images_once(stop: asyncio.Event | None = 
                         "Neironych late image outcome recorded gen=%s state=%s",
                         gen_id, provider_state,
                     )
-                    try:
-                        await send_admin_alert_once(
-                            alert_key=f"image-late-provider-result:{gen_id}",
-                            title="Изображение: исход провайдера после возврата",
-                            message=f"APIX генерация {gen_id}: Neironych сообщил исход "
-                                    "после возврата. Проверьте расход в admin API.",
-                        )
-                    except Exception as exc:
-                        logger.warning("Image supplier alert deferred gen=%s error=%s",
-                                       gen_id, type(exc).__name__)
             except Exception:
                 await session.rollback()
                 logger.exception("Refunded image supplier review failed gen=%s", gen_id)

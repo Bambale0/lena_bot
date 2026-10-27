@@ -18,7 +18,6 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 from api import neironych_seedance_runtime
 from api.neironych_seedance_runtime import PRODUCT_MODELS
-from core.admin_alerts import send_admin_alert_once
 from core.config import settings
 from core.neironych_video_poll_gate import (
     neironych_video_poll_guard,
@@ -497,27 +496,10 @@ async def _review_refunded_provider_task(gen_id: int) -> bool:
         await session.commit()
     if status in ("done", "failed") or marker.get("state") == "needs_admin_resolution":
         logger.warning(
-            "Seedance refunded provider task resolved or escalated gen=%s remote=%s; "
-            "customer_final_state_unchanged=true", gen_id, status,
+            "Seedance refunded provider task resolved or escalated gen=%s remote=%s "
+            "review_state=%s customer_final_state_unchanged=true",
+            gen_id, status, marker.get("state"),
         )
-        try:
-            title = (
-                "Seedance: подтверждён результат после возврата" if status == "done"
-                else "Seedance: ошибка подтверждена после возврата" if status == "failed"
-                else "Seedance: нужна сверка после возврата"
-            )
-            message = (
-                f"APIX задача {gen_id}; Нейроныч статус {status}. "
-                + ("Проверьте закупочный расход и завершите сверку в защищённом admin API. "
-                   if status != "failed" else "Поставщик подтвердил ошибку задачи. ")
-                + "Кредиты пользователю возвращены; повторного списания нет."
-            )
-            await send_admin_alert_once(
-                alert_key=f"seedance-late-provider-result:{gen_id}:{status}",
-                title=title, message=message,
-            )
-        except Exception as exc:
-            logger.warning("Seedance supplier alert deferred gen=%s error=%s",gen_id,type(exc).__name__)
     return True
 
 
