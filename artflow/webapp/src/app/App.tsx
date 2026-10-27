@@ -73,7 +73,7 @@ import type {
 import { firstMedia, isPendingTask, safeExternalUrl } from "@/lib/utils";
 import { saveDownload } from "@/lib/download";
 
-window.__APIX_MINIAPP_BUILD_ID__ = "20261027-lilac-noir-studio-r4";
+window.__APIX_MINIAPP_BUILD_ID__ = "20261027-admin-recent-works-r5";
 
 type FeedSource = "recent" | "top_day" | "top";
 type VideoQuote = Awaited<ReturnType<MiniAppApi["quoteVideo"]>>;
