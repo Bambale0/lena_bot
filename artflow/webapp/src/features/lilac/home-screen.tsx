@@ -135,7 +135,7 @@ export function LilacHome({ data, drafts, onNavigate, onTask }: HomeProps) {
         </button>
         <button type="button" className="lilac-promo lilac-promo-help" aria-label="Открыть помощь" onClick={() => onNavigate("help")}>
           <span className="lilac-help-orbit" aria-hidden="true"><LifeBuoy /><i /></span>
-          <span className="lilac-promo-copy"><small>APIX Studio</small><strong>Мы рядом</strong><span>Помощь 24/7</span></span>
+          <span className="lilac-promo-copy"><small>APIX Studio</small><strong>Мы рядом</strong><span>Центр помощи</span></span>
         </button>
       </div>
       <span className="lilac-showcase-dots" aria-hidden="true"><i /><i /><i /><i /></span>

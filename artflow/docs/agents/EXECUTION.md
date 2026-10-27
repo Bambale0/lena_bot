@@ -2257,6 +2257,9 @@ Steps: [x] root-cause and production preflight; [x] RED/green operator control;
   The 390px screenshot was inspected after the final build. Review found no new
   correctness, security, permission, billing or provider issue; no paid request
   or mutable production control was used.
+- Review removed an unsupported customer-facing `24/7` help SLA copied from the
+  visual reference. The promo keeps its real help route and neutral `Центр
+  помощи` copy; no availability promise is invented outside the control plane.
 - PR #312 first exact-head webapp run exposed one stale device-matrix selector:
   the new six-button semantic quick-launch navigation was correctly included in
   an unscoped `navigation` query that previously assumed only the five-button
