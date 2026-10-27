@@ -105,6 +105,58 @@ function HomeThumbnail({ url, kind, reducedMotion, fallback = null }: { url?: st
     : <img src={src} alt="" loading="lazy" onError={() => setFailed(src)} />;
 }
 
+function recentTaskType(task: GenerationTask): { label: string; Icon: typeof ImageIcon } {
+  if (task.gen_type === "image") return { label: "Фото", Icon: ImageIcon };
+  if (task.gen_type === "video") return { label: "Видео", Icon: Film };
+  if (task.gen_type === "music" || task.gen_type === "audio") return { label: "Музыка", Icon: Music2 };
+  return { label: "Проект", Icon: Shapes };
+}
+
+function recentTaskTitle(task: GenerationTask): string {
+  const { label } = recentTaskType(task);
+  const privateTemplate = task.prompt_hidden || task.prompt_actions_allowed === false;
+  const prompt = privateTemplate ? "" : String(task.prompt || "").trim();
+  if (prompt) return prompt;
+  if (privateTemplate) return label + " по шаблону";
+  return label + " · " + (String(task.model || "APIX").trim() || "APIX");
+}
+
+function recentTaskStatusTone(status: string): "done" | "active" | "queued" | "error" {
+  if (status === "done" || status === "completed") return "done";
+  if (status === "failed") return "error";
+  if (status === "pending" || status === "queued" || status === "created") return "queued";
+  return "active";
+}
+
+function RecentTaskCard({ task, reducedMotion, onOpen }: {
+  task: GenerationTask;
+  reducedMotion: boolean;
+  onOpen: (task: GenerationTask) => void;
+}) {
+  const { label, Icon } = recentTaskType(task);
+  const title = recentTaskTitle(task);
+  const status = generationStatusLabel(task.status);
+  const date = formatRelativeDate(task.created_at);
+  const hasVisualPreview = task.gen_type === "image" || task.gen_type === "video";
+  return <button type="button" className="lilac-recent-card"
+    aria-label={[title, status, date].join(". ")} onClick={() => onOpen(task)}>
+    <span className="lilac-recent-media">
+      <HomeThumbnail url={hasVisualPreview ? firstMedia(task) : undefined}
+        kind={task.gen_type === "video" ? "video" : "image"} reducedMotion={reducedMotion}
+        fallback={<span className="lilac-recent-placeholder" aria-hidden="true"><Icon /></span>} />
+      <span className="lilac-recent-type"><Icon aria-hidden="true" />{label}</span>
+    </span>
+    <span className="lilac-recent-copy">
+      <strong>{title}</strong>
+      <span className="lilac-recent-meta">
+        <span className="lilac-task-status" data-tone={recentTaskStatusTone(task.status)}>{status}</span>
+        <time dateTime={task.created_at || undefined}>{date}</time>
+      </span>
+    </span>
+    <ArrowRight className="lilac-recent-arrow" aria-hidden="true" />
+  </button>;
+}
+
 export function LilacHome({ data, drafts, onNavigate, onTask }: HomeProps) {
   const photoPreview = safeExternalUrl(data.feed.find(item => item.gen_type === "image")?.preview_url);
   const trendPreview = safeExternalUrl(data.trends.find(item => item.kind === "video")?.preview_url);
@@ -158,13 +210,25 @@ export function LilacHome({ data, drafts, onNavigate, onTask }: HomeProps) {
         <strong>{trend.title}</strong><small>{trend.kind === "video" ? "Видео" : "Фото"}</small>
       </button>)}</div> : <div className="lilac-empty"><Sparkles /><p>Готовых сценариев пока нет. Можно начать со своей идеи.</p><button className="lilac-primary" onClick={() => onNavigate("photo")}>Создать первое фото</button></div>}
     </section>
-    <section><div className="lilac-section-title"><h2>Последние работы</h2><button onClick={() => onNavigate("works")}>Все проекты <ArrowRight size={15} /></button></div>
-      {data.recentTasks.length ? data.recentTasks.slice(0, 3).map(task => <button key={task.id} className="lilac-row" onClick={() => onTask(task)}>
-        <span className="lilac-mini-preview"><HomeThumbnail url={task.gen_type === "image" ? firstMedia(task) : undefined} kind={task.gen_type === "image" ? "image" : "video"} reducedMotion={reducedMotion} fallback={task.gen_type === "image" ? <ImageIcon /> : <Film />} /></span>
-        <span><strong>{task.prompt_hidden || task.prompt_actions_allowed === false ? "Работа по шаблону" : task.prompt || task.model}</strong><small>{generationStatusLabel(task.status)} · {formatRelativeDate(task.created_at)}</small></span><ArrowRight size={18} />
-      </button>) : <p className="lilac-note">Здесь появятся ваши фото, видео и песни после первого запуска.</p>}
+    <section className="lilac-recent" aria-labelledby="lilac-recent-title">
+      <div className="lilac-section-title"><h2 id="lilac-recent-title">Последние работы</h2><button onClick={() => onNavigate("works")}>Все проекты <ArrowRight size={15} /></button></div>
+      {data.recentTasks.length
+        ? <div className="lilac-recent-grid">{data.recentTasks.slice(0, 3).map(task =>
+            <RecentTaskCard key={task.id} task={task} reducedMotion={reducedMotion} onOpen={onTask} />)}
+          </div>
+        : <div className="lilac-recent-empty" role="status">
+            <span className="lilac-mini-icon" aria-hidden="true"><ImageIcon /></span>
+            <span><strong>{data.historyUnavailable ? "Не удалось обновить работы" : "Пока нет готовых работ"}</strong>
+              <small>{data.historyUnavailable ? "Откройте проекты и повторите обновление." : "Первый результат появится здесь после запуска."}</small></span>
+            <button type="button" onClick={() => onNavigate(data.historyUnavailable ? "works" : "create")}>
+              {data.historyUnavailable ? "Открыть проекты" : "Создать"} <ArrowRight size={15} />
+            </button>
+          </div>}
     </section>
-    <div className="lilac-two-links"><button onClick={() => onNavigate("library")}><Library /> Библиотека промптов</button><button onClick={() => onNavigate("help")}><LifeBuoy /> Как начать</button></div>
+    <nav className="lilac-two-links lilac-home-links" aria-label="Полезные ссылки">
+      <button type="button" aria-label="Библиотека промптов" onClick={() => onNavigate("library")}><Library aria-hidden="true" /><span><strong>Библиотека промптов</strong><small>Идеи для старта</small></span><ArrowRight aria-hidden="true" /></button>
+      <button type="button" aria-label="Как начать" onClick={() => onNavigate("help")}><LifeBuoy aria-hidden="true" /><span><strong>Как начать</strong><small>Короткая инструкция</small></span><ArrowRight aria-hidden="true" /></button>
+    </nav>
   </div>;
 }
 

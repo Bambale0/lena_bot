@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-async function prepare(page: Page, admin = true) {
+async function prepare(page: Page, admin = true, recentTasks: any[] = [], historyStatus = 200) {
   const writes: Array<{ path: string; body: any }> = [];
   await page.addInitScript(() => {
     window.Telegram = { WebApp: { initData: "lilac-fixture", initDataUnsafe: { user: { id: 123 } },
@@ -31,7 +31,7 @@ async function prepare(page: Page, admin = true) {
     if (path.endsWith("/assistant")) return json({ reply: "Помогу с вашей идеей" });
     if (path.endsWith("/prompts") || path.endsWith("/prompts/my")) return json({ total: 1, items: [{ id: 10, title: "Мой портрет", prompt_text: "Портрет в мягком свете", model: "fixture-image", category: "other", status: "approved", likes: 0 }] });
     if (path.endsWith("/billing/transactions")) return json({ ok: true, data: { transactions: [], pending: [] } });
-    if (path.endsWith("/history")) return json([]);
+    if (path.endsWith("/history")) return historyStatus === 200 ? json(recentTasks) : route.fulfill({ status: historyStatus, json: { detail: "History unavailable" } });
     return json([]);
   });
   return writes;
@@ -125,6 +125,78 @@ test("luxury home keeps the APIX palette while matching the reference compositio
   expect(new Set(tiles.slice(0, 3).map(tile => Math.round(tile.y))).size).toBe(1);
   expect(tiles.every(tile => tile.width >= 44 && tile.height >= 44)).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+test("recent works use compact media cards and quiet utility links", async ({ page }, info) => {
+  const recentTasks = [
+    { id: 301, model: "fixture-image", gen_type: "image", prompt: "Сиреневый портрет в мягком свете", status: "completed",
+      preview_url: "https://fixture-media.test/portrait.svg", created_at: "2026-10-27T18:00:00Z" },
+    { id: 302, model: "fixture-video", gen_type: "video", prompt_hidden: true, prompt_actions_allowed: false, status: "processing",
+      preview_url: "https://fixture-media.test/motion.mp4", created_at: "2026-10-27T17:00:00Z" },
+    { id: 303, model: "fixture-music", gen_type: "music", prompt: "", status: "failed", created_at: "2026-10-27T16:00:00Z" },
+  ];
+  await prepare(page, true, recentTasks);
+  await page.route("https://fixture-media.test/portrait.svg", route => route.fulfill({
+    contentType: "image/svg+xml",
+    body: '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="200"><rect width="320" height="200" fill="#8c62ad"/></svg>',
+  }));
+  await page.route("https://fixture-media.test/motion.mp4", route => route.abort());
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/?ux=3");
+
+  const recent = page.getByRole("region", { name: "Последние работы", exact: true });
+  await expect(recent).toBeVisible();
+  const cards = recent.locator(".lilac-recent-card");
+  await expect(cards).toHaveCount(3);
+  await expect(cards.nth(0)).toContainText("Сиреневый портрет в мягком свете");
+  await expect(cards.nth(0)).toContainText("Фото");
+  await expect(cards.nth(0).locator("img")).toBeVisible();
+  await expect(cards.nth(1)).toContainText("Видео по шаблону");
+  await expect(cards.nth(1)).toContainText("Создаётся");
+  await expect(cards.nth(1).locator(".lilac-video-frame")).toBeVisible();
+  await expect(cards.nth(2)).toContainText("Музыка · fixture-music");
+  await expect(cards.nth(2)).toContainText("Ошибка");
+  await expect(cards.nth(2).locator(".lilac-recent-placeholder svg")).toBeVisible();
+  await expect(recent.locator(".lilac-task-status")).toHaveCount(3);
+
+  const mobileTargets = await cards.evaluateAll(nodes => nodes.map(node => {
+    const box = node.getBoundingClientRect(); return { width: box.width, height: box.height };
+  }));
+  expect(mobileTargets.every(target => target.width >= 44 && target.height >= 44)).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: info.outputPath("admin-recent-works-390.png"), fullPage: true });
+
+  const utilities = page.getByRole("navigation", { name: "Полезные ссылки", exact: true });
+  await expect(utilities.getByRole("button", { name: "Библиотека промптов", exact: true })).toBeVisible();
+  await expect(utilities.getByRole("button", { name: "Как начать", exact: true })).toBeVisible();
+  const utilityBackground = await utilities.getByRole("button").first().evaluate(node => getComputedStyle(node).backgroundColor);
+  const cardBackground = await cards.first().evaluate(node => getComputedStyle(node).backgroundColor);
+  expect(utilityBackground).not.toBe(cardBackground);
+
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const desktopCards = await cards.evaluateAll(nodes => nodes.map(node => {
+    const box = node.getBoundingClientRect(); return { x: box.x, y: box.y, width: box.width };
+  }));
+  expect(new Set(desktopCards.map(card => Math.round(card.y))).size).toBe(1);
+  expect(desktopCards.every(card => card.width > 200)).toBe(true);
+  await page.screenshot({ path: info.outputPath("admin-recent-works-1280.png"), fullPage: true });
+});
+
+test("recent works explain empty and temporarily unavailable history", async ({ page, context }) => {
+  await prepare(page, true, []);
+  await page.goto("/?ux=3");
+  const emptyRecent = page.getByRole("region", { name: "Последние работы", exact: true });
+  await expect(emptyRecent).toContainText("Пока нет готовых работ");
+  await expect(emptyRecent.getByRole("button", { name: /Создать/ })).toBeVisible();
+
+  const unavailablePage = await context.newPage();
+  await prepare(unavailablePage, true, [], 503);
+  await unavailablePage.goto("/?ux=3");
+  const unavailableRecent = unavailablePage.getByRole("region", { name: "Последние работы", exact: true });
+  await expect(unavailableRecent).toContainText("Не удалось обновить работы");
+  await expect(unavailableRecent).toContainText("повторите обновление");
+  await expect(unavailableRecent.getByRole("button", { name: /Открыть проекты/ })).toBeVisible();
+  await unavailablePage.close();
 });
 
 test("every luxury home launcher opens its real APIX workflow", async ({ page }) => {
