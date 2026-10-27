@@ -22,11 +22,11 @@ test("Studio black lilac navigation, balance cancel and profile work across the 
   });
   await page.goto("/?ux=3");
   await expect(page.locator("body")).toHaveCSS("background-color","rgb(0, 0, 0)");
-  const nav = page.getByRole("navigation");
+  const nav = page.getByRole("navigation", { name: "Основная навигация" });
   await expect(nav.locator("button")).toHaveCount(5);
   const create = await nav.locator('[data-destination="create"]').boundingBox();
   expect(create!.height).toBeGreaterThanOrEqual(44); expect(create!.width).toBeGreaterThanOrEqual(44);
-  await page.getByRole("button",{name:"Создать фото",exact:true}).click();
+  await page.getByRole("navigation", { name: "Быстрый запуск" }).getByRole("button",{name:"Создать фото",exact:true}).click();
   const prompt = page.getByRole("textbox",{name:/^Промпт/}); await prompt.fill("Сохранённый красный портрет");
   await nav.getByRole("button",{name:"Пополнить",exact:true}).click();
   await expect(page.getByRole("dialog")).toContainText("Пакет с сервера");
