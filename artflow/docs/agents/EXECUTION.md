@@ -2257,3 +2257,9 @@ Steps: [x] root-cause and production preflight; [x] RED/green operator control;
   The 390px screenshot was inspected after the final build. Review found no new
   correctness, security, permission, billing or provider issue; no paid request
   or mutable production control was used.
+- PR #312 first exact-head webapp run exposed one stale device-matrix selector:
+  the new six-button semantic quick-launch navigation was correctly included in
+  an unscoped `navigation` query that previously assumed only the five-button
+  bottom bar. The smoke now addresses both navigation regions by accessible
+  name; its four iPhone SE/iPhone 13/Pixel 5/Desktop cases pass locally. Product
+  behavior was unchanged by this test correction.
