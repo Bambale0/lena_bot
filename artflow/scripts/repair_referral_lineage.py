@@ -188,16 +188,25 @@ def find_invalid_credit_bonuses(
     credit_entries: Iterable[object],
 ) -> list[object]:
     by_id = {int(user.id): user for user in users}
+    signup_source_owners: dict[str, set[int]] = defaultdict(set)
+    for user in users:
+        user_id = int(user.id)
+        signup_source_owners[str(user_id)].add(user_id)
+        tg_id = int(getattr(user, "tg_id", 0) or 0)
+        if tg_id > 0:
+            signup_source_owners[str(tg_id)].add(user_id)
     invalid_sources: dict[int, set[tuple[str, str, str]]] = {}
+    invalid_signup_owners: dict[tuple[int, str], set[int]] = defaultdict(set)
     for edge in invalid_edges:
         child = by_id[edge.user_id]
         tg_id = int(getattr(child, "tg_id", 0) or 0)
-        signup_source_ids = {str(tg_id)} if tg_id > 0 else set()
-        # Contact-created accounts use their database id while their temporary
-        # Telegram id is negative. They can later bind Telegram, so the current
-        # positive tg_id cannot reconstruct the award-time source by itself.
-        if tg_id <= 0 or getattr(child, "email", None) or getattr(child, "phone", None):
-            signup_source_ids.add(str(edge.user_id))
+        # Signup awards use the DB id while a contact account still has a
+        # negative pseudo Telegram id, or the positive Telegram id otherwise.
+        # Current profile/contact fields are mutable, so retain both immutable
+        # identifier candidates and fail closed if their namespaces collide.
+        signup_source_ids = {str(edge.user_id)}
+        if tg_id > 0:
+            signup_source_ids.add(str(tg_id))
         invalid_sources.setdefault(edge.invalid_referrer_id, set()).update(
             {
                 ("referral_first_topup_bonus", "referral_user", str(edge.user_id)),
@@ -207,18 +216,31 @@ def find_invalid_credit_bonuses(
             ("referral_signup_bonus", "user", source_id)
             for source_id in signup_source_ids
         )
+        for source_id in signup_source_ids:
+            invalid_signup_owners[(edge.invalid_referrer_id, source_id)].add(edge.user_id)
 
-    return [
-        entry
-        for entry in credit_entries
-        if float(entry.delta or 0) > 0
-        and (
+    matches: list[object] = []
+    for entry in credit_entries:
+        signature = (
             str(entry.entry_type or ""),
             str(entry.source_type or ""),
             str(entry.source_id or ""),
         )
-        in invalid_sources.get(int(entry.user_id), set())
-    ]
+        if float(entry.delta or 0) <= 0 or signature not in invalid_sources.get(
+            int(entry.user_id), set()
+        ):
+            continue
+        if signature[0] == "referral_signup_bonus":
+            expected_owners = invalid_signup_owners[(int(entry.user_id), signature[2])]
+            actual_owners = signup_source_owners.get(signature[2], set())
+            if not actual_owners or not actual_owners.issubset(expected_owners):
+                raise RuntimeError(
+                    "Ambiguous referral signup bonus source; manual correction required: "
+                    f"ledger_entry_id={int(entry.id)} source_id={signature[2]!r} "
+                    f"owners={sorted(actual_owners)} expected_invalid={sorted(expected_owners)}"
+                )
+        matches.append(entry)
+    return matches
 
 
 def allocate_credit_corrections(

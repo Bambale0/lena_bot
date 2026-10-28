@@ -181,6 +181,35 @@ def upgrade() -> None:
                                 original.user_id <> r.user_id
                                 OR original.entry_type <> r.entry_type
                                 OR abs(original.delta - r.amount_credits) > 0.000001
+                                OR original.entry_type NOT IN (
+                                    'referral_first_topup_bonus', 'referral_signup_bonus'
+                                )
+                                OR NOT EXISTS (
+                                    SELECT 1
+                                    FROM referral_lineage_repair_rows lineage
+                                    JOIN users invalid_child ON invalid_child.id = lineage.user_id
+                                    WHERE lineage.batch_key = NEW.batch_key
+                                      AND lineage.reason = 'impossible_direct_referrer'
+                                      AND lineage.old_referrer_id = r.user_id
+                                      AND (
+                                        (
+                                          original.entry_type = 'referral_first_topup_bonus'
+                                          AND original.source_type IS NOT DISTINCT FROM 'referral_user'
+                                          AND original.source_id IS NOT DISTINCT FROM lineage.user_id::text
+                                        )
+                                        OR (
+                                          original.entry_type = 'referral_signup_bonus'
+                                          AND original.source_type IS NOT DISTINCT FROM 'user'
+                                          AND original.source_id IS NOT DISTINCT FROM lineage.user_id::text
+                                        )
+                                        OR (
+                                          original.entry_type = 'referral_signup_bonus'
+                                          AND original.source_type IS NOT DISTINCT FROM 'user'
+                                          AND invalid_child.tg_id > 0
+                                          AND original.source_id IS NOT DISTINCT FROM invalid_child.tg_id::text
+                                        )
+                                      )
+                                )
                                 OR reversal.user_id <> r.user_id
                                 OR reversal.entry_type <> 'referral_bonus_reversal'
                                 OR reversal.source_type IS DISTINCT FROM 'referral_lineage_repair'

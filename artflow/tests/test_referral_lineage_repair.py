@@ -201,8 +201,8 @@ def test_invalid_late_bind_credit_bonus_is_selected_for_audited_reversal() -> No
             source_type="referral_user",
             source_id="999",
         ),
-        # Numeric identifiers can collide across namespaces; neither is the
-        # source format written for this invalid child's event type.
+        # First-top-up never uses the Telegram namespace.
+        # Signup can use the DB id before a contact account binds Telegram.
         SimpleNamespace(
             id=10,
             user_id=4,
@@ -231,7 +231,7 @@ def test_invalid_late_bind_credit_bonus_is_selected_for_audited_reversal() -> No
 
     assert [
         entry.id for entry in find_invalid_credit_bonuses(invalid_edges, users, entries)
-    ] == [7, 8]
+    ] == [7, 8, 11]
 
 
 def test_contact_signup_bonus_keeps_database_source_after_telegram_binding() -> None:
@@ -254,6 +254,28 @@ def test_contact_signup_bonus_keeps_database_source_after_telegram_binding() -> 
     assert [
         entry.id for entry in find_invalid_credit_bonuses(invalid_edges, users, entries)
     ] == [20]
+
+
+def test_signup_bonus_source_collision_fails_closed() -> None:
+    users = [
+        SimpleNamespace(id=1, tg_id=111),
+        SimpleNamespace(id=4, tg_id=444),
+        SimpleNamespace(id=111, tg_id=999),
+    ]
+    invalid_edges = [SimpleNamespace(user_id=1, invalid_referrer_id=4)]
+    entries = [
+        SimpleNamespace(
+            id=21,
+            user_id=4,
+            delta=5.0,
+            entry_type="referral_signup_bonus",
+            source_type="user",
+            source_id="111",
+        )
+    ]
+
+    with pytest.raises(RuntimeError, match="Ambiguous referral signup bonus source"):
+        find_invalid_credit_bonuses(invalid_edges, users, entries)
 
 
 def test_credit_reversal_debits_available_balance_and_records_spent_remainder() -> None:
@@ -293,7 +315,8 @@ def _exercise_postgres_triggers(connection) -> None:
     connection.execute(
         sa.text(
             "CREATE TABLE users ("
-            "id integer PRIMARY KEY, created_at timestamptz NOT NULL DEFAULT now(), "
+            "id integer PRIMARY KEY, tg_id bigint NOT NULL, "
+            "created_at timestamptz NOT NULL DEFAULT now(), "
             "referrer_id integer, referrer_l2_id integer, referrer_l3_id integer, "
             "referral_balance double precision NOT NULL DEFAULT 0, "
             "credits double precision NOT NULL DEFAULT 0)"
@@ -322,8 +345,8 @@ def _exercise_postgres_triggers(connection) -> None:
 
     connection.execute(
         sa.text(
-            "INSERT INTO users (id,created_at,referrer_id) VALUES "
-            "(2, now(), NULL), (1, now() - interval '1 day', 2)"
+            "INSERT INTO users (id,tg_id,created_at,referrer_id) VALUES "
+            "(2,222,now(),NULL), (1,111,now() - interval '1 day',2)"
         )
     )
     _expect_db_error(connection, "UPDATE users SET referrer_id=NULL WHERE id=1")
