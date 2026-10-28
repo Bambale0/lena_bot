@@ -100,7 +100,8 @@ test("standalone Seedance 2.5 keeps guided materials and working advanced contro
   await page.goto(`/studio.html?type=video&model=${encodeURIComponent(model)}`);
   await expect(page.locator("[data-account-model-select]")).toHaveValue(model);
   const optional = page.locator("[data-optional-section]");
-  if (await optional.getAttribute("open") === null) await optional.locator(":scope > summary").click();
+  if (await optional.getAttribute("open") !== null) await optional.locator(":scope > summary").click();
+  await expect(optional).not.toHaveAttribute("open", "");
   await expect(page.locator("[data-seedance25-studio]")).toBeVisible();
   await expect(page.locator("[data-reference-section]")).toBeHidden();
   await expect(page.locator("[data-s25-material]")).toHaveCount(3);
@@ -152,8 +153,10 @@ test("standalone Grok exposes text and photo modes with the real variant and con
   await page.goto(`/studio.html?type=video&model=${encodeURIComponent(textModel)}`);
 
   const chooser = page.locator("[data-video-mode-switch]");
+  const references = page.locator("[data-reference-section]");
   await expect(chooser).toBeVisible();
   await expect(chooser.getByRole("button", { name: "По тексту" })).toHaveAttribute("aria-pressed", "true");
+  await expect(references).toBeHidden();
   await expect(page.locator("[data-generation-note]")).toContainText("0,6");
   await page.locator("[data-generate-button]").click();
   let review = page.locator("[data-generation-review-modal]");
@@ -167,10 +170,20 @@ test("standalone Grok exposes text and photo modes with the real variant and con
   await chooser.getByRole("button", { name: "По фото" }).click();
   await expect(chooser.getByRole("button", { name: "По фото" })).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator("[data-generation-note]")).toContainText("0,7");
+  await expect(references).toBeVisible();
 
-  const references = page.locator("[data-reference-section]");
   if (await references.getAttribute("open") === null) await references.locator(":scope > summary").click();
-  await references.locator("input[name=reference_file]").setInputFiles({ name: "reader.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) });
+  const fileInput = references.locator("input[name=reference_file]");
+  await fileInput.setInputFiles({ name: "reader.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) });
+  await references.locator("input[name=reference_url]").fill("https://example.test/route-reader.jpg");
+  await chooser.getByRole("button", { name: "По тексту" }).click();
+  await expect(references).toBeHidden();
+  await expect.poll(() => fileInput.evaluate((input: HTMLInputElement) => input.files?.length || 0)).toBe(0);
+  await expect(references.locator("input[name=reference_url]")).toHaveValue("");
+  await expect(page.locator("[data-toast]")).toContainText("Фото убрано");
+  await chooser.getByRole("button", { name: "По фото" }).click();
+  await expect(references).toBeVisible();
+  await fileInput.setInputFiles({ name: "reader.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) });
   await page.locator("[data-generate-button]").click();
   review = page.locator("[data-generation-review-modal]");
   await expect(review.getByText("По фото", { exact: true })).toBeVisible();

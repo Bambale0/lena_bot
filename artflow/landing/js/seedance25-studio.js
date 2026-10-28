@@ -63,8 +63,10 @@
       return;
     }
 
-    const body = document.querySelector("[data-optional-section] .composer-disclosure-body");
-    if (!body) return;
+    const composer = document.querySelector(".account-composer");
+    const intro = composer?.querySelector(".composer-section-intro");
+    const referenceSection = composer?.querySelector("[data-reference-section]");
+    if (!composer || (!intro && !referenceSection)) return;
 
     const panel = document.createElement("div");
     panel.dataset.seedance25Studio = "1";
@@ -101,7 +103,8 @@
         <div class="composer-row"><label class="check-line"><input data-s25-return-frame type="checkbox" /><span>Вернуть последний кадр</span></label><label class="check-line"><input data-s25-web-search type="checkbox" /><span>Использовать поиск в интернете</span></label></div>
       </div></details>
     `;
-    body.appendChild(panel);
+    if (intro) intro.insertAdjacentElement("afterend", panel);
+    else referenceSection.insertAdjacentElement("beforebegin", panel);
 
     panel.querySelector("[data-s25-image-files]")?.addEventListener("change", (event) => {
       imageFiles = Array.from(event.currentTarget.files || []).slice(0, 30);

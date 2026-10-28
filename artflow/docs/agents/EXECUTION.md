@@ -2505,7 +2505,12 @@ Steps: [x] root-cause and production preflight; [x] RED/green operator control;
   runtime assets. The first updated-head smoke run exposed a strict-selector
   failure after the new nested advanced panel appeared; the repeat helper now
   targets each panel's direct summary, and the failed Seedance repeat journey
-  passes on iPhone SE, iPhone 13, Pixel 5 and desktop. The final independent
-  review has no Critical or Important
-  finding. No paid
+  passes on iPhone SE, iPhone 13, Pixel 5 and desktop. The next GitHub review
+  found a stale Seedance asset token, standalone material tiles mounted inside
+  the closed precision panel, and preserved Grok photo inputs after choosing
+  text mode. The Seedance bundle and shared runtime are now cache-busted; its
+  three material tiles mount above closed advanced settings; switching Grok to
+  text explicitly clears photo files/links and explains the action. The focused
+  standalone suite passes 7/7 and parity/backend-compatibility coverage passes
+  24/24. Final updated-head review and protected gates remain required. No paid
   provider request or mutable production control was used for verification.
