@@ -553,9 +553,8 @@ class ReferralCreditRepairRow(Base):
     __tablename__ = "referral_credit_repair_rows"
     __table_args__ = (
         UniqueConstraint(
-            "batch_key",
             "original_ledger_id",
-            name="uq_referral_credit_repair_batch_ledger",
+            name="uq_referral_credit_repair_original_ledger",
         ),
         Index("ix_referral_credit_repair_rows_user", "user_id"),
         CheckConstraint(

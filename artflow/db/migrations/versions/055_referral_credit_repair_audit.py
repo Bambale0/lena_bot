@@ -59,9 +59,8 @@ def upgrade() -> None:
             "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
         ),
         sa.UniqueConstraint(
-            "batch_key",
             "original_ledger_id",
-            name="uq_referral_credit_repair_batch_ledger",
+            name="uq_referral_credit_repair_original_ledger",
         ),
         sa.CheckConstraint(
             "amount_credits > 0",

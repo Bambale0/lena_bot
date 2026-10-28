@@ -68,6 +68,7 @@ def test_referral_lineage_migration_is_current_head() -> None:
     assert {
         constraint.name for constraint in ReferralCreditRepairRow.__table__.constraints
     } >= {
+        "uq_referral_credit_repair_original_ledger",
         "ck_referral_credit_repair_positive_amount",
         "ck_referral_credit_repair_nonnegative_allocation",
         "ck_referral_credit_repair_allocation_total",
@@ -468,6 +469,31 @@ def _exercise_postgres_triggers(connection) -> None:
         "VALUES ('trigger-test',34,2,'referral_signup_bonus',1,1,0,35)",
     )
     _expect_db_error(connection, "UPDATE credit_ledger SET delta=0 WHERE id=31")
+    connection.execute(
+        sa.text(
+            "INSERT INTO referral_lineage_repair_batches "
+            "(batch_key,operator,reason,status,invalid_credit_credits) "
+            "VALUES ('trigger-test-2','pytest','duplicate test','applying',5)"
+        )
+    )
+    connection.execute(
+        sa.text("SELECT set_config('apix.referral_repair_batch','trigger-test-2',true)")
+    )
+    connection.execute(
+        sa.text(
+            "INSERT INTO credit_ledger "
+            "(id,user_id,delta,balance_after,entry_type,source_type,source_id) VALUES "
+            "(36,2,-3,5,'referral_bonus_reversal','referral_lineage_repair',"
+            "'trigger-test-2:30')"
+        )
+    )
+    _expect_db_error(
+        connection,
+        "INSERT INTO referral_credit_repair_rows "
+        "(batch_key,original_ledger_id,user_id,entry_type,amount_credits,"
+        "balance_debit_credits,unrecovered_credits,reversal_ledger_id) "
+        "VALUES ('trigger-test-2',30,2,'referral_signup_bonus',5,3,2,36)",
+    )
     _expect_db_error(
         connection,
         "UPDATE referral_lineage_repair_batches SET reason='changed' "
