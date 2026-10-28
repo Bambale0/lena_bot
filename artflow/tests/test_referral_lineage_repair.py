@@ -39,8 +39,8 @@ def test_referral_lineage_migration_is_current_head() -> None:
     config.set_main_option("script_location", "db/migrations")
     scripts = ScriptDirectory.from_config(config)
 
-    assert scripts.get_heads() == ["054_referral_lineage_immutability"]
-    assert scripts.get_revision("054_referral_lineage_immutability").down_revision == (
+    assert scripts.get_heads() == ["054_referral_lineage"]
+    assert scripts.get_revision("054_referral_lineage").down_revision == (
         "053_wan_kie_primary_fallback"
     )
 

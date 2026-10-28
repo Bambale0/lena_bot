@@ -35,7 +35,7 @@ alembic upgrade head
 python run_polling.py
 ```
 
-The current Alembic head is `054_referral_lineage_immutability`; use `alembic heads` to check the active branch rather than a copied migration count. The application also runs migrations in its Compose startup command.
+The current Alembic head is `054_referral_lineage`; use `alembic heads` to check the active branch rather than a copied migration count. The application also runs migrations in its Compose startup command.
 
 Build the Mini App from `artflow/webapp/`:
 

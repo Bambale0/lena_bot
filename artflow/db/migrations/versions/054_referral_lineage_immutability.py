@@ -1,13 +1,13 @@
 """Make referral lineage immutable and add auditable repair records.
 
-Revision ID: 054_referral_lineage_immutability
+Revision ID: 054_referral_lineage
 Revises: 053_wan_kie_primary_fallback
 """
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "054_referral_lineage_immutability"
+revision = "054_referral_lineage"
 down_revision = "053_wan_kie_primary_fallback"
 branch_labels = None
 depends_on = None
