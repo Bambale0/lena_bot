@@ -21,15 +21,18 @@
   were paid to user 12327 through the false branch. Current referral balance was
   2,224 RUB after an approved 2,300 RUB withdrawal, so apply must debit at most
   the available balance, append full reversal evidence, and record 1,080 RUB as
-  unrecovered rather than creating a negative user balance. Read-only SQL found
-  zero invalid `referral_first_topup_bonus` or legacy signup-credit ledger rows
-  for all 10 impossible roots. The repair nevertheless detects either event type
-  and fails closed for a separately approved spent-credit correction if any
-  appears before apply.
+  unrecovered rather than creating a negative user balance. The deployed
+  pre-apply detector then found eight invalid signup-credit ledger rows totaling
+  38 credits across users 273, 922 and 926. The safe follow-up debits only the
+  available balance, appends a credit-ledger reversal plus immutable audit per
+  source row, and records any spent portion as unrecovered instead of making a
+  user balance negative.
 - Implementation: referral resolution remains only on INSERT paths; the shared
   late-bind repository seam and settlement wrapper are removed. Revision
   `054_referral_lineage` adds exact audited-update and append-only evidence
-  triggers. The repair is dry-run by default, serializes same-key runs with a
+  triggers; follow-up revision `055_referral_credit` adds immutable credit
+  correction evidence and batch totals. The repair is dry-run by default,
+  serializes same-key runs with a
   transaction advisory lock, then takes `EXCLUSIVE` table barriers in payment
   lock order (`transactions`, `users`, `credit_ledger`, commission ledger),
   recomputes under lock, and commits lineage/audit/reversals atomically.
@@ -37,7 +40,8 @@
   shared links or web auth; new accounts retain valid referral creation;
   ordinary SQL lineage UPDATE fails; only an exact applying audit row can pass;
   evidence cannot be changed/deleted; rerunning the same batch is a no-op;
-  non-null recipient transfers and invalid credit bonuses fail closed; after
+  non-null recipient transfers fail closed; invalid credit bonuses are reversed
+  without a negative balance and retain spent-credit evidence; after
   apply no impossible direct edge or false propagated ancestry remains.
 - Verification: independent review found and closed fail-closed finance,
   concurrency, ORM and PostgreSQL-test gaps. Local Ruff and focused suites pass;
@@ -45,10 +49,14 @@
   limitations. PR CI first exposed an Alembic version-column length error; the
   revision ID was shortened and the fresh exact-head backend, PostgreSQL
   migration/trigger, referral, provider, bot and webapp gates all passed.
-- Release status: exact-head PR checks green; merge/release, exact production
-  SHA/migration/health verification, repeat dry-run, one apply batch
-  `referral-lineage-20261028`, and post-apply audit are still required. No paid
-  provider request is permitted for verification.
+- Release status: PR #319 merged as
+  `90338ef35ce57efb88cbb4383b6f855c3d1f11f2`; exact-SHA Production Autodeploy,
+  migration `054_referral_lineage`, containers and both health endpoints passed.
+  Its production dry-run correctly stopped before writes on the eight credit
+  rows. Follow-up branch `fix/referral-credit-reversal-20261028` must pass review,
+  CI and exact-SHA deploy before the single apply batch
+  `referral-lineage-20261028` and post-apply audit. No paid provider request is
+  permitted for verification.
 
 ## Active 2026-10-26 — Trend category shelves
 

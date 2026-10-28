@@ -457,6 +457,9 @@ class ReferralLineageRepairBatch(Base):
     invalid_commission_rub: Mapped[float] = mapped_column(Float, nullable=False, server_default="0")
     balance_debit_rub: Mapped[float] = mapped_column(Float, nullable=False, server_default="0")
     unrecovered_rub: Mapped[float] = mapped_column(Float, nullable=False, server_default="0")
+    invalid_credit_credits: Mapped[float] = mapped_column(Float, nullable=False, server_default="0")
+    balance_debit_credits: Mapped[float] = mapped_column(Float, nullable=False, server_default="0")
+    unrecovered_credits: Mapped[float] = mapped_column(Float, nullable=False, server_default="0")
     summary_json: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
@@ -539,6 +542,47 @@ class ReferralFinanceRepairRow(Base):
     reversal_ledger_id: Mapped[int] = mapped_column(
         Integer,
         ForeignKey("referral_commission_ledger.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class ReferralCreditRepairRow(Base):
+    __tablename__ = "referral_credit_repair_rows"
+    __table_args__ = (
+        UniqueConstraint(
+            "batch_key",
+            "original_ledger_id",
+            name="uq_referral_credit_repair_batch_ledger",
+        ),
+        Index("ix_referral_credit_repair_rows_user", "user_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    batch_key: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("referral_lineage_repair_batches.batch_key", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    original_ledger_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("credit_ledger.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    user_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    entry_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    amount_credits: Mapped[float] = mapped_column(Float, nullable=False)
+    balance_debit_credits: Mapped[float] = mapped_column(Float, nullable=False)
+    unrecovered_credits: Mapped[float] = mapped_column(Float, nullable=False)
+    reversal_ledger_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("credit_ledger.id", ondelete="RESTRICT"),
         nullable=False,
     )
     created_at: Mapped[datetime] = mapped_column(

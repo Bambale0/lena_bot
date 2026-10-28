@@ -17,11 +17,13 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from db.models import (
+    ReferralCreditRepairRow,
     ReferralFinanceRepairRow,
     ReferralLineageRepairBatch,
     ReferralLineageRepairRow,
 )
 from scripts.repair_referral_lineage import (
+    allocate_credit_corrections,
     build_finance_plan,
     build_lineage_plan,
     find_invalid_credit_bonuses,
@@ -43,10 +45,8 @@ def test_referral_lineage_migration_is_current_head() -> None:
     config.set_main_option("script_location", "db/migrations")
     scripts = ScriptDirectory.from_config(config)
 
-    assert scripts.get_heads() == ["054_referral_lineage"]
-    assert scripts.get_revision("054_referral_lineage").down_revision == (
-        "053_wan_kie_primary_fallback"
-    )
+    assert scripts.get_heads() == ["055_referral_credit"]
+    assert scripts.get_revision("055_referral_credit").down_revision == "054_referral_lineage"
 
     source = Path("db/migrations/versions/054_referral_lineage_immutability.py").read_text(
         encoding="utf-8"
@@ -54,10 +54,16 @@ def test_referral_lineage_migration_is_current_head() -> None:
     assert "trg_users_referral_lineage_immutable" in source
     assert "referral repair evidence is append-only" in source
     assert "referral repair batch evidence is immutable" in source
+    credit_source = Path(
+        "db/migrations/versions/055_referral_credit_repair_audit.py"
+    ).read_text(encoding="utf-8")
+    assert "trg_referral_credit_repair_rows_append_only" in credit_source
+    assert "sum(r.unrecovered_credits)" in credit_source
 
     assert ReferralLineageRepairBatch.__table__.c.batch_key.type.length == 64
     assert ReferralLineageRepairRow.__table__.c.user_id.nullable is False
     assert ReferralFinanceRepairRow.__table__.c.reversal_ledger_id.nullable is False
+    assert ReferralCreditRepairRow.__table__.c.reversal_ledger_id.nullable is False
 
     repair_source = Path("scripts/repair_referral_lineage.py").read_text(encoding="utf-8")
     assert "LOCK TABLE transactions, users, credit_ledger" in repair_source
@@ -156,7 +162,7 @@ def test_finance_plan_fails_closed_for_non_null_recipient_transfer() -> None:
         build_finance_plan(lineage_changes, [])
 
 
-def test_invalid_late_bind_credit_bonus_is_detected_fail_closed() -> None:
+def test_invalid_late_bind_credit_bonus_is_selected_for_audited_reversal() -> None:
     users = [
         SimpleNamespace(id=1, tg_id=111),
         SimpleNamespace(id=4, tg_id=444),
@@ -191,6 +197,30 @@ def test_invalid_late_bind_credit_bonus_is_detected_fail_closed() -> None:
     ] == [7, 8]
 
 
+def test_credit_reversal_debits_available_balance_and_records_spent_remainder() -> None:
+    entries = [
+        SimpleNamespace(id=7, user_id=4, delta=5.0),
+        SimpleNamespace(id=8, user_id=4, delta=5.0),
+        SimpleNamespace(id=9, user_id=5, delta=3.0),
+    ]
+
+    allocations = allocate_credit_corrections(entries, {4: 3.0, 5: 10.0})
+
+    assert [
+        (
+            item.original_ledger_id,
+            item.balance_debit_credits,
+            item.unrecovered_credits,
+            item.balance_after_credits,
+        )
+        for item in allocations
+    ] == [
+        (7, 3.0, 2.0, 0.0),
+        (8, 0.0, 5.0, 0.0),
+        (9, 3.0, 0.0, 7.0),
+    ]
+
+
 def _expect_db_error(connection, statement: str) -> None:
     savepoint = connection.begin_nested()
     try:
@@ -213,9 +243,20 @@ def _exercise_postgres_triggers(connection) -> None:
         sa.text("CREATE TABLE transactions (id integer PRIMARY KEY, user_id integer NOT NULL)")
     )
     connection.execute(sa.text("CREATE TABLE referral_commission_ledger (id integer PRIMARY KEY)"))
+    connection.execute(
+        sa.text(
+            "CREATE TABLE credit_ledger ("
+            "id integer PRIMARY KEY, user_id integer NOT NULL REFERENCES users(id))"
+        )
+    )
     migration = importlib.import_module("db.migrations.versions.054_referral_lineage_immutability")
     with Operations.context(MigrationContext.configure(connection)):
         migration.upgrade()
+    credit_migration = importlib.import_module(
+        "db.migrations.versions.055_referral_credit_repair_audit"
+    )
+    with Operations.context(MigrationContext.configure(connection)):
+        credit_migration.upgrade()
 
     connection.execute(
         sa.text(
@@ -228,8 +269,8 @@ def _exercise_postgres_triggers(connection) -> None:
     connection.execute(
         sa.text(
             "INSERT INTO referral_lineage_repair_batches "
-            "(batch_key,operator,reason,status) "
-            "VALUES ('trigger-test','pytest','test','applying')"
+            "(batch_key,operator,reason,status,invalid_credit_credits) "
+            "VALUES ('trigger-test','pytest','test','applying',5)"
         )
     )
     connection.execute(
@@ -272,8 +313,25 @@ def _exercise_postgres_triggers(connection) -> None:
         "DELETE FROM referral_finance_repair_rows WHERE id=1",
     )
     connection.execute(
+        sa.text("INSERT INTO credit_ledger (id,user_id) VALUES (30,2),(31,2)")
+    )
+    connection.execute(
+        sa.text(
+            "INSERT INTO referral_credit_repair_rows "
+            "(batch_key,original_ledger_id,user_id,entry_type,amount_credits,"
+            "balance_debit_credits,unrecovered_credits,reversal_ledger_id) "
+            "VALUES ('trigger-test',30,2,'referral_signup_bonus',5,3,2,31)"
+        )
+    )
+    _expect_db_error(
+        connection,
+        "UPDATE referral_credit_repair_rows SET amount_credits=4 WHERE id=1",
+    )
+    _expect_db_error(connection, "DELETE FROM referral_credit_repair_rows WHERE id=1")
+    connection.execute(
         sa.text(
             "UPDATE referral_lineage_repair_batches SET status='applied', "
+            "balance_debit_credits=3, unrecovered_credits=2, "
             "summary_json='{}', applied_at=now() WHERE batch_key='trigger-test'"
         )
     )
