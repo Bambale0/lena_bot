@@ -2452,3 +2452,49 @@ Steps: [x] root-cause and production preflight; [x] RED/green operator control;
 - Focused capability and no-second-paid-POST regressions pass 85 tests; Ruff and
   diff checks pass. Exact-head protected CI, conversation resolution, auto-merge
   and production revision/health proof remain required.
+
+## 2026-10-28 — guided Grok and Seedance reference composer
+
+- Baseline `9c06bcc3039543edbeab938a72c3c6a7702208cf`; branch
+  `fix/grok-seedance-guided-composer`. A real mobile report showed that the
+  `Оживить фото` launcher resumed a saved text-only Grok draft, while Seedance
+  2.5 exposed raw provider controls and a costly character-replacement preset.
+- Root causes: the launcher only selected an image-capable model for a fully
+  empty draft; Grok text/image capabilities are represented by separate model
+  keys; the Seedance Mini App enhancer injects provider-shaped fields directly
+  into the main form; character replacement is separately advertised in the
+  Mini App, landing site and Telegram picker.
+- Approved outcome: preserve the prompt but make `Оживить фото` enter a real
+  photo/reference path; expose a plain `По тексту / По фото` Grok family switch;
+  present Seedance photos, videos and audio as three guided upload tiles; move
+  optional provider controls under a closed `Дополнительные настройки` section;
+  remove character-replacement discovery from site, Mini App and Telegram while
+  retaining backend compatibility for old jobs.
+- Safety/parity: do not change prices, provider order, payload contracts,
+  credentials, balances, permissions, database schema or paid-generation
+  behavior. Site and Mini App share the React composer; Telegram receives the
+  matching discovery removal. Existing identity-transfer backend handling stays
+  available only for compatibility with already-saved requests.
+- Design direction: **Lilac Noir Guided Composer** — luxury/refined with
+  utilitarian clarity; the three material tiles are the sole new visual anchor.
+  Acceptance includes 390px usability, keyboard/focus semantics, prompt/media
+  preservation, exact quote refresh after model-family switching, collapsed
+  advanced controls and no identity-transfer entry point on public surfaces.
+- Test seams and steps: [x] RED browser tests for quick launch, Grok mode family
+  and Seedance tiles; [x] RED parity tests for public-surface removal; [x] minimal
+  implementation; [x] focused and full local gates; [x] independent review;
+  [ ] protected PR, exact-head CI, merge/autodeploy and public asset/health proof.
+- Verification evidence: 148 frontend unit tests, TypeScript and the Vite
+  production build pass. The final maintained browser gates pass 288/288 UX2,
+  300/300 user journeys and 392/392 four-device E2E cases (980 total). The
+  complete focused backend model/catalog matrix passes across image/video
+  adapters, Telegram navigation, API routing, reference limits, Seedance,
+  Grok, Veo, MiniMax and GPT Image; all 16 identity-compatibility tests pass.
+  Ruff's maintained CI baseline and `git diff --check` pass. The broad Windows
+  backend run retains documented current-main platform/environment failures;
+  protected Linux CI remains the authoritative full-suite gate. The 390px
+  rendered screenshot was inspected with three readable tiles, closed advanced
+  settings, black/lilac styling and no horizontal overflow. Review found and
+  closed the Seedance re-entry/upload defects plus a saved-draft model mutation;
+  the final independent review has no Critical or Important finding. No paid
+  provider request or mutable production control was used for verification.

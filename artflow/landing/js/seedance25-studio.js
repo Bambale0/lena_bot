@@ -69,51 +69,37 @@
     const panel = document.createElement("div");
     panel.dataset.seedance25Studio = "1";
     panel.className = "composer-section";
+    panel.setAttribute("role", "group");
+    panel.setAttribute("aria-label", "Материалы Seedance 2.5");
     panel.innerHTML = `
       <div class="composer-main-settings-head">
         <div>
-          <span>Seedance 2.5</span>
-          <b>Один мультимодальный вход</b>
-          <p>Без референсов — text-to-video. Любое фото, видео или аудио — multimodal references; отдельного first frame режима нет.</p>
+          <span>Seedance 2.5</span><b>Добавьте материалы</b>
+          <p>Можно выбрать фото, видео, аудио или сочетать их. Без файлов видео создаётся только по тексту.</p>
         </div>
       </div>
       <div class="composer-row">
-        <label>
-          <span>Фото-файлы · до 30</span>
+        <label data-s25-material="photo">
+          <span>Фото · до 30</span>
           <input data-s25-image-files type="file" accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp" multiple />
         </label>
-        <label><span>Фото по URL</span><textarea data-s25-image-urls rows="2" placeholder="Одна HTTPS-ссылка на строку"></textarea></label>
-      </div>
-      <div class="composer-row">
-        <label>
-          <span>Видео-файлы · до 10</span>
+        <label data-s25-material="video">
+          <span>Видео · до 10</span>
           <input data-s25-video-files type="file" accept="video/mp4,video/quicktime,video/x-matroska,.mp4,.mov,.mkv" multiple />
         </label>
-        <label><span>Видео по URL</span><textarea data-s25-video-urls rows="2" placeholder="Одна HTTPS-ссылка на строку"></textarea></label>
-      </div>
-      <div class="composer-row">
-        <label>
-          <span>Аудио-файлы · до 10</span>
+        <label data-s25-material="audio">
+          <span>Аудио · до 10</span>
           <input data-s25-audio-files type="file" accept="audio/*,.mp3,.wav,.aac,.m4a,.ogg" multiple />
         </label>
-        <label><span>Аудио по URL</span><textarea data-s25-audio-urls rows="2" placeholder="Одна HTTPS-ссылка на строку"></textarea></label>
       </div>
-      <div class="composer-row">
-        <label><span>Точная длительность 4–30 сек</span><input data-s25-duration type="number" min="4" max="30" /></label>
-        <label><span>Output</span><select data-s25-output><option value="mp4">mp4</option><option value="mov">mov</option></select></label>
-      </div>
-      <div class="composer-row">
-        <label class="check-line"><input data-s25-identity-transfer type="checkbox" /><span>🎭 Замена персонажа</span></label>
-        <small>1–3 фото одного человека задают внешность; 1 исходное видео задаёт только движение и сцену. Качество 480p / 720p выбирается выше.</small>
-      </div>
-      <div class="composer-row">
-        <label class="check-line"><input data-s25-auto-duration type="checkbox" /><span>Auto duration</span></label>
-        <label class="check-line"><input data-s25-generate-audio type="checkbox" checked /><span>Generate audio</span></label>
-      </div>
-      <div class="composer-row">
-        <label class="check-line"><input data-s25-return-frame type="checkbox" /><span>Return last frame</span></label>
-        <label class="check-line"><input data-s25-web-search type="checkbox" /><span>Web search grounding</span></label>
-      </div>
+      <details class="composer-disclosure"><summary>Дополнительные настройки</summary><div class="composer-disclosure-body">
+        <p>Качество 480p / 720p / 1080p выбирается в общих параметрах.</p>
+        <div class="composer-row"><label><span>Фото по ссылкам</span><textarea data-s25-image-urls rows="2" placeholder="Одна HTTPS-ссылка на строку"></textarea></label></div>
+        <div class="composer-row"><label><span>Видео по ссылкам</span><textarea data-s25-video-urls rows="2" placeholder="Одна HTTPS-ссылка на строку"></textarea></label><label><span>Аудио по ссылкам</span><textarea data-s25-audio-urls rows="2" placeholder="Одна HTTPS-ссылка на строку"></textarea></label></div>
+        <div class="composer-row"><label><span>Точная длительность 4–30 сек</span><input data-s25-duration type="number" min="4" max="30" /></label><label><span>Формат файла</span><select data-s25-output><option value="mp4">MP4</option><option value="mov">MOV</option></select></label></div>
+        <div class="composer-row"><label class="check-line"><input data-s25-auto-duration type="checkbox" /><span>Автоматическая длительность</span></label><label class="check-line"><input data-s25-generate-audio type="checkbox" checked /><span>Создавать звук</span></label></div>
+        <div class="composer-row"><label class="check-line"><input data-s25-return-frame type="checkbox" /><span>Вернуть последний кадр</span></label><label class="check-line"><input data-s25-web-search type="checkbox" /><span>Использовать поиск в интернете</span></label></div>
+      </div></details>
     `;
     body.appendChild(panel);
 
@@ -200,27 +186,16 @@
     body.image_url = allImages[0] || null;
     body.reference_urls = allImages.slice(1);
 
-    const identityTransfer = Boolean(panel?.querySelector("[data-s25-identity-transfer]")?.checked);
     const primaryVideo = String(body.video_url || "").trim();
     const allVideos = unique([primaryVideo, ...videoUrls, ...uploadedVideos]).slice(0, 10);
     body.video_url = allVideos[0] || null;
-
-    if (identityTransfer) {
-      if (allImages.length < 1 || allImages.length > 3) {
-        throw new Error("Замена персонажа: загрузите 1–3 фото одного человека.");
-      }
-      if (allVideos.length !== 1) {
-        throw new Error("Замена персонажа: нужен ровно один исходный видеоролик.");
-      }
-    }
 
     const existingAudio = Array.isArray(body.audio_ids) ? body.audio_ids.map(String) : [];
     const allAudios = unique([...existingAudio, ...audioUrls, ...uploadedAudios]).slice(0, 10);
 
     const controls = [
       token("output_format", panel?.querySelector("[data-s25-output]")?.value === "mov" ? "mov" : "mp4"),
-      token("generate_audio", identityTransfer ? false : Boolean(panel?.querySelector("[data-s25-generate-audio]")?.checked)),
-      token("identity_transfer", identityTransfer),
+      token("generate_audio", Boolean(panel?.querySelector("[data-s25-generate-audio]")?.checked)),
       token("return_last_frame", Boolean(panel?.querySelector("[data-s25-return-frame]")?.checked)),
       token("web_search", Boolean(panel?.querySelector("[data-s25-web-search]")?.checked)),
       ...allVideos.slice(1).map((ref) => token("video_ref", ref)),

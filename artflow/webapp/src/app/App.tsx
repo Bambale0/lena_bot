@@ -73,7 +73,7 @@ import type {
 import { firstMedia, isPendingTask, safeExternalUrl } from "@/lib/utils";
 import { saveDownload } from "@/lib/download";
 
-window.__APIX_MINIAPP_BUILD_ID__ = "20261028-lilac-nav-medallions-r5";
+window.__APIX_MINIAPP_BUILD_ID__ = "20261028-guided-video-composer-r6";
 
 type FeedSource = "recent" | "top_day" | "top";
 type VideoQuote = Awaited<ReturnType<MiniAppApi["quoteVideo"]>>;
@@ -1284,9 +1284,17 @@ function App() {
 
   const navigateStudio = (tab: AppTab) => {
     // The quick action promises photo-to-video, not a generic text-only form.
-    if (tab === "video" && videoDraft.promptId === null && !hasDraftInput(videoDraft) && !photoQueue.hasPending()) {
-      const model = data.videoModels.find(row => row.key === videoDraft.model && row.modes?.includes("image")) || data.videoModels.find(row => row.modes?.includes("image"));
-      if (model) setVideoDraft(current => ({ ...switchDraftModel(current, model), mode: "image" }));
+    if (tab === "video" && videoDraft.promptId === null && !photoQueue.hasPending()) {
+      const current = data.videoModels.find(row => row.key === videoDraft.model);
+      const currentSupportsPhoto = current?.modes?.includes("image") || current?.modes?.includes("multimodal") || current?.auto_route_by_inputs === true;
+      const pairedGrok = current?.key === "grok-imagine/text-to-video"
+        ? data.videoModels.find(row => row.key === "grok-imagine/image-to-video")
+        : undefined;
+      const model = currentSupportsPhoto ? current : pairedGrok || data.videoModels.find(row => row.modes?.includes("image") || row.modes?.includes("multimodal") || row.auto_route_by_inputs === true);
+      if (model) setVideoDraft(current => ({
+        ...switchDraftModel(current, model),
+        mode: model.modes?.includes("image") ? "image" : "text",
+      }));
     }
     setActiveTab(tab);
   };
@@ -1300,7 +1308,7 @@ function App() {
       }} />}<WorksScreen tasks={data.recentTasks} models={[...data.imageModels, ...data.videoModels]} language={data.user.language} unavailable={data.historyUnavailable} refreshing={worksRefreshing} onOpenTask={openTask} onCreate={() => setActiveTab("create")} onRefresh={() => void refreshWorks()} /></>;
   const screen = (() => {
     if (lilac && api) {
-      if (activeTab === "home") return <LilacHome data={data} drafts={[imageDraft, videoDraft, motionDraft]} onNavigate={navigateStudio} onTask={openTask} />;
+      if (activeTab === "home") return <LilacHome data={data} drafts={[imageDraft, videoDraft, motionDraft]} onNavigate={navigateStudio} onResume={setActiveTab} onTask={openTask} />;
       if (activeTab === "create") return <LilacCreate onNavigate={navigateStudio} />;
       if (activeTab === "ideas") return <LilacIdeas onNavigate={setActiveTab} />;
       if (activeTab === "assistant") return <LilacAssistant messages={assistantMessages} busy={assistantBusy} onSend={message => void sendAssistant(message)} />;

@@ -51,6 +51,8 @@ const GEMINI_MAX_TRIM_SECONDS = 10;
 const GEMINI_MAX_SEED = 2_147_483_647;
 const SEEDANCE_20_MODELS = new Set(["bytedance/seedance-2", "bytedance/seedance-2-fast", "bytedance/seedance-2-mini"]);
 const SEEDANCE_25_MODEL = "bytedance/seedance-2-5";
+const GROK_TEXT_VIDEO_MODEL = "grok-imagine/text-to-video";
+const GROK_IMAGE_VIDEO_MODEL = "grok-imagine/image-to-video";
 const WAN30_MODELS = new Set(["wan/3-0-video", "wan/3-0-video-prime"]);
 const KLING_3_MODELS = new Set(["kling-3.0/video", "kling/v3-turbo-text-to-video", "kling/v3-turbo-image-to-video"]);
 
@@ -186,6 +188,12 @@ function GenerationScreen({
       : models.filter((model) => !model.modes?.includes("motion") && !/motion-control/i.test(model.key)
         && (model.key !== KLING4_KEYFRAME || draft.model === KLING4_KEYFRAME));
   const selectedModel = availableModels.find((model) => model.key === draft.model) || (ux2 && draft.model ? undefined : availableModels[0]);
+  const grokTextModel = availableModels.find((model) => model.key === GROK_TEXT_VIDEO_MODEL);
+  const grokImageModel = availableModels.find((model) => model.key === GROK_IMAGE_VIDEO_MODEL);
+  const grokPairedComposer = kind === "video" && Boolean(
+    grokTextModel && grokImageModel &&
+    (selectedModel?.key === GROK_TEXT_VIDEO_MODEL || selectedModel?.key === GROK_IMAGE_VIDEO_MODEL),
+  );
   const kling4Selected = isKling4(selectedModel?.key || "");
   const isWan30 = kind === "video" && WAN30_MODELS.has(selectedModel?.key || "");
   const [wanQuote, setWanQuote] = useState<{
@@ -238,7 +246,9 @@ function GenerationScreen({
     return () => { disposed = true; window.clearTimeout(timer); };
   }, [isWan30, onQuoteWan, wanQuoteKey, draft.model, draft.mode, draft.videoUrl, draft.referenceUrls.length]);
   const mediaInspection = inspectDraftMedia(storedDraft, selectedModel);
-  const modes = selectedModel?.modes?.length ? selectedModel.modes : [kind === "motion" ? "motion" : "text"];
+  const modes = grokPairedComposer
+    ? ["text", "image"]
+    : selectedModel?.modes?.length ? selectedModel.modes : [kind === "motion" ? "motion" : "text"];
   const ratioModes = selectedModel?.aspect_ratio_modes?.length ? selectedModel.aspect_ratio_modes : modes;
   const ratios = ratioModes.includes(draft.mode) && selectedModel?.aspect_ratios?.length ? selectedModel.aspect_ratios : [];
   const qualities = selectedModel?.quality_options?.length ? selectedModel.quality_options : [];
@@ -366,6 +376,12 @@ function GenerationScreen({
   };
 
   const changeMode = (mode: string) => {
+    if (grokPairedComposer && (mode === "text" || mode === "image")) {
+      const pairedModel = mode === "image" ? grokImageModel : grokTextModel;
+      if (!pairedModel || mediaUploading || submitting) return;
+      syncSelectedModel(pairedModel.key);
+      return;
+    }
     if (preserveMedia) {
       if (mediaUploading || submitting || !modes.includes(mode)) return;
       onChange({ mode });
@@ -436,8 +452,8 @@ function GenerationScreen({
             {!kling4Selected && (modes.length > 1 || kind !== "image") ? (
               <LabeledChips label="Режим">
                 {modes.map((mode) => (
-                  <button key={mode} type="button" className={cn(chipClass(draft.mode === mode), "shrink-0")} disabled={preserveMedia && (mediaUploading || submitting)} onClick={() => changeMode(mode)}>
-                    {modeLabel(mode)}
+                  <button key={mode} type="button" aria-pressed={draft.mode === mode} className={cn(chipClass(draft.mode === mode), "shrink-0")} disabled={preserveMedia && (mediaUploading || submitting)} onClick={() => changeMode(mode)}>
+                    {grokPairedComposer ? (mode === "image" ? "По фото" : "По тексту") : modeLabel(mode)}
                   </button>
                 ))}
               </LabeledChips>
@@ -463,7 +479,7 @@ function GenerationScreen({
               <div className="apix-uploader-card grid min-w-0 gap-2 rounded-xl border border-border/75 bg-card/40 p-2">
                 <div className="apix-uploader-head flex min-w-0 flex-wrap items-center justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="text-xs font-semibold">{kind === "motion" ? "Фото персонажа" : `Референсы · до ${maxRefs}`}</p>
+                    <p className="text-xs font-semibold">{kind === "motion" ? "Фото персонажа" : kind === "video" ? `Фото · до ${maxRefs}` : `Референсы · до ${maxRefs}`}</p>
                     <p className="text-[10px] text-muted-foreground">Загрузи фото с устройства. Ссылки вставлять не нужно.</p>
                   </div>
                   <label className={cn(chipClass(Boolean(remainingRefs) && !referenceUploading), "inline-flex shrink-0 cursor-pointer items-center gap-1.5") }>

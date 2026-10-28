@@ -153,11 +153,13 @@ async def test_identity_transfer_runtime_keeps_selected_resolution_and_assigns_r
     assert "keep the source outfit" in kwargs["prompt"]
 
 
-def test_telegram_seedance_identity_mode_and_quality_choices_are_explicit() -> None:
+def test_telegram_seedance_identity_mode_is_not_publicly_advertised() -> None:
     mode_markup = video_mode_kb(seedance25_adapter.MODEL_KEY)
-    assert f"vid_mode:identity:{seedance25_adapter.MODEL_KEY}" in _callbacks(mode_markup)
-    assert any("Замена персонажа" in text for text in _texts(mode_markup))
+    assert f"vid_mode:identity:{seedance25_adapter.MODEL_KEY}" not in _callbacks(mode_markup)
+    assert not any("Замена персонажа" in text for text in _texts(mode_markup))
 
+
+def test_telegram_seedance_identity_legacy_state_keeps_quality_choices() -> None:
     params = video_params_kb(
         seedance25_adapter.MODEL_KEY,
         30,
@@ -174,21 +176,21 @@ def test_telegram_seedance_identity_mode_and_quality_choices_are_explicit() -> N
     assert not any(value.startswith("vpar_ratio:") for value in callbacks)
 
 
-def test_miniapp_seedance_identity_preset_is_user_selectable() -> None:
+def test_miniapp_seedance_identity_preset_is_not_publicly_selectable() -> None:
     source = Path("webapp/src/lib/seedance25-miniapp-enhancer.ts").read_text(encoding="utf-8")
 
-    assert 'data-seedance25="identityTransfer"' in source
-    assert 'token("identity_transfer", options.identityTransfer)' in source
-    assert "1–3" in source
+    assert 'data-seedance25="identityTransfer"' not in source
+    assert 'token("identity_transfer", options.identityTransfer)' not in source
+    assert "Замена персонажа" not in source
     assert "480p" in source and "720p" in source
 
 
-def test_website_seedance_identity_preset_is_user_selectable() -> None:
+def test_website_seedance_identity_preset_is_not_publicly_selectable() -> None:
     source = Path("landing/js/seedance25-studio.js").read_text(encoding="utf-8")
 
-    assert "data-s25-identity-transfer" in source
-    assert 'token("identity_transfer"' in source
-    assert "1–3" in source
+    assert "data-s25-identity-transfer" not in source
+    assert 'token("identity_transfer"' not in source
+    assert "Замена персонажа" not in source
     assert "480p" in source and "720p" in source
 
 

@@ -89,7 +89,7 @@ test("standalone Seedance 2.5 exact repeat keeps reader photo upload without gen
   expect(launches[0]).toMatchObject({ duration: 10, duration_override: 15, quoted_credits: 30 });
 });
 
-test("standalone Seedance 2.5 ordinary generation retains its multimodal controls", async ({ page }) => {
+test("standalone Seedance 2.5 keeps guided materials and working advanced controls", async ({ page }) => {
   await fixture(page);
   const launches: Record<string, unknown>[] = [];
   await page.route("**/api/web/generate/video/quote", r => r.fulfill({ json: { ok: true, data: { cost_credits: 20, can_run: true } } }));
@@ -103,6 +103,10 @@ test("standalone Seedance 2.5 ordinary generation retains its multimodal control
   if (await optional.getAttribute("open") === null) await optional.locator(":scope > summary").click();
   await expect(page.locator("[data-seedance25-studio]")).toBeVisible();
   await expect(page.locator("[data-reference-section]")).toBeHidden();
+  await expect(page.locator("[data-s25-material]")).toHaveCount(3);
+  const advanced = page.locator("[data-seedance25-studio] > details");
+  await expect(advanced).not.toHaveAttribute("open", "");
+  await advanced.locator(":scope > summary").click();
   await page.locator("textarea[name=prompt]").fill("Cinematic portrait with gentle camera motion");
   await page.locator("[data-s25-image-urls]").fill("https://example.test/ordinary-reader.jpg");
   await page.locator("[data-s25-generate-audio]").uncheck();
