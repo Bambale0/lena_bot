@@ -244,7 +244,8 @@ def _exercise_postgres_triggers(connection) -> None:
             "CREATE TABLE users ("
             "id integer PRIMARY KEY, created_at timestamptz NOT NULL DEFAULT now(), "
             "referrer_id integer, referrer_l2_id integer, referrer_l3_id integer, "
-            "referral_balance double precision NOT NULL DEFAULT 0)"
+            "referral_balance double precision NOT NULL DEFAULT 0, "
+            "credits double precision NOT NULL DEFAULT 0)"
         )
     )
     connection.execute(
@@ -331,6 +332,7 @@ def _exercise_postgres_triggers(connection) -> None:
             "'trigger-test:30')"
         )
     )
+    connection.execute(sa.text("UPDATE users SET credits=5 WHERE id=2"))
     connection.execute(
         sa.text(
             "INSERT INTO referral_credit_repair_rows "
@@ -360,6 +362,14 @@ def _exercise_postgres_triggers(connection) -> None:
         "balance_debit_credits,unrecovered_credits,reversal_ledger_id) "
         "VALUES ('trigger-test',32,2,'referral_signup_bonus',1,-1,2,33)",
     )
+    connection.execute(sa.text("UPDATE credit_ledger SET balance_after=1000 WHERE id=31"))
+    _expect_db_error(
+        connection,
+        "UPDATE referral_lineage_repair_batches SET status='applied', "
+        "balance_debit_credits=3, unrecovered_credits=2, "
+        "summary_json='{}', applied_at=now() WHERE batch_key='trigger-test'",
+    )
+    connection.execute(sa.text("UPDATE credit_ledger SET balance_after=5 WHERE id=31"))
     connection.execute(
         sa.text(
             "UPDATE referral_lineage_repair_batches SET status='applied', "
@@ -383,6 +393,7 @@ def _exercise_postgres_triggers(connection) -> None:
         "balance_debit_credits,unrecovered_credits,reversal_ledger_id) "
         "VALUES ('trigger-test',34,2,'referral_signup_bonus',1,1,0,35)",
     )
+    _expect_db_error(connection, "UPDATE credit_ledger SET delta=0 WHERE id=31")
     _expect_db_error(
         connection,
         "UPDATE referral_lineage_repair_batches SET reason='changed' "

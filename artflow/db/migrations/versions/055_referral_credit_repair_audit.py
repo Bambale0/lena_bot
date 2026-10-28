@@ -175,6 +175,7 @@ def upgrade() -> None:
                             FROM referral_credit_repair_rows r
                             JOIN credit_ledger original ON original.id = r.original_ledger_id
                             JOIN credit_ledger reversal ON reversal.id = r.reversal_ledger_id
+                            JOIN users repaired_user ON repaired_user.id = r.user_id
                             WHERE r.batch_key = NEW.batch_key
                               AND (
                                 original.user_id <> r.user_id
@@ -182,12 +183,22 @@ def upgrade() -> None:
                                 OR abs(original.delta - r.amount_credits) > 0.000001
                                 OR reversal.user_id <> r.user_id
                                 OR reversal.entry_type <> 'referral_bonus_reversal'
-                                OR reversal.source_type <> 'referral_lineage_repair'
-                                OR reversal.source_id <> (
+                                OR reversal.source_type IS DISTINCT FROM 'referral_lineage_repair'
+                                OR reversal.source_id IS DISTINCT FROM (
                                     NEW.batch_key || ':' || r.original_ledger_id::text
                                 )
                                 OR abs(reversal.delta + r.balance_debit_credits) > 0.000001
-                                OR reversal.balance_after < -0.000001
+                                OR abs(
+                                    reversal.balance_after
+                                    - repaired_user.credits
+                                    - COALESCE((
+                                        SELECT sum(later.balance_debit_credits)
+                                        FROM referral_credit_repair_rows later
+                                        WHERE later.batch_key = r.batch_key
+                                          AND later.user_id = r.user_id
+                                          AND later.reversal_ledger_id > r.reversal_ledger_id
+                                      ), 0)
+                                  ) > 0.000001
                               )
                           )
                        OR NEW.summary_json IS NULL
@@ -202,6 +213,36 @@ def upgrade() -> None:
             """
         )
 
+        op.execute(
+            """
+            CREATE OR REPLACE FUNCTION protect_finalized_referral_credit_ledger()
+            RETURNS trigger AS $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1
+                    FROM referral_credit_repair_rows r
+                    JOIN referral_lineage_repair_batches b ON b.batch_key = r.batch_key
+                    WHERE b.status = 'applied'
+                      AND (r.original_ledger_id = OLD.id OR r.reversal_ledger_id = OLD.id)
+                ) THEN
+                    RAISE EXCEPTION 'finalized referral credit evidence is immutable';
+                END IF;
+                IF TG_OP = 'DELETE' THEN
+                    RETURN OLD;
+                END IF;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+            """
+        )
+        op.execute(
+            """
+            CREATE TRIGGER trg_credit_ledger_finalized_referral_evidence
+            BEFORE UPDATE OR DELETE ON credit_ledger
+            FOR EACH ROW EXECUTE FUNCTION protect_finalized_referral_credit_ledger()
+            """
+        )
+
 
 def downgrade() -> None:
     bind = op.get_bind()
@@ -210,6 +251,11 @@ def downgrade() -> None:
             "Cannot downgrade after a referral credit repair: retain immutable audit evidence"
         )
     if bind.dialect.name == "postgresql":
+        op.execute(
+            "DROP TRIGGER IF EXISTS trg_credit_ledger_finalized_referral_evidence "
+            "ON credit_ledger"
+        )
+        op.execute("DROP FUNCTION IF EXISTS protect_finalized_referral_credit_ledger()")
         for table_name in (
             "referral_lineage_repair_rows",
             "referral_finance_repair_rows",
