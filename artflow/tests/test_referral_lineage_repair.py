@@ -172,8 +172,8 @@ def test_finance_plan_fails_closed_for_non_null_recipient_transfer() -> None:
 
 def test_invalid_late_bind_credit_bonus_is_selected_for_audited_reversal() -> None:
     users = [
-        SimpleNamespace(id=1, tg_id=111),
-        SimpleNamespace(id=4, tg_id=444),
+        SimpleNamespace(id=1, tg_id=111, email=None, phone=None),
+        SimpleNamespace(id=4, tg_id=444, email=None, phone=None),
     ]
     invalid_edges = [SimpleNamespace(user_id=1, invalid_referrer_id=4)]
     entries = [
@@ -232,6 +232,28 @@ def test_invalid_late_bind_credit_bonus_is_selected_for_audited_reversal() -> No
     assert [
         entry.id for entry in find_invalid_credit_bonuses(invalid_edges, users, entries)
     ] == [7, 8]
+
+
+def test_contact_signup_bonus_keeps_database_source_after_telegram_binding() -> None:
+    users = [
+        SimpleNamespace(id=1, tg_id=111, email="child@example.test", phone=None),
+        SimpleNamespace(id=4, tg_id=444, email=None, phone=None),
+    ]
+    invalid_edges = [SimpleNamespace(user_id=1, invalid_referrer_id=4)]
+    entries = [
+        SimpleNamespace(
+            id=20,
+            user_id=4,
+            delta=5.0,
+            entry_type="referral_signup_bonus",
+            source_type="user",
+            source_id="1",
+        )
+    ]
+
+    assert [
+        entry.id for entry in find_invalid_credit_bonuses(invalid_edges, users, entries)
+    ] == [20]
 
 
 def test_credit_reversal_debits_available_balance_and_records_spent_remainder() -> None:

@@ -192,12 +192,20 @@ def find_invalid_credit_bonuses(
     for edge in invalid_edges:
         child = by_id[edge.user_id]
         tg_id = int(getattr(child, "tg_id", 0) or 0)
-        signup_source_id = str(tg_id if tg_id > 0 else edge.user_id)
+        signup_source_ids = {str(tg_id)} if tg_id > 0 else set()
+        # Contact-created accounts use their database id while their temporary
+        # Telegram id is negative. They can later bind Telegram, so the current
+        # positive tg_id cannot reconstruct the award-time source by itself.
+        if tg_id <= 0 or getattr(child, "email", None) or getattr(child, "phone", None):
+            signup_source_ids.add(str(edge.user_id))
         invalid_sources.setdefault(edge.invalid_referrer_id, set()).update(
             {
                 ("referral_first_topup_bonus", "referral_user", str(edge.user_id)),
-                ("referral_signup_bonus", "user", signup_source_id),
             }
+        )
+        invalid_sources[edge.invalid_referrer_id].update(
+            ("referral_signup_bonus", "user", source_id)
+            for source_id in signup_source_ids
         )
 
     return [
