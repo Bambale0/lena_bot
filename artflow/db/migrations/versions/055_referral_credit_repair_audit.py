@@ -62,6 +62,10 @@ def upgrade() -> None:
             "original_ledger_id",
             name="uq_referral_credit_repair_original_ledger",
         ),
+        sa.UniqueConstraint(
+            "reversal_ledger_id",
+            name="uq_referral_credit_repair_reversal_ledger",
+        ),
         sa.CheckConstraint(
             "amount_credits > 0",
             name="ck_referral_credit_repair_positive_amount",
@@ -208,6 +212,28 @@ def upgrade() -> None:
                                           AND original.source_id IS NOT DISTINCT FROM invalid_child.tg_id::text
                                         )
                                       )
+                                )
+                                OR (
+                                  original.entry_type = 'referral_signup_bonus'
+                                  AND EXISTS (
+                                    SELECT 1
+                                    FROM users source_owner
+                                    WHERE (
+                                      source_owner.id::text = original.source_id
+                                      OR (
+                                        source_owner.tg_id > 0
+                                        AND source_owner.tg_id::text = original.source_id
+                                      )
+                                    )
+                                    AND NOT EXISTS (
+                                      SELECT 1
+                                      FROM referral_lineage_repair_rows owner_lineage
+                                      WHERE owner_lineage.batch_key = NEW.batch_key
+                                        AND owner_lineage.reason = 'impossible_direct_referrer'
+                                        AND owner_lineage.old_referrer_id = r.user_id
+                                        AND owner_lineage.user_id = source_owner.id
+                                    )
+                                  )
                                 )
                                 OR reversal.user_id <> r.user_id
                                 OR reversal.entry_type <> 'referral_bonus_reversal'

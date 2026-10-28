@@ -556,6 +556,10 @@ class ReferralCreditRepairRow(Base):
             "original_ledger_id",
             name="uq_referral_credit_repair_original_ledger",
         ),
+        UniqueConstraint(
+            "reversal_ledger_id",
+            name="uq_referral_credit_repair_reversal_ledger",
+        ),
         Index("ix_referral_credit_repair_rows_user", "user_id"),
         CheckConstraint(
             "amount_credits > 0",

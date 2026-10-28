@@ -69,6 +69,7 @@ def test_referral_lineage_migration_is_current_head() -> None:
         constraint.name for constraint in ReferralCreditRepairRow.__table__.constraints
     } >= {
         "uq_referral_credit_repair_original_ledger",
+        "uq_referral_credit_repair_reversal_ledger",
         "ck_referral_credit_repair_positive_amount",
         "ck_referral_credit_repair_nonnegative_allocation",
         "ck_referral_credit_repair_allocation_total",
@@ -437,6 +438,22 @@ def _exercise_postgres_triggers(connection) -> None:
         "balance_debit_credits,unrecovered_credits,reversal_ledger_id) "
         "VALUES ('trigger-test',32,2,'referral_signup_bonus',1,-1,2,33)",
     )
+    _expect_db_error(
+        connection,
+        "INSERT INTO referral_credit_repair_rows "
+        "(batch_key,original_ledger_id,user_id,entry_type,amount_credits,"
+        "balance_debit_credits,unrecovered_credits,reversal_ledger_id) "
+        "VALUES ('trigger-test',32,2,'referral_signup_bonus',1,1,0,31)",
+    )
+    connection.execute(sa.text("INSERT INTO users (id,tg_id) VALUES (111,999)"))
+    connection.execute(sa.text("UPDATE credit_ledger SET source_id='111' WHERE id=30"))
+    _expect_db_error(
+        connection,
+        "UPDATE referral_lineage_repair_batches SET status='applied', "
+        "balance_debit_credits=3, unrecovered_credits=2, "
+        "summary_json='{}', applied_at=now() WHERE batch_key='trigger-test'",
+    )
+    connection.execute(sa.text("UPDATE credit_ledger SET source_id='1' WHERE id=30"))
     connection.execute(sa.text("UPDATE credit_ledger SET balance_after=1000 WHERE id=31"))
     _expect_db_error(
         connection,
