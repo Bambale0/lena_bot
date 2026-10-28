@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import redis.asyncio as aioredis
-from sqlalchemy import DateTime, and_, cast, func, or_, select
+from sqlalchemy import DateTime, and_, case, cast, func, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
 
 from api import neironych_seedance_runtime
@@ -138,10 +138,25 @@ def _expired_seedance_query():
     kie_started = func.jsonb_extract_path_text(
         params_json, repo.KIE_VIDEO_SUBMISSION_KEY, "started_at"
     )
-    started = func.coalesce(
-        cast(kie_started, DateTime(timezone=True)),
-        cast(neironych_started, DateTime(timezone=True)),
-        Generation.created_at,
+    neironych_task = or_(
+        Generation.task_id.like("neironych:%"),
+        Generation.task_id.like("web:neironych:%"),
+        Generation.task_id.like("neironych-submit:%"),
+        Generation.task_id.like("web:neironych-submit:%"),
+    )
+    started = case(
+        (
+            neironych_task,
+            func.coalesce(
+                cast(neironych_started, DateTime(timezone=True)),
+                Generation.created_at,
+            ),
+        ),
+        else_=func.coalesce(
+            cast(kie_started, DateTime(timezone=True)),
+            cast(neironych_started, DateTime(timezone=True)),
+            Generation.created_at,
+        ),
     )
     return select(Generation.id).where(
         Generation.gen_type == GenerationType.video,
@@ -814,6 +829,7 @@ async def _resume_rejected_wan_kie_fallback(session, gen: Generation) -> bool:
     from api import wan30_provider
     from api.neironych_seedance import (
         NeironychPreSubmitFailure,
+        NeironychSeedanceError,
         NeironychSubmissionUnknown,
     )
     from core.seedance_reconciliation import (
@@ -855,6 +871,30 @@ async def _resume_rejected_wan_kie_fallback(session, gen: Generation) -> bool:
     except NeironychPreSubmitFailure:
         await session.rollback()
         return False
+    except NeironychSeedanceError as exc:
+        expected_task = (
+            ("web:" if surface == "web" else "")
+            + "neironych-submit:"
+            + context.client_request_id
+        )
+        changed, _ = await repo.fail_generation_and_refund(
+            session,
+            gen_id,
+            str(exc),
+            expected_task_id=expected_task,
+            refund_note="wan:kie_primary:neironych_fallback_rejected",
+            video_notice_kind="failed" if surface != "web" else None,
+        )
+        if changed and surface != "web":
+            try:
+                await _track_active_video_notice_intent(gen_id)
+            except Exception as notice_exc:
+                logger.warning(
+                    "Wan fallback rejection notice retry delayed gen=%s error=%s",
+                    gen_id,
+                    type(notice_exc).__name__,
+                )
+        return changed
     try:
         saved = await persist_submission_result(
             session, gen_id, context, submitted.task_id, surface=surface,

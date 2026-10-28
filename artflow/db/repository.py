@@ -1461,7 +1461,7 @@ async def begin_neironych_fallback_after_kie_rejection(
     now = datetime.now(timezone.utc).isoformat()
     kie.update({
         "state": "definite_rejected_fallback_neironych",
-        "rejected_at": now,
+        "fallback_started_at": now,
     })
     params[KIE_VIDEO_SUBMISSION_KEY] = kie
     params[SEEDANCE_SUBMISSION_KEY] = {

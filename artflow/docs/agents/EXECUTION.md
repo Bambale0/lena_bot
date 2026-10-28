@@ -2319,3 +2319,10 @@ Steps: [x] root-cause and production preflight; [x] RED/green operator control;
   regression covers the durable marker, resumed fallback, result binding and
   exactly-one KIE POST. Production route policy remains `kie_only` until this
   follow-up passes exact-head gates, review, merge and deployment verification.
+- Follow-up PR #318 review identified three recovery correctness gaps. The
+  amendment immediately refunds a resumed Neironych admission rejection under
+  the exact task-id lock, preserves the original KIE `rejected_at` and records
+  `fallback_started_at` separately, and makes the SQL expiry lane use the
+  active Neironych submission clock so recovered rows cannot starve the batch.
+  Focused admission/timeout/recovery coverage passes 132/132; updated-head CI
+  and review remain required before production policy activation.
