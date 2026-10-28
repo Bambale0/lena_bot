@@ -1,4 +1,20 @@
-(() => {
+// Review and submission share the same ordering, deduplication and limits.
+function seedance25MaterialSelection(existing, panel, files) {
+  const merge = (kind, selector, limit) => {
+    const links = String(panel?.querySelector(selector)?.value || "")
+      .split(/\r?\n|,/).map((item) => item.trim()).filter(Boolean).slice(0, limit);
+    return [...new Set([
+      ...(existing[kind] || []), ...links, ...(files[kind] || []).slice(0, limit),
+    ].filter(Boolean))].slice(0, limit);
+  };
+  return {
+    images: merge("images", "[data-s25-image-urls]", 30),
+    videos: merge("videos", "[data-s25-video-urls]", 10),
+    audios: merge("audios", "[data-s25-audio-urls]", 10),
+  };
+}
+
+const composerMaterialReview = (() => {
   "use strict";
 
   const MODEL = "bytedance/seedance-2-5";
@@ -7,9 +23,85 @@
   const TOKEN_PREFIX = "__apix_seedance25:";
   const originalFetch = window.fetch.bind(window);
 
-  let imageFiles = [];
-  let videoFiles = [];
-  let audioFiles = [];
+  let preparation = null;
+
+  function panelFiles(panel) {
+    const files = (selector, limit) => Array.from(panel?.querySelector(selector)?.files || []).slice(0, limit);
+    return {
+      images: files("[data-s25-image-files]", 30),
+      videos: files("[data-s25-video-files]", 10),
+      audios: files("[data-s25-audio-files]", 10),
+    };
+  }
+
+  function selectionSnapshot(form) {
+    const panel = form?.querySelector("[data-seedance25-studio]");
+    return [
+      state.authEpoch, state.user?.id, state.token, state.generationKind,
+      state.routeModelKey, state.routeFeedRemixId, state.routeSourceReferenceUrl,
+      panel, panel?.hidden,
+      ...Array.from(form.querySelectorAll("input, select, textarea")).flatMap((field) => [
+        // Ratio availability is derived from the uploaded URLs, not user input.
+        field, field.name === "aspect_ratio" ? null : field.disabled,
+        field.value, field.checked, ...Array.from(field.files || []),
+      ]),
+    ];
+  }
+
+  function matchesSelection(candidate) {
+    if (!candidate) return false;
+    const current = selectionSnapshot(candidate.form);
+    return current.length === candidate.snapshot.length
+      && current.every((value, index) => value === candidate.snapshot[index]);
+  }
+
+  function referenceUrl(file, channel, init) {
+    if (!matchesSelection(preparation)) return null;
+    if (init && (authHeaders(init)["X-Web-Auth-Token"] || "") !== preparation.token) return null;
+    return preparation[channel].get(file) || null;
+  }
+
+  async function prepareReview(form, { signal } = {}) {
+    preparation = null;
+    const candidate = {
+      form, snapshot: selectionSnapshot(form), token: state.token || "",
+      generic: new Map(), panel: new Map(),
+    };
+    const assertCurrent = () => {
+      if (signal?.aborted) throw new DOMException("Upload timed out", "AbortError");
+      if (!matchesSelection(candidate)) throw new Error("Материалы или параметры изменились. Проверьте их ещё раз.");
+    };
+    for (const file of referenceFiles(form)) {
+      assertCurrent();
+      candidate.generic.set(file, await uploadReference(file, { signal }));
+    }
+    const files = panelFiles(form.querySelector("[data-seedance25-studio]:not([hidden])"));
+    const init = { headers: candidate.token ? { "X-Web-Auth-Token": candidate.token } : {}, signal };
+    for (const file of [...files.images, ...files.videos, ...files.audios]) {
+      assertCurrent();
+      candidate.panel.set(file, await upload(file, init));
+    }
+    assertCurrent();
+    preparation = candidate;
+  }
+
+  function preparedReferences(form) {
+    if (preparation?.form !== form || !matchesSelection(preparation)) return null;
+    return uniqueSafeUrls([
+      ...referenceFiles(form).map((file) => preparation.generic.get(file)), ...referenceLinkValues(form),
+    ]);
+  }
+
+  function preparedMaterials(form) {
+    const references = preparedReferences(form);
+    if (!references) return null;
+    const panel = form.querySelector("[data-seedance25-studio]:not([hidden])");
+    const files = panelFiles(panel);
+    return seedance25MaterialSelection({
+      images: references,
+      videos: [selectedOptionValue(form, "video_url")],
+    }, panel, Object.fromEntries(Object.entries(files).map(([kind, items]) => [kind, items.map((file) => preparation.panel.get(file))])));
+  }
 
   function modelSelect() {
     return document.querySelector("[data-account-model-select]");
@@ -29,14 +121,6 @@
 
   function token(key, value) {
     return `${TOKEN_PREFIX}${key}=${String(value)}`;
-  }
-
-  function lines(value, limit) {
-    return String(value || "")
-      .split(/\r?\n|,/)
-      .map((item) => item.trim())
-      .filter(Boolean)
-      .slice(0, limit);
   }
 
   function genericSeedModeLabel() {
@@ -63,69 +147,49 @@
       return;
     }
 
-    const body = document.querySelector("[data-optional-section] .composer-disclosure-body");
-    if (!body) return;
+    const composer = document.querySelector(".account-composer");
+    const intro = composer?.querySelector(".composer-section-intro");
+    const referenceSection = composer?.querySelector("[data-reference-section]");
+    if (!composer || (!intro && !referenceSection)) return;
 
     const panel = document.createElement("div");
     panel.dataset.seedance25Studio = "1";
     panel.className = "composer-section";
+    panel.setAttribute("role", "group");
+    panel.setAttribute("aria-label", "Материалы Seedance 2.5");
     panel.innerHTML = `
       <div class="composer-main-settings-head">
         <div>
-          <span>Seedance 2.5</span>
-          <b>Один мультимодальный вход</b>
-          <p>Без референсов — text-to-video. Любое фото, видео или аудио — multimodal references; отдельного first frame режима нет.</p>
+          <span>Seedance 2.5</span><b>Добавьте материалы</b>
+          <p>Можно выбрать фото, видео, аудио или сочетать их. Без файлов видео создаётся только по тексту.</p>
         </div>
       </div>
       <div class="composer-row">
-        <label>
-          <span>Фото-файлы · до 30</span>
+        <label data-s25-material="photo">
+          <span>Фото · до 30</span>
           <input data-s25-image-files type="file" accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp" multiple />
         </label>
-        <label><span>Фото по URL</span><textarea data-s25-image-urls rows="2" placeholder="Одна HTTPS-ссылка на строку"></textarea></label>
-      </div>
-      <div class="composer-row">
-        <label>
-          <span>Видео-файлы · до 10</span>
+        <label data-s25-material="video">
+          <span>Видео · до 10</span>
           <input data-s25-video-files type="file" accept="video/mp4,video/quicktime,video/x-matroska,.mp4,.mov,.mkv" multiple />
         </label>
-        <label><span>Видео по URL</span><textarea data-s25-video-urls rows="2" placeholder="Одна HTTPS-ссылка на строку"></textarea></label>
-      </div>
-      <div class="composer-row">
-        <label>
-          <span>Аудио-файлы · до 10</span>
+        <label data-s25-material="audio">
+          <span>Аудио · до 10</span>
           <input data-s25-audio-files type="file" accept="audio/*,.mp3,.wav,.aac,.m4a,.ogg" multiple />
         </label>
-        <label><span>Аудио по URL</span><textarea data-s25-audio-urls rows="2" placeholder="Одна HTTPS-ссылка на строку"></textarea></label>
       </div>
-      <div class="composer-row">
-        <label><span>Точная длительность 4–30 сек</span><input data-s25-duration type="number" min="4" max="30" /></label>
-        <label><span>Output</span><select data-s25-output><option value="mp4">mp4</option><option value="mov">mov</option></select></label>
-      </div>
-      <div class="composer-row">
-        <label class="check-line"><input data-s25-identity-transfer type="checkbox" /><span>🎭 Замена персонажа</span></label>
-        <small>1–3 фото одного человека задают внешность; 1 исходное видео задаёт только движение и сцену. Качество 480p / 720p выбирается выше.</small>
-      </div>
-      <div class="composer-row">
-        <label class="check-line"><input data-s25-auto-duration type="checkbox" /><span>Auto duration</span></label>
-        <label class="check-line"><input data-s25-generate-audio type="checkbox" checked /><span>Generate audio</span></label>
-      </div>
-      <div class="composer-row">
-        <label class="check-line"><input data-s25-return-frame type="checkbox" /><span>Return last frame</span></label>
-        <label class="check-line"><input data-s25-web-search type="checkbox" /><span>Web search grounding</span></label>
-      </div>
+      <details class="composer-disclosure"><summary>Дополнительные настройки</summary><div class="composer-disclosure-body">
+        <p>Качество 480p / 720p / 1080p выбирается в общих параметрах.</p>
+        <div class="composer-row"><label><span>Фото по ссылкам</span><textarea data-s25-image-urls rows="2" placeholder="Одна HTTPS-ссылка на строку"></textarea></label></div>
+        <div class="composer-row"><label><span>Видео по ссылкам</span><textarea data-s25-video-urls rows="2" placeholder="Одна HTTPS-ссылка на строку"></textarea></label><label><span>Аудио по ссылкам</span><textarea data-s25-audio-urls rows="2" placeholder="Одна HTTPS-ссылка на строку"></textarea></label></div>
+        <div class="composer-row"><label><span>Точная длительность 4–30 сек</span><input data-s25-duration type="number" min="4" max="30" /></label><label><span>Формат файла</span><select data-s25-output><option value="mp4">MP4</option><option value="mov">MOV</option></select></label></div>
+        <div class="composer-row"><label class="check-line"><input data-s25-auto-duration type="checkbox" /><span>Автоматическая длительность</span></label><label class="check-line"><input data-s25-generate-audio type="checkbox" checked /><span>Создавать звук</span></label></div>
+        <div class="composer-row"><label class="check-line"><input data-s25-return-frame type="checkbox" /><span>Вернуть последний кадр</span></label><label class="check-line"><input data-s25-web-search type="checkbox" /><span>Использовать поиск в интернете</span></label></div>
+      </div></details>
     `;
-    body.appendChild(panel);
+    if (intro) intro.insertAdjacentElement("afterend", panel);
+    else referenceSection.insertAdjacentElement("beforebegin", panel);
 
-    panel.querySelector("[data-s25-image-files]")?.addEventListener("change", (event) => {
-      imageFiles = Array.from(event.currentTarget.files || []).slice(0, 30);
-    });
-    panel.querySelector("[data-s25-video-files]")?.addEventListener("change", (event) => {
-      videoFiles = Array.from(event.currentTarget.files || []).slice(0, 10);
-    });
-    panel.querySelector("[data-s25-audio-files]")?.addEventListener("change", (event) => {
-      audioFiles = Array.from(event.currentTarget.files || []).slice(0, 10);
-    });
   }
 
   function generationUrl(input) {
@@ -143,6 +207,8 @@
   }
 
   async function upload(file, init) {
+    const prepared = referenceUrl(file, "panel", init);
+    if (prepared) return prepared;
     const form = new FormData();
     form.append("file", file);
     const response = await originalFetch(UPLOAD_PATH, {
@@ -150,6 +216,7 @@
       body: form,
       credentials: "same-origin",
       headers: authHeaders(init),
+      signal: init?.signal,
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || payload.detail || `Upload HTTP ${response.status}`);
@@ -157,10 +224,6 @@
     const url = String(data.url || "").trim();
     if (!url) throw new Error("Seedance 2.5 upload did not return URL");
     return url;
-  }
-
-  function unique(values) {
-    return values.filter(Boolean).filter((item, index, all) => all.indexOf(item) === index);
   }
 
   window.fetch = async (input, init = {}) => {
@@ -181,46 +244,27 @@
     }
 
     const panel = document.querySelector("[data-seedance25-studio]");
+    const files = panelFiles(panel);
     const uploadedImages = [];
-    for (const file of imageFiles) uploadedImages.push(await upload(file, init));
+    for (const file of files.images) uploadedImages.push(await upload(file, init));
     const uploadedVideos = [];
-    for (const file of videoFiles) uploadedVideos.push(await upload(file, init));
+    for (const file of files.videos) uploadedVideos.push(await upload(file, init));
     const uploadedAudios = [];
-    for (const file of audioFiles) uploadedAudios.push(await upload(file, init));
+    for (const file of files.audios) uploadedAudios.push(await upload(file, init));
 
-    const imageUrls = lines(panel?.querySelector("[data-s25-image-urls]")?.value, 30);
-    const videoUrls = lines(panel?.querySelector("[data-s25-video-urls]")?.value, 10);
-    const audioUrls = lines(panel?.querySelector("[data-s25-audio-urls]")?.value, 10);
-
-    const existingImages = unique([
-      String(body.image_url || "").trim(),
-      ...(Array.isArray(body.reference_urls) ? body.reference_urls.map(String) : []),
-    ]);
-    const allImages = unique([...existingImages, ...imageUrls, ...uploadedImages]).slice(0, 30);
+    const materials = seedance25MaterialSelection({
+      images: [String(body.image_url || "").trim(), ...(Array.isArray(body.reference_urls) ? body.reference_urls.map(String) : [])],
+      videos: [String(body.video_url || "").trim()],
+      audios: Array.isArray(body.audio_ids) ? body.audio_ids.map(String) : [],
+    }, panel, { images: uploadedImages, videos: uploadedVideos, audios: uploadedAudios });
+    const { images: allImages, videos: allVideos, audios: allAudios } = materials;
     body.image_url = allImages[0] || null;
     body.reference_urls = allImages.slice(1);
-
-    const identityTransfer = Boolean(panel?.querySelector("[data-s25-identity-transfer]")?.checked);
-    const primaryVideo = String(body.video_url || "").trim();
-    const allVideos = unique([primaryVideo, ...videoUrls, ...uploadedVideos]).slice(0, 10);
     body.video_url = allVideos[0] || null;
-
-    if (identityTransfer) {
-      if (allImages.length < 1 || allImages.length > 3) {
-        throw new Error("Замена персонажа: загрузите 1–3 фото одного человека.");
-      }
-      if (allVideos.length !== 1) {
-        throw new Error("Замена персонажа: нужен ровно один исходный видеоролик.");
-      }
-    }
-
-    const existingAudio = Array.isArray(body.audio_ids) ? body.audio_ids.map(String) : [];
-    const allAudios = unique([...existingAudio, ...audioUrls, ...uploadedAudios]).slice(0, 10);
 
     const controls = [
       token("output_format", panel?.querySelector("[data-s25-output]")?.value === "mov" ? "mov" : "mp4"),
-      token("generate_audio", identityTransfer ? false : Boolean(panel?.querySelector("[data-s25-generate-audio]")?.checked)),
-      token("identity_transfer", identityTransfer),
+      token("generate_audio", Boolean(panel?.querySelector("[data-s25-generate-audio]")?.checked)),
       token("return_last_frame", Boolean(panel?.querySelector("[data-s25-return-frame]")?.checked)),
       token("web_search", Boolean(panel?.querySelector("[data-s25-web-search]")?.checked)),
       ...allVideos.slice(1).map((ref) => token("video_ref", ref)),
@@ -244,6 +288,7 @@
   new MutationObserver(ensurePanel).observe(document.documentElement, { childList: true, subtree: true });
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", ensurePanel);
   else ensurePanel();
+  return { prepare: prepareReview, references: preparedReferences, materials: preparedMaterials, referenceUrl };
 })();
 
 // Suno source-audio product surface. It lives in this already-loaded Studio

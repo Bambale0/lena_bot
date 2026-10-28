@@ -22,6 +22,7 @@ const state = {
   activeExample: 0,
   modelType: "all",
   generationKind: "image",
+  videoScenarioMode: "text",
   queue: [],
   history: [],
   prompts: [],
@@ -2000,17 +2001,52 @@ function currentModel() {
   return currentModelGroup()?.preferred || modelsForCurrentKind()[0] || null;
 }
 
+function grokVideoPair(model = currentModel()) {
+  const variants = model?.variants?.length ? model.variants : [model].filter(Boolean);
+  const baseKey = (item) => String(item?.key || "").replace(/__.+$/, "");
+  const text = variants.filter((item) => baseKey(item) === "grok-imagine/text-to-video")
+    .sort((left, right) => String(left.key).includes("__") - String(right.key).includes("__"))[0];
+  const image = variants.filter((item) => baseKey(item) === "grok-imagine/image-to-video")
+    .sort((left, right) => String(left.key).includes("__") - String(right.key).includes("__"))[0];
+  return text && image ? { text, image } : null;
+}
+
+function selectedGrokVideoMode(form = document.querySelector(".account-composer"), model = currentModel()) {
+  if (state.generationKind !== "video" || !grokVideoPair(model)) return "";
+  const sourceModel = String(state.feedRepeat?.source?.model || state.routeModelKey || "");
+  if (isFeedRemixMode()) {
+    if (/grok-imagine\/image-to-video/.test(sourceModel)) return "image";
+    if (/grok-imagine\/text-to-video/.test(sourceModel)) return "text";
+  }
+  const input = form?.querySelector("[name='video_mode']");
+  const value = String((input && !input.disabled ? input.value : "") || state.videoScenarioMode || "text");
+  return value === "image" ? "image" : "text";
+}
+
+function currentRequestModel(form = document.querySelector(".account-composer")) {
+  const model = currentModel();
+  const pair = grokVideoPair(model);
+  if (!pair || state.generationKind !== "video") return model;
+  return pair[selectedGrokVideoMode(form, model)] || model;
+}
+
 function applyRouteParams() {
   const params = new URLSearchParams(location.search);
   const kind = params.get("type");
   if (["image", "video", "music"].includes(kind)) state.generationKind = kind;
   state.routeModelKey = params.get("model") || "";
+  state.videoScenarioMode = state.generationKind === "video" && /grok-imagine\/image-to-video/.test(state.routeModelKey)
+    ? "image"
+    : "text";
   state.routePrompt = params.get("prompt") || "";
   state.routeReferenceUrl = params.get("ref") || "";
   state.routeReferenceUrls = uniqueSafeUrls([
     state.routeReferenceUrl,
     ...splitReferenceLinks(params.get("refs") || ""),
   ]);
+  if (state.generationKind === "video" && state.routeReferenceUrls.length && /grok-imagine\/(?:text|image)-to-video/.test(state.routeModelKey)) {
+    state.videoScenarioMode = "image";
+  }
   state.routeSourceReferenceUrl = params.get("source_ref") || "";
   state.routeFeedRemixId = params.get("feed_remix") || "";
   const flow = params.get("flow");
@@ -2203,6 +2239,9 @@ async function loadFeedRepeat() {
   state.feedRepeat = { scope, authEpoch, source, override: null, offer: null, historyChecked: false, historyText: "" };
   state.generationKind = "video";
   state.routeModelKey = source.model;
+  if (/grok-imagine\/(?:text|image)-to-video/.test(String(source.model || ""))) {
+    state.videoScenarioMode = /grok-imagine\/image-to-video/.test(String(source.model || "")) ? "image" : "text";
+  }
   state.routeSourceReferenceUrl = "";
 }
 
@@ -2370,8 +2409,12 @@ function syncStudioSubpages() {
   });
 
   $$("[data-reference-section]").forEach((section) => {
-    section.hidden = !current.showReference;
-    if (current.showReference) section.open = Boolean(current.openReference);
+    const hideForGrokText = state.generationKind === "video"
+      && Boolean(grokVideoPair())
+      && selectedGrokVideoMode(document.querySelector(".account-composer")) === "text"
+      && !isFeedRemixMode();
+    section.hidden = !current.showReference || hideForGrokText;
+    if (current.showReference && !hideForGrokText) section.open = Boolean(current.openReference);
   });
 
   $$("[data-optional-section]").forEach((section) => {
@@ -2397,6 +2440,7 @@ function setGenerationFlow(flow, { updateRoute = false } = {}) {
 
 function setGenerationKind(kind, { updateRoute = false } = {}) {
   state.generationKind = ["image", "video", "music"].includes(kind) ? kind : "image";
+  state.videoScenarioMode = "text";
   if (state.generationKind === "image" && !state.routeFlow) state.routeFlow = "text";
   state.routeModelKey = "";
   state.routeFeedRemixId = "";
@@ -2554,6 +2598,25 @@ function syncDisclosureContentVisibility() {
   });
 }
 
+function preparedReferenceUrls(form) {
+  return typeof composerMaterialReview === "undefined" ? null : composerMaterialReview.references(form);
+}
+
+function composerAspectRatioAllowed(model, form, refCount = preparedReferenceUrls(form)?.length ?? referenceFiles(form).length + referenceLinkValues(form).length) {
+  if (state.generationKind === "music") return false;
+  if (state.generationKind !== "video" || !model?.aspectRatioMinRefs) return true;
+  const mode = selectedGrokVideoMode(form)
+    || (selectedOptionValue(form, "video_url") ? "video" : refCount ? "image" : model?.modes?.[0] || "text");
+  return mode !== "image" || refCount >= model.aspectRatioMinRefs;
+}
+
+function syncReferenceAspectRatio(form) {
+  setComposerControl("aspect_ratio", composerAspectRatioAllowed(currentRequestModel(form), form));
+  syncComposerRows();
+  syncFeedRepeatControls();
+  refreshCustomSelects();
+}
+
 function syncControlVisibility(model) {
   const kind = state.generationKind;
   const source = `${model?.key || ""} ${model?.name || ""}`.toLowerCase();
@@ -2561,7 +2624,6 @@ function syncControlVisibility(model) {
   const hasCounts = Boolean(model?.counts?.length && model.counts.length > 1);
   const isGrok = source.includes("grok");
 
-  setComposerControl("aspect_ratio", kind !== "music");
   setComposerControl("quality", kind !== "music");
   setComposerControl("count", hasCounts);
   setComposerControl("duration", kind === "video");
@@ -2570,6 +2632,7 @@ function syncControlVisibility(model) {
   setComposerControl("reference_urls", kind !== "music");
   setComposerControl("reference_file", kind !== "music");
   setComposerControl("video_url", kind === "video");
+  setComposerControl("aspect_ratio", composerAspectRatioAllowed(model, document.querySelector(".account-composer")));
   setComposerControl("seed", isGrok);
   setComposerControl("grok_mode", isGrok);
   setComposerControl("instrumental", kind === "music");
@@ -2596,6 +2659,8 @@ function requestModelForCurrentSetup(model, { referenceUrl = "", videoUrl = "" }
   const variants = model?.variants?.length ? model.variants : [model].filter(Boolean);
   if (!variants.length) return model;
   if (state.generationKind === "video") {
+    const pair = grokVideoPair(model);
+    if (pair) return pair[selectedGrokVideoMode(document.querySelector(".account-composer"), model)] || model;
     if (videoUrl) return variants.find((item) => variantMatches(item, [/video-to-video/, /motion-control/])) || model;
     if (referenceUrl) return variants.find((item) => variantMatches(item, [/image-to-video/, /\/image/, /-image/])) || model;
     return variants.find((item) => variantMatches(item, [/text-to-video/, /\/text/, /-text/])) || model;
@@ -2648,8 +2713,8 @@ function estimateGenerationCost(model = currentModel(), form = document.querySel
 function updateGenerationEstimate() {
   const note = $("[data-generation-note]");
   if (!note) return;
-  const model = currentModel();
   const form = note.closest(".account-composer") || document.querySelector(".account-composer");
+  const model = currentRequestModel(form);
   const estimate = estimateGenerationCost(model, form);
   const name = cleanModelName(model?.name || model?.key || "Выбранный режим");
   note.innerHTML = `
@@ -2663,6 +2728,19 @@ function generationKindLabel(kind = state.generationKind) {
   if (kind === "video") return "Видео";
   if (kind === "music") return "Музыка";
   return "Картинка";
+}
+
+function generationScenarioLabel(form, model = currentModel()) {
+  if (state.generationKind === "image") {
+    return ({ text: "С нуля", reference: "По референсу", edit: "Улучшить фото" }[state.routeFlow || "text"] || "С нуля");
+  }
+  if (state.generationKind !== "video") return "По описанию";
+  const grokMode = selectedGrokVideoMode(form);
+  if (grokMode) return grokMode === "image" ? "По фото" : "По тексту";
+  const seedanceMaterials = seedanceGuidedMaterialSummary(form);
+  if (seedanceMaterials) return seedanceMaterials.total ? "По материалам" : "По тексту";
+  if (selectedComposerValue("video_url", form)) return "По видео";
+  return referenceFiles(form).length || referenceLinkValues(form).length ? "По фото" : "По тексту";
 }
 
 function selectedOptionText(form, name) {
@@ -2785,7 +2863,25 @@ function updatePromptInjectionStatus(form = document.querySelector(".account-com
     : "Акценты не выбраны";
 }
 
+function seedanceGuidedMaterialSummary(form = document.querySelector(".account-composer")) {
+  const panel = form?.querySelector("[data-seedance25-studio]");
+  if (!panel || panel.hidden) return null;
+  const materials = composerMaterialReview.materials(form);
+  if (!materials) return null;
+  const photos = materials.images.length, videos = materials.videos.length, audios = materials.audios.length;
+  const parts = [
+    photos ? `Фото: ${photos}` : "",
+    videos ? `Видео: ${videos}` : "",
+    audios ? `Аудио: ${audios}` : "",
+  ].filter(Boolean);
+  return { photos, videos, audios, total: photos + videos + audios, label: parts.join(" · ") || "без материалов" };
+}
+
 function referenceSummary(form) {
+  const seedanceMaterials = seedanceGuidedMaterialSummary(form);
+  if (seedanceMaterials) return seedanceMaterials.label;
+  const prepared = preparedReferenceUrls(form);
+  if (prepared) return prepared.length ? `Фото: ${prepared.length}` : "без примера";
   const files = referenceFiles(form);
   if (files.length === 1) return `фото: ${files[0].name}`;
   if (files.length > 1) return `${files.length} фото`;
@@ -2867,7 +2963,11 @@ function ensureGenerationReviewModal() {
   return modal;
 }
 
-function openGenerationReview(form) {
+let generationReviewPreparing = false;
+let generationReviewPreparedMaterials = false;
+
+async function openGenerationReview(form) {
+  if (generationReviewPreparing || state.generationSubmitting) return;
   if (!state.user) {
     openLogin();
     toast("Сначала войдите.", "info");
@@ -2880,16 +2980,51 @@ function openGenerationReview(form) {
     toast("Опишите, что нужно создать.", "danger");
     return;
   }
+  if (selectedGrokVideoMode(form) === "image" && !referenceFiles(form).length && !referenceLinkValues(form).length) {
+    const references = form.querySelector("[data-reference-section]");
+    if (references) {
+      references.hidden = false;
+      references.open = true;
+    }
+    toast("Для режима «По фото» сначала добавьте исходное фото.", "danger");
+    return;
+  }
+  const seedancePanel = form.querySelector("[data-seedance25-studio]");
+  const prepareGrokReferences = !feedRemixMode && selectedGrokVideoMode(form) === "image"
+    && currentRequestModel(form)?.aspectRatioMinRefs > 0;
+  const prepareMaterials = Boolean((seedancePanel && !seedancePanel.hidden) || prepareGrokReferences);
+  if (prepareMaterials) {
+    const button = form.querySelector("[data-generate-button]");
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 120_000);
+    generationReviewPreparing = true;
+    if (button) { button.disabled = true; button.setAttribute("aria-busy", "true"); }
+    closeGenerationReview();
+    try {
+      await composerMaterialReview.prepare(form, { signal: controller.signal });
+      if (prepareGrokReferences) syncReferenceAspectRatio(form);
+    } catch (error) {
+      toast(controller.signal.aborted ? "Слишком долгая загрузка материалов. Повторите попытку."
+        : error.message || "Не удалось загрузить материалы. Повторите попытку.", "danger");
+      return;
+    } finally {
+      clearTimeout(timer);
+      generationReviewPreparing = false;
+      if (button) { button.disabled = state.generationSubmitting; button.removeAttribute("aria-busy"); }
+      syncFeedRepeatControls();
+    }
+  }
   state.pendingGenerationForm = form;
+  generationReviewPreparedMaterials = prepareMaterials;
   const modal = ensureGenerationReviewModal();
-  const model = currentModel();
+  const model = currentRequestModel(form);
   const estimate = estimateGenerationCost(model, form);
   const rows = [
     ["Формат", generationKindLabel()],
-    ["Сценарий", state.generationKind === "image" ? ({ text: "С нуля", reference: "По референсу", edit: "Улучшить фото" }[state.routeFlow || "text"] || "С нуля") : "По описанию"],
+    ["Сценарий", generationScenarioLabel(form)],
     ["Модель", cleanModelName(model?.name || model?.key || "не выбрана")],
     ["Качество", selectedOptionText(form, "quality") || "Стандарт"],
-    ["Формат кадра", selectedOptionText(form, "aspect_ratio") || "Авто"],
+    ["Формат кадра", composerAspectRatioAllowed(model, form) ? selectedOptionText(form, "aspect_ratio") || "Авто" : "Авто"],
     ["Количество", selectedOptionValue(form, "count") || "1"],
     ...(state.generationKind === "video" ? [["Длительность", selectedOptionText(form, "duration") || "Авто"]] : []),
     ["Пример", referenceSummary(form)],
@@ -2909,7 +3044,10 @@ function openGenerationReview(form) {
 function closeGenerationReview({ keepPending = false } = {}) {
   const modal = $("[data-generation-review-modal]");
   if (modal) modal.hidden = true;
-  if (!keepPending) state.pendingGenerationForm = null;
+  if (!keepPending) {
+    state.pendingGenerationForm = null;
+    generationReviewPreparedMaterials = false;
+  }
 }
 
 function syncGenerationControls() {
@@ -2945,7 +3083,8 @@ function syncGenerationControls() {
   syncMirrorSelects("[data-quality-options]", quality, "<option value='basic'>Стандарт</option>");
   syncMirrorSelects("[data-count-options]", count, "<option>1</option>");
   syncMirrorSelects("[data-duration-options]", duration, "<option>5 сек</option>");
-  syncControlVisibility(model);
+  syncGrokVideoMode(model);
+  syncControlVisibility(currentRequestModel());
   syncStudioSubpages();
   $$(".account-composer").forEach((form) => updatePhotoPromptStatus(form));
   updateGenerationEstimate();
@@ -2954,6 +3093,61 @@ function syncGenerationControls() {
   renderActiveImageSession();
   syncFeedRepeatControls();
   refreshCustomSelects();
+}
+
+function syncGrokVideoMode(model = currentModel()) {
+  const chooser = document.querySelector("[data-video-mode-switch]");
+  if (!chooser) return;
+  const pair = grokVideoPair(model);
+  const visible = state.generationKind === "video" && Boolean(pair) && !isFeedRemixMode();
+  chooser.hidden = !visible;
+  const references = document.querySelector("[data-reference-section]");
+  const input = chooser.querySelector("[name='video_mode']");
+  if (!visible) {
+    if (input) input.disabled = true;
+    if (references?.dataset.grokPreviousHidden != null) {
+      references.hidden = references.dataset.grokPreviousHidden === "true";
+      delete references.dataset.grokPreviousHidden;
+    }
+    return;
+  }
+  const mode = state.videoScenarioMode === "image" ? "image" : "text";
+  state.videoScenarioMode = mode;
+  if (input) {
+    input.disabled = false;
+    input.value = mode;
+  }
+  chooser.querySelectorAll("[data-video-mode-choice]").forEach((button) => {
+    const active = button.dataset.videoModeChoice === mode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+  const copy = chooser.querySelector("[data-video-mode-copy]");
+  if (copy) copy.textContent = mode === "image"
+    ? "Добавьте фото — оно станет исходным кадром и задаст героя или сцену."
+    : "Опишите сцену — исходное фото не требуется.";
+  if (references) {
+    if (references.dataset.grokPreviousHidden == null) {
+      references.dataset.grokPreviousHidden = references.hidden ? "true" : "false";
+    }
+    references.hidden = mode === "text";
+  }
+}
+
+function clearGrokVideoReferences(form = document.querySelector(".account-composer")) {
+  if (!form) return false;
+  const hadReferences = Boolean(referenceFiles(form).length || referenceLinkValues(form).length);
+  const fileInput = form.querySelector("[name='reference_file']");
+  const primary = form.querySelector("[name='reference_url']");
+  const extra = form.querySelector("[name='reference_urls']");
+  if (fileInput) fileInput.value = "";
+  if (primary) primary.value = "";
+  if (extra) extra.value = "";
+  state.routeReferenceUrl = "";
+  state.routeReferenceUrls = [];
+  updateStudioSearch({ ref: "", refs: "" });
+  updatePhotoPromptStatus(form);
+  return hadReferences;
 }
 
 function syncMirrorSelects(selector, sourceSelect, fallbackHtml) {
@@ -4660,10 +4854,12 @@ function closeRealtime() {
   socket.close();
 }
 
-async function uploadReference(file) {
+async function uploadReference(file, { signal } = {}) {
+  const prepared = typeof composerMaterialReview !== "undefined" ? composerMaterialReview.referenceUrl(file, "generic") : null;
+  if (prepared) return prepared;
   const form = new FormData();
   form.append("file", file);
-  const result = await request("/uploads/reference", { method: "POST", body: form });
+  const result = await request("/uploads/reference", { method: "POST", body: form, signal });
   return result.url;
 }
 
@@ -4722,7 +4918,8 @@ async function submitGeneration(form, { quoteOnly = false } = {}) {
     progress: 12,
   });
   try {
-    const files = referenceFiles(form);
+    const grokVideoMode = selectedGrokVideoMode(form, model);
+    const files = grokVideoMode === "text" ? [] : referenceFiles(form);
     let uploadedReferenceUrls = [];
     if (files.length) {
       setGenerationStatus({ status: "uploading", progress: 14 });
@@ -4730,12 +4927,15 @@ async function submitGeneration(form, { quoteOnly = false } = {}) {
     }
     const allReferenceUrls = uniqueSafeUrls([
       ...uploadedReferenceUrls,
-      ...referenceLinkValues(form),
+      ...(grokVideoMode === "text" ? [] : referenceLinkValues(form)),
     ]);
     const referenceUrl = allReferenceUrls[0] || "";
     const extraReferenceUrls = allReferenceUrls.slice(1);
     const videoUrl = String(data.get("video_url") || "").trim();
     const requestModel = requestModelForCurrentSetup(model, { referenceUrl, videoUrl });
+    if (grokVideoMode === "image" && !referenceUrl) {
+      throw new Error("Для режима «По фото» добавьте исходное фото или ссылку на него.");
+    }
 
     let body;
     let path;
@@ -4748,10 +4948,11 @@ async function submitGeneration(form, { quoteOnly = false } = {}) {
       body = {
         model: repeat?.source.model || requestModel?.key,
         ...(feedRemixMode ? {} : { prompt }),
-        mode: videoUrl ? "video" : "image",
+        mode: videoUrl ? "video" : (grokVideoMode || "image"),
         duration: Number(repeat?.source.original_duration || data.get("duration") || model?.durations?.[0] || 5),
         ...(repeat?.override != null ? { duration_override: repeat.override } : {}),
-        aspect_ratio: repeat?.source.original_aspect_ratio || String(data.get("aspect_ratio") || "") || null,
+        aspect_ratio: repeat?.source.original_aspect_ratio
+          || (composerAspectRatioAllowed(requestModel, form, allReferenceUrls.length) ? String(data.get("aspect_ratio") || "") || null : null),
         resolution: repeat?.source.original_resolution || String(data.get("resolution") || "") || null,
         image_url: referenceUrl || null,
         source_image_url: repeatVideo ? null : (feedRemixMode ? (feedSourceRef || null) : null),
@@ -5851,6 +6052,26 @@ function bindUi() {
       setGenerationFlow(button.dataset.generationFlow || "text", { updateRoute: true });
     });
   });
+  $$("[data-video-mode-choice]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const form = document.querySelector(".account-composer");
+      const mode = button.dataset.videoModeChoice === "image" ? "image" : "text";
+      state.videoScenarioMode = mode;
+      const pair = grokVideoPair();
+      if (pair) {
+        state.routeModelKey = pair[mode].key;
+        updateStudioSearch({ model: pair[mode].key });
+      }
+      if (mode === "text" && clearGrokVideoReferences(form)) {
+        toast("Фото убрано: режим «По тексту» создаёт видео только по описанию.");
+      }
+      syncGenerationControls();
+      if (mode === "image") {
+        const references = document.querySelector("[data-reference-section]");
+        if (references && !references.hidden) references.open = true;
+      }
+    });
+  });
   $("[data-account-model-select]")?.addEventListener("change", syncGenerationControls);
   $$(".account-composer").forEach((form) => {
     form.querySelectorAll("details").forEach((details) => {
@@ -5863,6 +6084,7 @@ function bindUi() {
       if (!(target instanceof HTMLElement)) return;
       if (target.matches("[data-account-model-select]")) return;
       if (target.matches("[name='reference_file']")) updatePhotoPromptStatus(form);
+      if (target.matches("[name='reference_file'], [name='reference_url'], [name='reference_urls'], [name='video_url']")) syncReferenceAspectRatio(form);
       if (target.matches("[name='prompt_preset']")) updatePromptInjectionStatus(form);
       if (target.matches("[name='duration']") && state.feedRepeat?.scope === feedRepeatScope()) {
         const value = Number(target.value);
@@ -5881,6 +6103,7 @@ function bindUi() {
     form.addEventListener("input", (event) => {
       const target = event.target;
       if (!(target instanceof HTMLElement)) return;
+      if (target.matches("[name='reference_url'], [name='reference_urls'], [name='video_url']")) syncReferenceAspectRatio(form);
       if (target.matches("[name='prompt'], [name='reference_url'], [name='reference_urls'], [name='video_url']")) return;
       updateGenerationEstimate();
     });
@@ -6004,8 +6227,12 @@ function bindUi() {
     const confirmGenerationButton = target.closest("[data-confirm-generation]");
     if (confirmGenerationButton) {
       const form = state.pendingGenerationForm;
-      closeGenerationReview({ keepPending: true });
-      state.pendingGenerationForm = null;
+      const preparedMaterialsValid = !generationReviewPreparedMaterials || (form && preparedReferenceUrls(form));
+      closeGenerationReview();
+      if (!preparedMaterialsValid) {
+        toast("Материалы или параметры изменились. Проверьте их ещё раз.", "danger");
+        return;
+      }
       if (form) submitGeneration(form);
       return;
     }

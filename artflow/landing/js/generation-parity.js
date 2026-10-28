@@ -35,7 +35,9 @@
     });
     return max > 0 ? unique.slice(0, max) : unique;
   };
-  const current = () => (typeof currentModel === "function" ? currentModel() : null);
+  const current = () => (typeof currentRequestModel === "function"
+    ? currentRequestModel(form())
+    : (typeof currentModel === "function" ? currentModel() : null));
   const capabilityModes = (model) => Array.isArray(model?.modes) && model.modes.length ? model.modes : (model?.capabilities || []);
   const hasMode = (model, mode) => capabilityModes(model).includes(mode);
 

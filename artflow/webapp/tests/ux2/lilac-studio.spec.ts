@@ -1,6 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 
-async function prepare(page: Page, admin = true) {
+const defaultVideoModels = [{ key: "fixture-video", display_name: "Видео модель", modes: ["text", "image"], credits: 10, max_refs: 1, aspect_ratios: ["16:9", "9:16"], durations: [5], resolutions: ["720p"] }];
+
+async function prepare(page: Page, admin = true, videoModels = defaultVideoModels) {
   const writes: Array<{ path: string; body: any }> = [];
   await page.addInitScript(() => {
     window.Telegram = { WebApp: { initData: "lilac-fixture", initDataUnsafe: { user: { id: 123 } },
@@ -20,7 +22,7 @@ async function prepare(page: Page, admin = true) {
     if (path.endsWith("/me/permissions")) return json({ is_admin: admin });
     if (path.endsWith("/studio/preview")) return admin ? json({ allowed: true, ui_version: 3 }) : route.fulfill({ status: 403, json: { detail: "Admin access required" } });
     if (path.endsWith("/models/image")) return json([{ key: "fixture-image", display_name: "Портретная модель", description: "Фото и иллюстрации", modes: ["text", "image"], credits: 5, max_refs: 2, aspect_ratios: ["1:1", "9:16"], counts: [1], quality_options: [{ value: "basic", label: "Обычное" }] }]);
-    if (path.endsWith("/models/video")) return json([{ key: "fixture-video", display_name: "Видео модель", modes: ["text", "image"], credits: 10, max_refs: 1, aspect_ratios: ["16:9", "9:16"], durations: [5], resolutions: ["720p"] }]);
+    if (path.endsWith("/models/video")) return json(videoModels);
     if (path.endsWith("/models/music")) return json([{ key: "fixture-music", display_name: "Музыкальная модель", credits: 20 }]);
     if (path.endsWith("/music/voices")) return json([]);
     if (path.endsWith("/plans")) return json([{ key:"fixture-plan", title:"Серверный пакет", credits:50, price_rub:99 }]);
@@ -159,6 +161,77 @@ test("every luxury home launcher opens its real APIX workflow", async ({ page })
     await expect(page.getByRole("heading", { name: heading, exact: true }).first()).toBeVisible();
     await page.getByRole("navigation", { name: "Основная навигация" }).getByRole("tab", { name: "Главная", exact: true }).click();
   }
+});
+
+test("animate-photo launcher preserves the prompt and replaces a saved text-only Grok model", async ({ page }) => {
+  const grokText = { key: "grok-imagine/text-to-video", display_name: "Grok Imagine Video", modes: ["text"], credits: 0.6, max_refs: 1, aspect_ratios: ["9:16"], durations: [10], resolutions: ["720p"] };
+  const grokPhoto = { key: "grok-imagine/image-to-video", display_name: "Grok Imagine Video", modes: ["image"], credits: 0.7, max_refs: 7, aspect_ratios: ["9:16"], durations: [10], resolutions: ["720p"] };
+  await prepare(page, true, [grokText, grokPhoto]);
+  await page.goto("/?ux=3");
+
+  await page.getByRole("button", { name: "Оживить фото", exact: true }).click();
+  const model = page.getByRole("combobox", { name: "Модель", exact: true });
+  await model.selectOption(grokText.key);
+  await page.getByRole("textbox", { name: /^Промпт/ }).fill("Оживи красиво без речи");
+  await page.getByRole("navigation", { name: "Основная навигация" }).getByRole("tab", { name: "Главная", exact: true }).click();
+  await page.locator("section").filter({ hasText: "Продолжить черновик" }).getByRole("button", { name: /Видео/ }).click();
+  await expect(model).toHaveValue(grokText.key);
+  await expect(page.getByRole("textbox", { name: /^Промпт/ })).toHaveValue("Оживи красиво без речи");
+  await page.getByRole("navigation", { name: "Основная навигация" }).getByRole("tab", { name: "Главная", exact: true }).click();
+  await page.getByRole("button", { name: "Оживить фото", exact: true }).click();
+
+  await expect(model).toHaveValue(grokPhoto.key);
+  await expect(page.getByRole("button", { name: "По фото", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("textbox", { name: /^Промпт/ })).toHaveValue("Оживи красиво без речи");
+  await expect(page.getByText("Фото · до 7", { exact: true })).toBeVisible();
+});
+
+test("Grok exposes one plain text-or-photo choice and switches the underlying priced model", async ({ page }) => {
+  const grokText = { key: "grok-imagine/text-to-video", display_name: "Grok Imagine Video", modes: ["text"], credits: 0.6, max_refs: 1, aspect_ratios: ["9:16"], durations: [10], resolutions: ["720p"] };
+  const grokPhoto = { key: "grok-imagine/image-to-video", display_name: "Grok Imagine Video", modes: ["image"], credits: 0.7, max_refs: 7, aspect_ratios: ["9:16"], durations: [10], resolutions: ["720p"] };
+  await prepare(page, true, [grokText, grokPhoto]);
+  await page.goto("/?ux=3");
+  await page.getByRole("button", { name: "Оживить фото", exact: true }).click();
+  const model = page.getByRole("combobox", { name: "Модель", exact: true });
+  await model.selectOption(grokText.key);
+  await page.getByRole("textbox", { name: /^Промпт/ }).fill("Плавное движение камеры");
+
+  await expect(page.getByRole("button", { name: "По тексту", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "По фото", exact: true }).click();
+
+  await expect(model).toHaveValue(grokPhoto.key);
+  await expect(page.getByRole("textbox", { name: /^Промпт/ })).toHaveValue("Плавное движение камеры");
+  await expect(page.getByText("0,7 кр.", { exact: true }).first()).toBeVisible();
+});
+
+test("Seedance presents three guided material tiles and keeps technical options collapsed", async ({ page }, info) => {
+  const fallback = { key: "fixture-video", display_name: "Видео модель", modes: ["text", "image"], credits: 10, max_refs: 1, aspect_ratios: ["9:16"], durations: [5], resolutions: ["720p"] };
+  const seedance = { key: "bytedance/seedance-2-5", display_name: "Seedance 2.5", modes: ["text", "multimodal"], auto_route_by_inputs: true, credits: 4, max_refs: 30, aspect_ratios: ["adaptive", "9:16"], durations: [4, 5, 10, 15, 30], resolutions: ["480p", "720p", "1080p"], supports_video_input: true };
+  await prepare(page, true, [fallback, seedance]);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/?ux=3");
+  await page.getByRole("button", { name: "Оживить фото", exact: true }).click();
+  await page.getByRole("combobox", { name: "Модель", exact: true }).selectOption(seedance.key);
+
+  const materials = page.getByRole("group", { name: "Материалы Seedance 2.5" });
+  await expect(materials.locator("[data-seedance25-material]"), "photo, video and audio stay visible as task choices").toHaveCount(3, { timeout: 4000 });
+  expect(await materials.locator("[data-seedance25-material]").evaluateAll(nodes => nodes.map(node => node.tagName))).toEqual(["BUTTON", "BUTTON", "BUTTON"]);
+  for (const name of ["Фото", "Видео", "Аудио"]) await expect(materials.getByText(name, { exact: true })).toBeVisible();
+  const advanced = materials.locator("details");
+  await expect(advanced.getByText("Дополнительные настройки", { exact: true })).toBeVisible();
+  await expect(advanced).not.toHaveAttribute("open", "");
+  const chooser = page.waitForEvent("filechooser");
+  await materials.getByText("Фото", { exact: true }).click();
+  await chooser;
+  await expect(page.getByText("Замена персонажа", { exact: false })).toHaveCount(0);
+  await expect(page.getByText("Generate audio", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Web search grounding", { exact: true })).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.getByRole("navigation", { name: "Основная навигация" }).getByRole("tab", { name: "Главная", exact: true }).click();
+  await page.getByRole("button", { name: "Оживить фото", exact: true }).click();
+  await expect(page.getByRole("combobox", { name: "Модель", exact: true })).toHaveValue(seedance.key);
+  await expect(page.getByText("Возможности модели изменились", { exact: false })).toHaveCount(0);
+  await page.screenshot({ path: info.outputPath("seedance-guided-composer-390.png"), fullPage: true });
 });
 
 test("luxury home stays usable in compact portrait and phone landscape", async ({ page }) => {

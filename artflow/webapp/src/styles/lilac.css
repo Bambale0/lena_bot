@@ -225,3 +225,16 @@ html[data-apix-studio="lilac"] .apix-safe-sheet { max-height:calc(min(100dvh,var
 @media(min-width:700px) { .trend-folder-grid { grid-template-columns:repeat(4,minmax(0,1fr)); }.trend-live-rail { grid-auto-columns:minmax(170px,19%); }.trend-category-manager { padding:20px; } }
 @media(max-width:520px) { .trend-live-rail { grid-auto-columns:minmax(142px,46%); }.trend-manager-create,.trend-manager-reassign { grid-template-columns:1fr; }.trend-manager-row { grid-template-columns:auto minmax(0,1fr); }.trend-manager-actions { grid-column:1/-1; justify-content:stretch; }.trend-manager-actions button { flex:1; }.trend-shelves-page,.trend-folder-page { gap:18px; }.trend-shelf-skeleton { grid-template-columns:repeat(2,minmax(0,1fr)); }.trend-shelf-skeleton i:last-child { display:none; } }
 @media(max-width:350px) { .trend-live-rail { grid-auto-columns:minmax(134px,48%); gap:8px; }.trend-folder-grid { gap:8px; }.trend-live-copy { padding:8px; }.trend-category-heading > button { font-size:11px; } }
+
+/* Seedance keeps the common API contract but presents materials as three plain tasks. */
+html[data-apix-studio="lilac"] .seedance25-guided { border-color:#74539290; background:linear-gradient(145deg,#21172f,#151019); box-shadow:4px 4px 0 #1d0f29; }
+html[data-apix-studio="lilac"] .seedance25-guided-head p { margin:0; }
+html[data-apix-studio="lilac"] .seedance25-material { min-width:0; min-height:92px; display:grid; place-items:center; align-content:center; gap:3px; padding:10px 6px; border:1px solid #74539290; border-radius:18px 7px 18px 10px; background:#21172f; color:#f7f3ff; text-align:center; transition:transform .16s ease,border-color .16s ease,background .16s ease; }
+html[data-apix-studio="lilac"] .seedance25-material:nth-child(2) { border-radius:7px 18px 10px 18px; }
+html[data-apix-studio="lilac"] .seedance25-material:hover { transform:translateY(-1px); border-color:#c4a1ff; background:#2d2040; }
+html[data-apix-studio="lilac"] .seedance25-material > span { display:grid; width:30px; height:30px; place-items:center; border:1px solid #a98bff80; border-radius:10px; color:#d8ccff; font-size:18px; }
+html[data-apix-studio="lilac"] .seedance25-material strong { font-size:12px; }
+html[data-apix-studio="lilac"] .seedance25-material small { color:#9f91b4; font-size:9px; line-height:1.2; }
+html[data-apix-studio="lilac"] .seedance25-advanced { border-top:1px solid #67507970; padding-top:9px; }
+html[data-apix-studio="lilac"] .seedance25-advanced > summary { min-height:42px; display:flex; align-items:center; color:#d8ccff; font-size:12px; font-weight:650; cursor:pointer; }
+html[data-apix-studio="lilac"] .seedance25-check { min-height:44px; display:flex; align-items:center; gap:9px; padding:9px 10px; border:1px solid #67507980; border-radius:11px; background:#120d18; font-size:12px; }

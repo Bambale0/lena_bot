@@ -11,11 +11,11 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=Onest:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="css/prototype-premium.css?v=20261025_repeat_duration" />
-    <script src="js/prototype-premium.js?v=20261025_repeat_duration" defer></script>
+    <link rel="stylesheet" href="css/prototype-premium.css?v=20261028_guided_composer_r7" />
+    <script src="js/prototype-premium.js?v=20261028_guided_composer_r11" defer></script>
     <script src="js/minimax-h3-studio.js?v=20261022_observer" defer></script>
-    <script src="js/seedance25-studio.js?v=20261025_exact_repeat" defer></script>
-    <script src="js/generation-parity.js?v=20261015_video_quote" defer></script>
+    <script src="js/seedance25-studio.js?v=20261028_guided_composer_r10" defer></script>
+    <script src="js/generation-parity.js?v=20261028_guided_composer_r7" defer></script>
     <script src="js/kling4-studio.js?v=20261023_references" defer></script>
   </head>
   <body>
@@ -97,6 +97,15 @@
               <div class="composer-row composer-row-primary">
                 <label><span>Модель</span><select name="model" data-account-model-select data-no-custom-select="true" required></select></label>
                 <label><span>Формат</span><select name="aspect_ratio" data-no-custom-select="true"><option>9:16</option><option>1:1</option><option>16:9</option></select></label>
+              </div>
+              <div class="video-mode-switch" data-video-mode-switch hidden>
+                <input name="video_mode" type="hidden" value="text" />
+                <div><span>Сценарий</span><b>Как создаём видео?</b></div>
+                <div class="video-mode-actions" role="group" aria-label="Сценарий Grok Imagine Video">
+                  <button type="button" data-video-mode-choice="text" aria-pressed="true">По тексту</button>
+                  <button type="button" data-video-mode-choice="image" aria-pressed="false">По фото</button>
+                </div>
+                <p data-video-mode-copy>Опишите сцену — исходное фото не требуется.</p>
               </div>
               <div class="composer-row composer-row-primary" data-advanced-controls>
                 <label><span>Качество</span><select name="quality" data-no-custom-select="true"><option value="basic">Стандарт</option><option value="2K">2K</option><option value="4K">4K</option></select></label>

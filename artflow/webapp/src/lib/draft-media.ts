@@ -17,6 +17,15 @@ function keepOrFirst<T>(current: T, allowed?: T[]): T {
   return allowed?.length && !allowed.includes(current) ? allowed[0] : current;
 }
 
+/** Keep the saved choice, but omit it from requests until enough photos are active. */
+export function effectiveVideoAspectRatio(draft: GenerationDraft, model: ModelInfo | undefined): string | null {
+  if (draft.promptId !== null) return draft.aspectRatio;
+  const minReferences = model?.aspect_ratio_min_refs || 0;
+  return draft.mode === "image" && new Set(selectGenerationInputs(draft).referenceUrls).size < minReferences
+    ? null
+    : draft.aspectRatio;
+}
+
 /** Change only supported ordinary settings; canonical input media are never trimmed. */
 export function switchDraftModel(draft: GenerationDraft, model: ModelInfo): GenerationDraft {
   if (draft.promptId !== null) return draft;

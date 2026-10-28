@@ -2452,3 +2452,145 @@ Steps: [x] root-cause and production preflight; [x] RED/green operator control;
 - Focused capability and no-second-paid-POST regressions pass 85 tests; Ruff and
   diff checks pass. Exact-head protected CI, conversation resolution, auto-merge
   and production revision/health proof remain required.
+
+## 2026-10-28 — guided Grok and Seedance reference composer
+
+- Release continuation baseline: PR #322 head
+  `045aec835dd208ec98aa0b885679c76cf91b7781`, main
+  `34e97f3bea5bd3d3f3c2e341d32e337236aab89e`. All six exact-head
+  checks passed, but three unresolved GitHub review findings were independently
+  reproduced in source: Seedance confirmation counted duplicate links that the
+  request wrapper removes; Grok I2V offered aspect ratio below the catalog's
+  two-reference threshold; an old Telegram identity callback could start a new
+  hidden flow. Release remains blocked until those behaviors pass regressions.
+- Continuation seams: standalone confirmation versus captured quote/launch
+  requests with duplicates and caps; Mini App and standalone Grok references
+  changing 1 -> 2 -> 1 plus text sibling; actual Telegram callback dispatch
+  with unchanged FSM after rejection and retained legacy identity processing.
+  No migration, provider contract, price, credential, runtime setting, paid
+  generation or production data change is required. Existing protected
+  PR -> native auto-merge -> exact-main CI/autodeploy remains the release path.
+- Continuation steps: [x] RED/GREEN regressions for all three findings;
+  [x] focused checks and independent Standards/Spec review; [ ] refreshed
+  protected CI on the new head; [ ] merge, exact-SHA autodeploy and public
+  health/frontend-asset verification. Review evidence will be recorded below.
+- Continuation verification so far: the actual Telegram router/FSM regression
+  failed before the guard (a fresh session entered `image_upload`), then the
+  full maintained bot-navigation bundle passed 374 tests. The Mini App browser
+  regression failed on the incorrectly visible ratio, then passed 2/2 cases
+  for 1 -> 2 -> 1 active photos and the text sibling; 12 existing repeat cases
+  passed across all four device profiles. Structural provider inventory,
+  product readiness and the dry smoke manifest validate all 100 public
+  contracts. These checks use synthetic provider responses and no paid jobs.
+- Standalone review also reproduced content-addressed uploads: distinct file
+  names with identical bytes yield the same server URL. The confirmation must
+  therefore use actual prepared upload URLs, with selection/auth invalidation
+  and reuse for quote/launch, rather than counting browser File objects. This
+  preparation uses the existing non-charging upload endpoints and preserves
+  the separate generic/panel storage channels and provider payload contract.
+- First published continuation evidence: TypeScript, production build, 148 frontend
+  unit tests, the full Ruff check and diff check pass. The maintained UX2 suite
+  now contains 301 scenarios: 299 passed together; two completed their assertions
+  but failed trace teardown because parallel runs shared an output directory.
+  Both passed on an isolated 2/2 rerun without source or assertion changes.
+  The final standalone suite passes 17/17 with isolated artifacts, including
+  upload failure/retry, changed selection/authentication, stale confirmation and
+  the bounded 120-second preparation timeout. The focused parity and retained
+  identity-compatibility bundle passes 24/24. Bot-navigation remains 374/374.
+- Independent Standards and Spec reviews of that first freeze found no blockers.
+  Both checked shared material selection, actual upload URL reuse, auth/form
+  invalidation, Grok active-reference gating, the Telegram callback guard and
+  retained saved-job compatibility. Runtime cache tokens are prototype r10,
+  Seedance r9 and Mini App build `20261028-guided-video-composer-r7`.
+  Protected CI on the published final head and actual merge-SHA deployment are
+  still required; the final release evidence, workflow links and public asset
+  verification will be recorded in PR #322 after those gates finish.
+- Additional release check on published `5f5f3bfd67886dd0578632d118b57552a49fe6e2`
+  reproduced the content-addressed duplicate case for ordinary Grok as well.
+  Standalone confirmation used raw file counts while submission deduplicated
+  upload URLs. Mini App retained separate material rows with the same upload
+  URL and repeated the primary URL in `reference_urls`; its ratio threshold
+  therefore counted duplicates. The actual backend normalizer confirmed that
+  Grok expects one primary plus additional references and does not deduplicate
+  this input itself. Provider/backend/storage contracts need no changes.
+- Deduplication follow-up: [x] failing browser regressions for duplicate files
+  and file-plus-existing-URL; [x] shared standalone preparation and unique
+  active-ready Grok Mini App payload, preserving canonical rows and exact
+  repeats; [x] focused checks and refreshed Standards/Spec review; [ ] protected
+  CI on the new head, merge-SHA autodeploy and public delivery proof.
+- Final deduplication evidence: all 149 frontend unit tests pass, including a
+  real ordinary-draft-to-saved-recipe transition preserving format and rows.
+  TypeScript/build pass. Grok browser regressions pass 5/5 through actual upload
+  queue events, with exact quote/launch body equality; the standalone suite
+  passes 21/21, including hidden Seedance material exclusion after model change.
+  Parity/identity compatibility passes 24/24; full Ruff and diff check pass.
+  Both independent Standards and Spec reviewers passed the final frozen delta,
+  including the saved-prompt format guard. The imported backend normalizer was
+  called without provider/DB requests: one primary plus no additional URL keeps
+  ratio null; two distinct references retain the selected ratio.
+  Final resource tokens: prototype r11, Seedance r10, Mini App build
+  `20261028-guided-video-composer-r8`. Exact-head protected CI and deployment
+  evidence remain pending and will be recorded in PR #322.
+
+- Baseline `9c06bcc3039543edbeab938a72c3c6a7702208cf`; branch
+  `fix/grok-seedance-guided-composer`. A real mobile report showed that the
+  `Оживить фото` launcher resumed a saved text-only Grok draft, while Seedance
+  2.5 exposed raw provider controls and a costly character-replacement preset.
+- Root causes: the launcher only selected an image-capable model for a fully
+  empty draft; Grok text/image capabilities are represented by separate model
+  keys; the Seedance Mini App enhancer injects provider-shaped fields directly
+  into the main form; character replacement is separately advertised in the
+  Mini App, landing site and Telegram picker.
+- Approved outcome: preserve the prompt but make `Оживить фото` enter a real
+  photo/reference path; expose a plain `По тексту / По фото` Grok family switch;
+  present Seedance photos, videos and audio as three guided upload tiles; move
+  optional provider controls under a closed `Дополнительные настройки` section;
+  remove character-replacement discovery from site, Mini App and Telegram while
+  retaining backend compatibility for old jobs.
+- Safety/parity: do not change prices, provider order, payload contracts,
+  credentials, balances, permissions, database schema or paid-generation
+  behavior. Site and Mini App share the React composer; Telegram receives the
+  matching discovery removal. Existing identity-transfer backend handling stays
+  available only for compatibility with already-saved requests.
+- Design direction: **Lilac Noir Guided Composer** — luxury/refined with
+  utilitarian clarity; the three material tiles are the sole new visual anchor.
+  Acceptance includes 390px usability, keyboard/focus semantics, prompt/media
+  preservation, exact quote refresh after model-family switching, collapsed
+  advanced controls and no identity-transfer entry point on public surfaces.
+- Test seams and steps: [x] RED browser tests for quick launch, Grok mode family
+  and Seedance tiles; [x] RED parity tests for public-surface removal; [x] minimal
+  implementation; [x] focused and full local gates; [x] independent review;
+  [ ] protected PR, exact-head CI, merge/autodeploy and public asset/health proof.
+- Verification evidence: 148 frontend unit tests, TypeScript and the Vite
+  production build pass. The final maintained browser gates cover 290 UX2,
+  300 user journeys and 392 four-device E2E cases (982 total). In the earlier full
+  UX2 run 287 cases passed together; two unrelated startup timeouts then passed
+  2/2 in an isolated single-worker rerun. The
+  complete focused backend model/catalog matrix passes across image/video
+  adapters, Telegram navigation, API routing, reference limits, Seedance,
+  Grok, Veo, MiniMax and GPT Image; all 16 identity-compatibility tests pass.
+  Ruff's maintained CI baseline and `git diff --check` pass. The broad Windows
+  backend run retains documented current-main platform/environment failures;
+  protected Linux CI remains the authoritative full-suite gate. The 390px
+  rendered screenshot was inspected with three readable tiles, closed advanced
+  settings, black/lilac styling and no horizontal overflow. Review found and
+  closed the Seedance re-entry/upload defects plus a saved-draft model mutation;
+  GitHub review then found that the standalone Studio still lacked the explicit
+  Grok text/photo choice. The site now mirrors the real sibling model, price,
+  required photo, confirmation label and payload in both modes; a browser
+  regression covers quote and launch for each variant, including cache-busted
+  runtime assets. The first updated-head smoke run exposed a strict-selector
+  failure after the new nested advanced panel appeared; the repeat helper now
+  targets each panel's direct summary, and the failed Seedance repeat journey
+  passes on iPhone SE, iPhone 13, Pixel 5 and desktop. The next GitHub review
+  found a stale Seedance asset token, standalone material tiles mounted inside
+  the closed precision panel, and preserved Grok photo inputs after choosing
+  text mode. The Seedance bundle and shared runtime are now cache-busted; its
+  three material tiles mount above closed advanced settings; switching Grok to
+  text explicitly clears photo files/links and explains the action. The focused
+  standalone suite passes 8/8 and parity/backend-compatibility coverage passes
+  24/24. A further review pass added pre-review validation for empty Grok photo
+  mode, includes every guided Seedance file/link count in the confirmation, and
+  covers Grok image-to-video feed repeats where the mode chooser is intentionally
+  hidden. Final updated-head review and protected gates remain required. No paid
+  provider request or mutable production control was used for verification.

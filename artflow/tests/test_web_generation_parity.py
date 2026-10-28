@@ -9,7 +9,7 @@ def test_studio_loads_generation_parity_layer():
     html = (ROOT / "landing/studio.html").read_text()
     assert "js/prototype-premium.js" in html
     assert "js/generation-parity.js" in html
-    assert "seedance25-studio.js?v=20261025_exact_repeat" in html
+    assert "seedance25-studio.js?v=20261028_guided_composer_r10" in html
 
 
 def test_web_parity_layer_exposes_advanced_video_contract():
@@ -59,12 +59,14 @@ def test_public_site_billing_keeps_tribute_usd_provider_parity():
 
 
 def test_public_site_uses_current_cached_runtime_release():
-    expected = "prototype-premium.js?v=20261025_repeat_duration"
+    expected = "prototype-premium.js?v=20261028_guided_composer_r11"
+    expected_parity = "generation-parity.js?v=20261028_guided_composer_r7"
     pages = sorted((ROOT / "landing").glob("*.html"))
     referenced = [path for path in pages if "prototype-premium.js?v=" in path.read_text()]
     assert referenced
     for path in referenced:
         assert expected in path.read_text(), path.name
+    assert expected_parity in (ROOT / "landing/studio.html").read_text()
 
 
 def test_payment_plan_cards_show_rub_and_tribute_usd_together_across_web_surfaces():

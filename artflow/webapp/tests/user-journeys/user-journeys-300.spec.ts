@@ -560,6 +560,7 @@ registerDomain("06 · Повтор работы из ленты сохраняе
   await page.locator(".apix-feed-card").first().getByRole("button", { name: "Повторить" }).click();
   const dialog = page.getByRole("dialog", { name: "Повторить работу" });
   await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Добавить" })).toBeEnabled();
   await dialog.locator("input[type=file]").setInputFiles({
     name: `ref-${seed}.jpg`,
     mimeType: "image/jpeg",

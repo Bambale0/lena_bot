@@ -13,6 +13,7 @@ async function fixture(page: Page, launchStatus = 202, locked = false) {
     const json = (data: unknown) => r.fulfill({ json: { ok: true, data } });
     if (url.pathname.endsWith("/me")) return json({ id: 7, credits: 100, full_name: "Reader" });
     if (url.pathname.endsWith("/uploads/reference")) return json({ url: "https://example.test/uploaded-reader.jpg" });
+    if (url.pathname.endsWith("/seedance25/upload-reference")) return json({ url: "https://example.test/guided-reader.jpg" });
     if (url.pathname.endsWith("/models/video")) return json([{ key: model, name: "Seedance 2.5", type: "video", durations: [5, 10, 15], resolutions: ["480p", "720p"], aspect_ratios: ["9:16", "16:9"], credits: 2, active: true }]);
     if (url.pathname.endsWith("/feed/42")) return json({ id: 42, type: "video", model, original_duration: 10, original_resolution: "720p", original_aspect_ratio: "16:9", source_has_video_reference: locked, result_url: "https://example.test/public.mp4" });
     if (url.pathname.endsWith("/remix/quote")) {
@@ -89,7 +90,7 @@ test("standalone Seedance 2.5 exact repeat keeps reader photo upload without gen
   expect(launches[0]).toMatchObject({ duration: 10, duration_override: 15, quoted_credits: 30 });
 });
 
-test("standalone Seedance 2.5 ordinary generation retains its multimodal controls", async ({ page }) => {
+test("standalone Seedance 2.5 keeps guided materials and working advanced controls", async ({ page }) => {
   await fixture(page);
   const launches: Record<string, unknown>[] = [];
   await page.route("**/api/web/generate/video/quote", r => r.fulfill({ json: { ok: true, data: { cost_credits: 20, can_run: true } } }));
@@ -100,17 +101,484 @@ test("standalone Seedance 2.5 ordinary generation retains its multimodal control
   await page.goto(`/studio.html?type=video&model=${encodeURIComponent(model)}`);
   await expect(page.locator("[data-account-model-select]")).toHaveValue(model);
   const optional = page.locator("[data-optional-section]");
-  if (await optional.getAttribute("open") === null) await optional.locator(":scope > summary").click();
+  if (await optional.getAttribute("open") !== null) await optional.locator(":scope > summary").click();
+  await expect(optional).not.toHaveAttribute("open", "");
   await expect(page.locator("[data-seedance25-studio]")).toBeVisible();
   await expect(page.locator("[data-reference-section]")).toBeHidden();
+  await expect(page.locator("[data-s25-material]")).toHaveCount(3);
+  await page.locator("[data-s25-image-files]").setInputFiles({ name: "guided.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) });
+  const advanced = page.locator("[data-seedance25-studio] > details");
+  await expect(advanced).not.toHaveAttribute("open", "");
+  await advanced.locator(":scope > summary").click();
   await page.locator("textarea[name=prompt]").fill("Cinematic portrait with gentle camera motion");
   await page.locator("[data-s25-image-urls]").fill("https://example.test/ordinary-reader.jpg");
   await page.locator("[data-s25-generate-audio]").uncheck();
-  await launch(page);
+  await page.locator("[data-generate-button]").click();
+  const review = page.locator("[data-generation-review-modal]");
+  await expect(review.getByText("По материалам", { exact: true })).toBeVisible();
+  await expect(review.getByText("Фото: 2", { exact: true })).toBeVisible();
+  await review.locator("[data-confirm-generation]").click();
   await expect.poll(() => launches.length).toBe(1);
   expect(launches[0].image_url).toBe("https://example.test/ordinary-reader.jpg");
+  expect(launches[0].reference_urls).toContain("https://example.test/guided-reader.jpg");
   expect(launches[0].audio_ids).toContain("__apix_seedance25:output_format=mp4");
   expect(launches[0].audio_ids).toContain("__apix_seedance25:generate_audio=false");
+});
+
+for (const capped of [false, true]) {
+  test(`standalone Seedance review matches deduplicated ${capped ? "capped" : "mixed"} materials in quote and launch`, async ({ page }) => {
+    await fixture(page);
+    const requests: Record<string, any>[] = [];
+    await page.route("**/api/web/generate/video{,/quote}", r => {
+      requests.push(r.request().postDataJSON());
+      return r.fulfill({ json: { ok: true, data: r.request().url().endsWith("/quote")
+        ? { cost_credits: 20, can_run: true } : { id: 95, status: "pending" } } });
+    });
+    const photo = "https://example.test/material.jpg";
+    const video = "https://example.test/material.mp4";
+    const audio = "https://example.test/material.mp3";
+    await page.goto(`/studio.html?type=video&model=${encodeURIComponent(model)}&ref=${encodeURIComponent(photo)}`);
+    const panel = page.locator("[data-seedance25-studio]");
+    await expect(panel).toBeVisible();
+    await panel.locator(":scope > details > summary").click();
+    for (const [selector, url, limit] of [
+      ["[data-s25-image-urls]", photo, 30],
+      ["[data-s25-video-urls]", video, 10],
+      ["[data-s25-audio-urls]", audio, 10],
+    ] as const) {
+      await panel.locator(selector).fill(capped
+        ? [...Array(limit).fill(url), "https://example.test/outside-cap"].join("\n")
+        : [url, url].join("\n"));
+    }
+    const optional = page.locator("[data-optional-section]");
+    if (await optional.getAttribute("open") === null) await optional.locator(":scope > summary").click();
+    await optional.locator("[name=video_url]").fill(video);
+    if (!capped) await panel.locator("[data-s25-image-files]").setInputFiles({ name: "guided.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) });
+    await page.locator("[data-generate-button]").click();
+    const review = page.locator("[data-generation-review-modal]");
+    await expect(review.getByText(`Фото: ${capped ? 1 : 2} · Видео: 1 · Аудио: 1`, { exact: true })).toBeVisible();
+    await review.locator("[data-confirm-generation]").click();
+    await expect.poll(() => requests.length).toBe(2);
+    for (const body of requests) {
+      expect([body.image_url, ...body.reference_urls]).toEqual(capped ? [photo] : [photo, "https://example.test/guided-reader.jpg"]);
+      expect(body.video_url).toBe(video);
+      expect(body.audio_ids.filter((value: string) => !value.startsWith("__apix_seedance25:"))).toEqual([audio]);
+      expect(body.audio_ids.filter((value: string) => value.startsWith("__apix_seedance25:video_ref="))).toEqual([]);
+    }
+  });
+}
+
+test("standalone Seedance review deduplicates uploaded content and reuses prepared URLs", async ({ page }) => {
+  await fixture(page);
+  let uploads = 0;
+  const requests: Record<string, any>[] = [];
+  await page.route("**/api/web/seedance25/upload-reference", r => {
+    uploads += 1;
+    return r.fulfill({ json: { ok: true, data: { url: "https://example.test/same-content.jpg" } } });
+  });
+  await page.route("**/api/web/generate/video{,/quote}", r => {
+    requests.push(r.request().postDataJSON());
+    return r.fulfill({ json: { ok: true, data: r.request().url().endsWith("/quote")
+      ? { cost_credits: 20, can_run: true } : { id: 97, status: "pending" } } });
+  });
+  await page.goto(`/studio.html?type=video&model=${encodeURIComponent(model)}&ref=${encodeURIComponent("https://example.test/same-content.jpg")}`);
+  await page.locator("[data-s25-image-files]").setInputFiles(["original.jpg", "copy.jpg"].map(name => ({ name, mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) })));
+  await page.locator("[data-generate-button]").click();
+  const review = page.locator("[data-generation-review-modal]");
+  await expect(review.getByText("Фото: 1", { exact: true })).toBeVisible();
+  expect(uploads).toBe(2);
+  expect(requests).toHaveLength(0);
+  await review.locator("[data-confirm-generation]").click();
+  await expect.poll(() => requests.length).toBe(2);
+  expect(uploads).toBe(2);
+  for (const body of requests) expect([body.image_url, ...body.reference_urls]).toEqual(["https://example.test/same-content.jpg"]);
+});
+
+test("standalone Seedance failed upload prevents review and can be retried", async ({ page }) => {
+  await fixture(page);
+  let uploads = 0, generations = 0;
+  await page.route("**/api/web/seedance25/upload-reference", r => {
+    uploads += 1;
+    return uploads === 1
+      ? r.fulfill({ status: 503, json: { error: "Не удалось загрузить материал" } })
+      : r.fulfill({ json: { ok: true, data: { url: "https://example.test/retried.jpg" } } });
+  });
+  await page.route("**/api/web/generate/video{,/quote}", r => { generations += 1; return r.fulfill({ json: {} }); });
+  await page.goto(`/studio.html?type=video&model=${encodeURIComponent(model)}`);
+  await page.locator("[data-s25-image-files]").setInputFiles({ name: "retry.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) });
+  const button = page.locator("[data-generate-button]");
+  await button.click();
+  await expect(page.locator("[data-toast]")).toContainText("Не удалось загрузить материал");
+  await expect(page.locator("[data-generation-review-modal]")).toBeHidden();
+  await expect(button).toBeEnabled();
+  expect(generations).toBe(0);
+  await button.click();
+  await expect(page.locator("[data-generation-review-modal]").getByText("Фото: 1", { exact: true })).toBeVisible();
+  expect(uploads).toBe(2);
+  expect(generations).toBe(0);
+});
+
+for (const change of ["selection", "logout"] as const) {
+  test(`standalone Seedance does not open a stale review after ${change} during upload`, async ({ page }) => {
+    await fixture(page);
+    let uploadStarted = false, finishUpload: () => void = () => {};
+    const uploadReady = new Promise<void>(resolve => { finishUpload = resolve; });
+    await page.route("**/api/web/seedance25/upload-reference", async r => {
+      uploadStarted = true;
+      await uploadReady;
+      await r.fulfill({ json: { ok: true, data: { url: "https://example.test/stale.jpg" } } });
+    });
+    await page.goto(`/studio.html?type=video&model=${encodeURIComponent(model)}`);
+    await page.locator("[data-s25-image-files]").setInputFiles({ name: "stale.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) });
+    const button = page.locator("[data-generate-button]");
+    await button.click();
+    await expect.poll(() => uploadStarted).toBe(true);
+    await expect(button).toBeDisabled();
+    if (change === "logout") await page.locator("[data-logout]").click();
+    else await page.locator("textarea[name=prompt]").fill("Changed while the selected file uploads");
+    finishUpload();
+    await expect(page.locator("[data-toast]")).toContainText("изменились");
+    await expect(page.locator("[data-generation-review-modal]")).toBeHidden();
+    await expect(button).toBeEnabled();
+  });
+}
+
+test("standalone Seedance preparation has a bounded timeout and restores the form", async ({ page }) => {
+  await fixture(page);
+  let started = false, finishUpload: () => void = () => {};
+  const uploadReady = new Promise<void>(resolve => { finishUpload = resolve; });
+  await page.route("**/api/web/seedance25/upload-reference", async r => {
+    started = true;
+    await uploadReady;
+    await r.fulfill({ json: { ok: true, data: { url: "https://example.test/late.jpg" } } }).catch(() => {});
+  });
+  await page.goto(`/studio.html?type=video&model=${encodeURIComponent(model)}`);
+  await page.locator("[data-s25-image-files]").setInputFiles({ name: "late.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) });
+  await page.clock.install();
+  const button = page.locator("[data-generate-button]");
+  await button.click();
+  await expect.poll(() => started).toBe(true);
+  await page.clock.fastForward(120_000);
+  await expect(page.locator("[data-toast]")).toContainText("Слишком долгая загрузка");
+  await expect(button).toBeEnabled();
+  await expect(page.locator("[data-generation-review-modal]")).toBeHidden();
+  finishUpload();
+});
+
+test("standalone Seedance confirmation rejects a changed prepared selection", async ({ page }) => {
+  await fixture(page);
+  let generations = 0;
+  await page.route("**/api/web/generate/video{,/quote}", r => { generations += 1; return r.fulfill({ json: { ok: true, data: { cost_credits: 20, can_run: true, id: 98, status: "pending" } } }); });
+  await page.goto(`/studio.html?type=video&model=${encodeURIComponent(model)}`);
+  await page.locator("[data-s25-image-files]").setInputFiles({ name: "prepared.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) });
+  await page.locator("[data-generate-button]").click();
+  const review = page.locator("[data-generation-review-modal]");
+  await expect(review).toBeVisible();
+  await page.locator("textarea[name=prompt]").fill("A changed draft behind the open confirmation", { force: true });
+  await review.locator("[data-confirm-generation]").click();
+  await expect(page.locator("[data-toast]")).toContainText("изменились");
+  await expect(review).toBeHidden();
+  expect(generations).toBe(0);
+});
+
+test("standalone Grok exposes text and photo modes with the real variant and confirmation", async ({ page }) => {
+  const textModel = "grok-imagine/text-to-video";
+  const photoModel = "grok-imagine/image-to-video";
+  const quotes: Record<string, unknown>[] = [];
+  const launches: Record<string, unknown>[] = [];
+  await page.route("**/studio.html?*", r => r.fulfill({ path: path.join(landing, "studio.html"), contentType: "text/html" }));
+  await page.route("**/js/*.js?*", r => r.fulfill({ path: path.join(landing, "js", new URL(r.request().url()).pathname.split("/").pop()!), contentType: "text/javascript" }));
+  await page.route("**/css/prototype-premium.css?*", r => r.fulfill({ path: path.join(landing, "css/prototype-premium.css"), contentType: "text/css" }));
+  await page.route("**/api/web/**", r => {
+    const url = new URL(r.request().url());
+    const json = (data: unknown) => r.fulfill({ json: { ok: true, data } });
+    if (url.pathname.endsWith("/me")) return json({ id: 7, credits: 100, full_name: "Reader" });
+    if (url.pathname.endsWith("/uploads/reference")) return json({ url: "https://example.test/grok-reader.jpg" });
+    if (url.pathname.endsWith("/models/video")) return json([
+      { key: textModel, name: "Grok Imagine Video", type: "video", modes: ["text"], durations: [10], resolutions: ["720p"], aspect_ratios: ["9:16"], credits: 0.6, active: true },
+      { key: photoModel, name: "Grok Imagine Video", type: "video", modes: ["image"], durations: [10], resolutions: ["720p"], aspect_ratios: ["9:16"], max_refs: 7, credits: 0.7, active: true },
+    ]);
+    if (url.pathname.endsWith("/generate/video/quote")) {
+      const body = r.request().postDataJSON();
+      quotes.push(body);
+      return json({ cost_credits: body.model === photoModel ? 7 : 6, can_run: true, reference_seconds: 0, output_seconds: 10 });
+    }
+    if (url.pathname.endsWith("/generate/video")) {
+      launches.push(r.request().postDataJSON());
+      return json({ id: 93, status: "pending" });
+    }
+    if (url.pathname.includes("/prompts")) return json({ items: [] });
+    if (url.pathname.includes("/transactions")) return json({ transactions: [], pending: [] });
+    if (url.pathname.includes("/auth/config")) return json({});
+    return json([]);
+  });
+  page.on("dialog", d => d.accept());
+  await page.goto(`/studio.html?type=video&model=${encodeURIComponent(textModel)}`);
+
+  const chooser = page.locator("[data-video-mode-switch]");
+  const references = page.locator("[data-reference-section]");
+  await expect(chooser).toBeVisible();
+  await expect(chooser.getByRole("button", { name: "По тексту" })).toHaveAttribute("aria-pressed", "true");
+  await expect(references).toBeHidden();
+  await expect(page.locator("[data-generation-note]")).toContainText("0,6");
+  await page.locator("[data-generate-button]").click();
+  let review = page.locator("[data-generation-review-modal]");
+  await expect(review.getByText("По тексту", { exact: true })).toBeVisible();
+  await review.locator("[data-confirm-generation]").click();
+  await expect.poll(() => launches.length).toBe(1);
+  expect(quotes[0]).toMatchObject({ model: textModel, mode: "text", image_url: null });
+  expect(launches[0]).toMatchObject({ model: textModel, mode: "text", image_url: null, quoted_credits: 6 });
+
+  await page.goto(`/studio.html?type=video&model=${encodeURIComponent(textModel)}`);
+  await chooser.getByRole("button", { name: "По фото" }).click();
+  await expect(chooser.getByRole("button", { name: "По фото" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("[data-generation-note]")).toContainText("0,7");
+  await expect(references).toBeVisible();
+  await page.locator("[data-generate-button]").click();
+  await expect(page.locator("[data-generation-review-modal]")).toBeHidden();
+  await expect(page.locator("[data-toast]")).toContainText("сначала добавьте исходное фото");
+
+  if (await references.getAttribute("open") === null) await references.locator(":scope > summary").click();
+  const fileInput = references.locator("input[name=reference_file]");
+  await fileInput.setInputFiles({ name: "reader.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) });
+  await references.locator("input[name=reference_url]").fill("https://example.test/route-reader.jpg");
+  await chooser.getByRole("button", { name: "По тексту" }).click();
+  await expect(references).toBeHidden();
+  await expect.poll(() => fileInput.evaluate((input: HTMLInputElement) => input.files?.length || 0)).toBe(0);
+  await expect(references.locator("input[name=reference_url]")).toHaveValue("");
+  await expect(page.locator("[data-toast]")).toContainText("Фото убрано");
+  await chooser.getByRole("button", { name: "По фото" }).click();
+  await expect(references).toBeVisible();
+  await fileInput.setInputFiles({ name: "reader.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) });
+  await page.locator("[data-generate-button]").click();
+  review = page.locator("[data-generation-review-modal]");
+  await expect(review.getByText("По фото", { exact: true })).toBeVisible();
+  await review.locator("[data-confirm-generation]").click();
+  await expect.poll(() => launches.length).toBe(2);
+  expect(quotes[1]).toMatchObject({ model: photoModel, mode: "image", image_url: "https://example.test/grok-reader.jpg" });
+  expect(launches[1]).toMatchObject({ model: photoModel, mode: "image", image_url: "https://example.test/grok-reader.jpg", quoted_credits: 7 });
+});
+
+test("standalone Grok photo repeat keeps replacement photo while the mode chooser is hidden", async ({ page }) => {
+  const textModel = "grok-imagine/text-to-video";
+  const photoModel = "grok-imagine/image-to-video";
+  const quotes: Record<string, unknown>[] = [];
+  const launches: Record<string, unknown>[] = [];
+  await page.route("**/studio.html?*", r => r.fulfill({ path: path.join(landing, "studio.html"), contentType: "text/html" }));
+  await page.route("**/js/*.js?*", r => r.fulfill({ path: path.join(landing, "js", new URL(r.request().url()).pathname.split("/").pop()!), contentType: "text/javascript" }));
+  await page.route("**/css/prototype-premium.css?*", r => r.fulfill({ path: path.join(landing, "css/prototype-premium.css"), contentType: "text/css" }));
+  await page.route("**/api/web/**", r => {
+    const url = new URL(r.request().url());
+    const json = (data: unknown) => r.fulfill({ json: { ok: true, data } });
+    if (url.pathname.endsWith("/me")) return json({ id: 7, credits: 100, full_name: "Reader" });
+    if (url.pathname.endsWith("/models/video")) return json([
+      { key: textModel, name: "Grok Imagine Video", type: "video", modes: ["text"], durations: [10], resolutions: ["720p"], aspect_ratios: ["9:16"], credits: 0.6, active: true },
+      { key: photoModel, name: "Grok Imagine Video", type: "video", modes: ["image"], durations: [10], resolutions: ["720p"], aspect_ratios: ["9:16"], max_refs: 7, credits: 0.7, active: true },
+    ]);
+    if (url.pathname.endsWith("/uploads/reference")) return json({ url: "https://example.test/repeat-reader.jpg" });
+    if (url.pathname.endsWith("/feed/77")) return json({
+      id: 77, type: "video", model: photoModel, original_duration: 10,
+      original_resolution: "720p", original_aspect_ratio: "9:16",
+      source_has_video_reference: false, result_url: "https://example.test/source.mp4",
+    });
+    if (url.pathname.endsWith("/feed/77/remix/quote")) {
+      quotes.push(r.request().postDataJSON());
+      return json({ cost_credits: 7, can_run: true, duration_options: [10], default_duration: 10, effective_duration: 10 });
+    }
+    if (url.pathname.endsWith("/feed/77/remix")) {
+      launches.push(r.request().postDataJSON());
+      return json({ id: 94, status: "pending" });
+    }
+    if (url.pathname.includes("/prompts")) return json({ items: [] });
+    if (url.pathname.includes("/transactions")) return json({ transactions: [], pending: [] });
+    if (url.pathname.includes("/auth/config")) return json({});
+    return json([]);
+  });
+  page.on("dialog", d => d.accept());
+  await page.goto(`/studio.html?type=video&model=${encodeURIComponent(photoModel)}&feed_remix=77`);
+
+  await expect(page.locator("[data-video-mode-switch]")).toBeHidden();
+  const references = page.locator("[data-reference-section]");
+  await expect(references).toBeVisible();
+  if (await references.getAttribute("open") === null) await references.locator(":scope > summary").click();
+  await references.locator("input[name=reference_file]").setInputFiles({ name: "repeat.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) });
+  await page.getByRole("button", { name: "Проверить цену и длительность" }).click();
+  await expect.poll(() => quotes.length).toBe(1);
+  expect(quotes[0]).toMatchObject({ model: photoModel, mode: "image", image_url: "https://example.test/repeat-reader.jpg" });
+  await launch(page);
+  await expect.poll(() => launches.length).toBe(1);
+  expect(launches[0]).toMatchObject({ model: photoModel, mode: "image", image_url: "https://example.test/repeat-reader.jpg", quoted_credits: 7 });
+});
+
+test("standalone Grok ratio follows distinct references without resetting other choices", async ({ page }) => {
+  await fixture(page);
+  const textModel = "grok-imagine/text-to-video", photoModel = "grok-imagine/image-to-video";
+  const requests: Record<string, any>[] = [];
+  await page.route("**/api/web/models/video", r => r.fulfill({ json: { ok: true, data: [
+    { key: textModel, name: "Grok Imagine Video", type: "video", modes: ["text"], durations: [10], resolutions: ["720p"], aspect_ratios: ["9:16", "16:9"], credits: 0.6, active: true },
+    { key: photoModel, name: "Grok Imagine Video", type: "video", modes: ["image"], durations: [10], resolutions: ["720p"], aspect_ratios: ["9:16", "16:9"], aspect_ratio_min_refs: 2, max_refs: 7, credits: 0.7, active: true },
+  ] } }));
+  await page.route("**/api/web/generate/video{,/quote}", r => {
+    requests.push(r.request().postDataJSON());
+    return r.fulfill({ json: { ok: true, data: r.request().url().endsWith("/quote")
+      ? { cost_credits: 7, can_run: true } : { id: 96, status: "pending" } } });
+  });
+  const first = "https://example.test/first.jpg", second = "https://example.test/second.jpg";
+  await page.goto(`/studio.html?type=video&model=${encodeURIComponent(photoModel)}&ref=${encodeURIComponent(first)}`);
+  const ratio = page.locator(".account-composer [name=aspect_ratio]");
+  const ratioLabel = ratio.locator("..");
+  const references = page.locator("[data-reference-section]");
+  await expect(ratio).toBeDisabled();
+  await expect(ratioLabel).toBeHidden();
+  if (await references.getAttribute("open") === null) await references.locator(":scope > summary").click();
+  const extras = references.locator("[name=reference_urls]");
+  await extras.fill(first);
+  await expect(ratio).toBeDisabled();
+  await extras.fill(`${first}\n${second}`);
+  await expect(ratio).toBeEnabled();
+  await expect(ratioLabel).toBeVisible();
+  await ratio.selectOption("16:9");
+  const optional = page.locator("[data-optional-section]");
+  if (await optional.getAttribute("open") === null) await optional.locator(":scope > summary").click();
+  await page.locator(".account-composer [name=resolution]").selectOption("720p");
+  await extras.fill("");
+  await expect(ratio).toBeDisabled();
+  await expect(ratioLabel).toBeHidden();
+  const files = references.locator("[name=reference_file]");
+  await files.setInputFiles({ name: "second.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) });
+  await expect(ratio).toBeEnabled();
+  await expect(ratio).toHaveValue("16:9");
+  await files.setInputFiles([]);
+  await expect(ratio).toBeDisabled();
+  await expect(page.locator(".account-composer [name=resolution]")).toHaveValue("720p");
+  await page.locator("[data-generate-button]").click();
+  const review = page.locator("[data-generation-review-modal]");
+  await expect(review.locator("[data-review-list] article").filter({ hasText: "Формат кадра" }).locator("b")).toHaveText("Авто");
+  await review.locator("[data-confirm-generation]").click();
+  await expect.poll(() => requests.length).toBe(2);
+  for (const body of requests) expect(body).toMatchObject({ model: photoModel, aspect_ratio: null, image_url: first, reference_urls: [], resolution: "720p" });
+
+  await page.goto(`/studio.html?type=video&model=${encodeURIComponent(photoModel)}&ref=${encodeURIComponent(first)}&refs=${encodeURIComponent(second)}`);
+  await expect(ratio).toBeEnabled();
+  await ratio.selectOption("16:9");
+  await launch(page);
+  await expect.poll(() => requests.length).toBe(4);
+  for (const body of requests.slice(2)) expect(body).toMatchObject({ model: photoModel, aspect_ratio: "16:9", image_url: first, reference_urls: [second] });
+
+  await page.goto(`/studio.html?type=video&model=${encodeURIComponent(textModel)}`);
+  await expect(ratio).toBeEnabled();
+  await ratio.selectOption("16:9");
+  await launch(page);
+  await expect.poll(() => requests.length).toBe(6);
+  for (const body of requests.slice(4)) expect(body).toMatchObject({ model: textModel, aspect_ratio: "16:9", image_url: null, reference_urls: [] });
+});
+
+async function grokPreparationFixture(page: Page, uploadedUrls = ["https://example.test/same-content.jpg"]) {
+  await fixture(page);
+  const textModel = "grok-imagine/text-to-video", photoModel = "grok-imagine/image-to-video";
+  const uploads: string[] = [], requests: Record<string, any>[] = [];
+  await page.route("**/api/web/models/video", r => r.fulfill({ json: { ok: true, data: [
+    { key: model, name: "Seedance 2.5", type: "video", durations: [10], aspect_ratios: ["9:16", "16:9"], credits: 2, active: true },
+    { key: textModel, name: "Grok Imagine Video", type: "video", modes: ["text"], durations: [10], aspect_ratios: ["9:16", "16:9"], credits: 0.6, active: true },
+    { key: photoModel, name: "Grok Imagine Video", type: "video", modes: ["image"], durations: [10], aspect_ratios: ["9:16", "16:9"], aspect_ratio_min_refs: 2, max_refs: 7, credits: 0.7, active: true },
+  ] } }));
+  await page.route("**/api/web/uploads/reference", r => {
+    const url = uploadedUrls[uploads.length % uploadedUrls.length];
+    uploads.push(url);
+    return r.fulfill({ json: { ok: true, data: { url } } });
+  });
+  await page.route("**/api/web/generate/video{,/quote}", r => {
+    requests.push(r.request().postDataJSON());
+    return r.fulfill({ json: { ok: true, data: r.request().url().endsWith("/quote")
+      ? { cost_credits: 7, can_run: true } : { id: 99, status: "pending" } } });
+  });
+  return { textModel, photoModel, uploads, requests };
+}
+
+for (const duplicate of ["files", "file and URL"] as const) {
+  test(`standalone Grok prepares duplicate ${duplicate} before confirming the actual ratio`, async ({ page }) => {
+    const { photoModel, uploads, requests } = await grokPreparationFixture(page);
+    const sameUrl = "https://example.test/same-content.jpg";
+    await page.goto(`/studio.html?type=video&model=${encodeURIComponent(photoModel)}${duplicate === "file and URL" ? `&ref=${encodeURIComponent(sameUrl)}` : ""}`);
+    const references = page.locator("[data-reference-section]");
+    if (await references.getAttribute("open") === null) await references.locator(":scope > summary").click();
+    await references.locator("[name=reference_file]").setInputFiles((duplicate === "files" ? ["original.jpg", "copy.jpg"] : ["original.jpg"])
+      .map(name => ({ name, mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) })));
+    const ratio = page.locator(".account-composer [name=aspect_ratio]");
+    await ratio.selectOption("16:9");
+    const review = page.locator("[data-generation-review-modal]");
+    const reviewRatio = review.locator("[data-review-list] article").filter({ hasText: "Формат кадра" }).locator("b");
+    await page.locator("[data-generate-button]").click();
+    await expect(reviewRatio).toHaveText("Авто");
+    await expect(review.getByText("Фото: 1", { exact: true })).toBeVisible();
+    await expect(ratio).toBeDisabled();
+    await expect(ratio.locator("..")).toBeHidden();
+    expect(uploads).toHaveLength(duplicate === "files" ? 2 : 1);
+    expect(requests).toHaveLength(0);
+
+    await review.getByRole("button", { name: "Проверить ещё раз" }).click();
+    await references.locator("[name=reference_urls]").fill("https://example.test/distinct.jpg");
+    await page.locator("[data-generate-button]").click();
+    await expect(reviewRatio).toHaveText("16:9");
+    await expect(review.getByText("Фото: 2", { exact: true })).toBeVisible();
+    await expect(ratio).toBeEnabled();
+    await review.getByRole("button", { name: "Проверить ещё раз" }).click();
+    await references.locator("[name=reference_urls]").fill("");
+    await page.locator("[data-generate-button]").click();
+    await expect(reviewRatio).toHaveText("Авто");
+    await expect(ratio).toBeDisabled();
+    const preparedUploads = uploads.length;
+    await review.locator("[data-confirm-generation]").click();
+    await expect.poll(() => requests.length).toBe(2);
+    expect(uploads).toHaveLength(preparedUploads);
+    for (const body of requests) expect(body).toMatchObject({ model: photoModel, aspect_ratio: null, image_url: sameUrl, reference_urls: [] });
+  });
+}
+
+test("standalone Grok retains the selected ratio for distinct prepared uploads", async ({ page }) => {
+  const urls = ["https://example.test/first.jpg", "https://example.test/second.jpg"];
+  const { photoModel, uploads, requests } = await grokPreparationFixture(page, urls);
+  await page.goto(`/studio.html?type=video&model=${encodeURIComponent(photoModel)}`);
+  const references = page.locator("[data-reference-section]");
+  if (await references.getAttribute("open") === null) await references.locator(":scope > summary").click();
+  await references.locator("[name=reference_file]").setInputFiles(["first.jpg", "second.jpg"]
+    .map((name, i) => ({ name, mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, i, 0xff, 0xd9]) })));
+  await page.locator(".account-composer [name=aspect_ratio]").selectOption("16:9");
+  await page.locator("[data-generate-button]").click();
+  const review = page.locator("[data-generation-review-modal]");
+  await expect(review.getByText("Фото: 2", { exact: true })).toBeVisible();
+  await expect(review.locator("[data-review-list] article").filter({ hasText: "Формат кадра" }).locator("b")).toHaveText("16:9");
+  expect(uploads).toHaveLength(2);
+  await review.locator("[data-confirm-generation]").click();
+  await expect.poll(() => requests.length).toBe(2);
+  expect(uploads).toHaveLength(2);
+  for (const body of requests) expect(body).toMatchObject({ model: photoModel, aspect_ratio: "16:9", image_url: urls[0], reference_urls: [urls[1]] });
+});
+
+test("standalone Grok preparation ignores retained materials in the hidden Seedance panel", async ({ page }) => {
+  const { textModel, photoModel, uploads, requests } = await grokPreparationFixture(page);
+  let panelUploads = 0;
+  await page.route("**/api/web/seedance25/upload-reference", r => { panelUploads += 1; return r.fulfill({ json: { ok: true, data: { url: "https://example.test/hidden.jpg" } } }); });
+  await page.goto(`/studio.html?type=video&model=${encodeURIComponent(model)}`);
+  await page.locator("[data-seedance25-studio]").getByText("Дополнительные настройки", { exact: true }).click();
+  await page.locator("[data-s25-image-urls]").fill("https://example.test/hidden-url.jpg");
+  await page.locator("[data-s25-image-files]").setInputFiles({ name: "hidden.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) });
+  await page.locator("[data-account-model-select]").selectOption(textModel);
+  await page.locator("[data-video-mode-switch]").getByRole("button", { name: "По фото" }).click();
+  await expect(page.locator("[data-seedance25-studio]")).toBeHidden();
+  const references = page.locator("[data-reference-section]");
+  if (await references.getAttribute("open") === null) await references.locator(":scope > summary").click();
+  await references.locator("[name=reference_file]").setInputFiles({ name: "reader.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) });
+  await page.locator("[data-generate-button]").click();
+  const review = page.locator("[data-generation-review-modal]");
+  await expect(review.getByText("Фото: 1", { exact: true })).toBeVisible();
+  expect(panelUploads).toBe(0);
+  expect(uploads).toHaveLength(1);
+  await review.locator("[data-confirm-generation]").click();
+  await expect.poll(() => requests.length).toBe(2);
+  expect(panelUploads).toBe(0);
+  expect(uploads).toHaveLength(1);
+  for (const body of requests) expect(body).toMatchObject({ model: photoModel, aspect_ratio: null, image_url: "https://example.test/same-content.jpg", reference_urls: [] });
 });
 
 test("standalone site blocks ambiguous repeat across reload until history acknowledgement", async ({ page }) => {

@@ -10,6 +10,7 @@ interface HomeProps {
   data: BootstrapData;
   drafts: GenerationDraft[];
   onNavigate: (tab: AppTab) => void;
+  onResume: (tab: AppTab) => void;
   onTask: (task: GenerationTask) => void;
 }
 
@@ -105,7 +106,7 @@ function HomeThumbnail({ url, kind, reducedMotion, fallback = null }: { url?: st
     : <img src={src} alt="" loading="lazy" onError={() => setFailed(src)} />;
 }
 
-export function LilacHome({ data, drafts, onNavigate, onTask }: HomeProps) {
+export function LilacHome({ data, drafts, onNavigate, onResume, onTask }: HomeProps) {
   const photoPreview = safeExternalUrl(data.feed.find(item => item.gen_type === "image")?.preview_url);
   const trendPreview = safeExternalUrl(data.trends.find(item => item.kind === "video")?.preview_url);
   const saved = drafts.filter(hasDraftInput);
@@ -149,7 +150,7 @@ export function LilacHome({ data, drafts, onNavigate, onTask }: HomeProps) {
       </button>)}
     </nav>
     {saved.length > 0 && <section><div className="lilac-section-title"><h2>Продолжить черновик</h2></div>
-      {saved.map(draft => <button className="lilac-row" key={draft.kind} onClick={() => onNavigate(draft.kind === "image" ? "photo" : draft.kind)}>
+      {saved.map(draft => <button className="lilac-row" key={draft.kind} onClick={() => onResume(draft.kind === "image" ? "photo" : draft.kind)}>
         <span className="lilac-mini-icon"><Orbit /></span><span><strong>{draft.kind === "image" ? "Фото" : draft.kind === "video" ? "Видео" : "Движение"}</strong><small>{draft.prompt.trim() || "Материалы уже добавлены"}</small></span><ArrowRight size={18} />
       </button>)}<p className="lilac-note">Черновики сохраняются в этой вкладке браузера.</p></section>}
     <section><div className="lilac-section-title"><h2>Повторить готовый пример</h2><button onClick={() => onNavigate("trends")}>Все шаблоны <ArrowRight size={15} /></button></div><p className="lilac-note">Выберите пример, добавьте свои материалы и подтвердите стоимость.</p>

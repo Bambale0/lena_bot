@@ -1048,13 +1048,6 @@ def video_mode_kb(model_key: str) -> InlineKeyboardMarkup:
         builder.row(
             InlineKeyboardButton(text="🎞️ Видео → Видео", callback_data=f"vid_mode:video:{model_key}"),
         )
-    if model_key == "bytedance/seedance-2-5":
-        builder.row(
-            InlineKeyboardButton(
-                text="🎭 Замена персонажа",
-                callback_data=f"vid_mode:identity:{model_key}",
-            )
-        )
     builder.row(InlineKeyboardButton(text="← Назад", callback_data="vid_nav:models"))
     return builder.as_markup()
 

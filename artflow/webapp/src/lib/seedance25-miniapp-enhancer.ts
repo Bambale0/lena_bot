@@ -16,7 +16,6 @@ type Seedance25Options = {
   generateAudio: boolean;
   returnLastFrame: boolean;
   webSearch: boolean;
-  identityTransfer: boolean;
   videoFiles: File[];
   audioFiles: File[];
   videoRefs: string[];
@@ -35,7 +34,6 @@ const DEFAULT_OPTIONS: Seedance25Options = {
   generateAudio: true,
   returnLastFrame: false,
   webSearch: false,
-  identityTransfer: false,
   videoFiles: [],
   audioFiles: [],
   videoRefs: [],
@@ -83,7 +81,7 @@ function parameterGroup(root: HTMLElement, title: string): HTMLElement | null {
 
 function genericReferenceCard(root: HTMLElement): HTMLElement | null {
   return Array.from(root.querySelectorAll<HTMLElement>(".apix-uploader-card")).find(
-    (card) => card.id !== PANEL_ID && card.textContent?.includes("Референсы"),
+    (card) => card.id !== PANEL_ID && Boolean(card.querySelector<HTMLInputElement>('input[type="file"][accept*="image"]')),
   ) || null;
 }
 
@@ -110,70 +108,55 @@ function renderPanel(): HTMLElement {
   const current = readOptions();
   const panel = document.createElement("div");
   panel.id = PANEL_ID;
-  panel.className = "apix-uploader-card grid min-w-0 gap-2 rounded-xl border border-primary/30 bg-primary/5 p-2";
+  panel.className = "apix-uploader-card seedance25-guided grid min-w-0 gap-3 rounded-xl border border-primary/30 bg-primary/5 p-3";
+  panel.setAttribute("role", "group");
+  panel.setAttribute("aria-label", "Материалы Seedance 2.5");
   panel.innerHTML = `
-    <div class="min-w-0">
-      <p class="text-xs font-semibold">Seedance 2.5 · референсы</p>
+    <div class="seedance25-guided-head min-w-0">
+      <p class="text-sm font-semibold">Добавьте материалы</p>
       <p class="text-[10px] text-muted-foreground">
-        Без референсов Seedance создаёт видео по тексту. Любое добавленное фото, видео или аудио участвует как мультимодальный референс — первый кадр отдельно не используется.
+        Можно выбрать один тип или сочетать несколько. Без файлов видео создаётся только по тексту; первый кадр отдельно не используется.
       </p>
     </div>
-    <label class="grid min-w-0 gap-1 text-xs font-medium">
-      Видео · до ${MAX_VIDEOS}
-      <input data-seedance25="videoFiles" type="file" accept="video/mp4,video/quicktime,.mp4,.mov" multiple class="w-full text-xs" />
-    </label>
-    <label class="grid min-w-0 gap-1 text-xs font-medium">
-      Аудио · до ${MAX_AUDIOS}
-      <input data-seedance25="audioFiles" type="file" accept="audio/*,.mp3,.wav,.aac,.m4a,.ogg" multiple class="w-full text-xs" />
-    </label>
-    <div class="grid min-w-0 gap-2 sm:grid-cols-2">
-      <label class="grid min-w-0 gap-1 text-xs font-medium">
-        Доп. video refs по URL
-        <textarea data-seedance25="videoRefs" class="min-h-14 w-full rounded-md border bg-background px-2 py-2 font-mono text-xs" placeholder="https://…/ref.mp4"></textarea>
-      </label>
-      <label class="grid min-w-0 gap-1 text-xs font-medium">
-        Audio refs по URL
-        <textarea data-seedance25="audioRefs" class="min-h-14 w-full rounded-md border bg-background px-2 py-2 font-mono text-xs" placeholder="https://…/sound.mp3"></textarea>
-      </label>
+    <div class="seedance25-materials grid min-w-0 grid-cols-3 gap-2">
+      <button type="button" data-seedance25-material="photo" class="seedance25-material">
+        <span aria-hidden="true">◇</span><strong>Фото</strong><small>до ${MAX_IMAGES}</small>
+      </button>
+      <button type="button" data-seedance25-material="video" class="seedance25-material">
+        <span aria-hidden="true">▷</span><strong>Видео</strong><small data-seedance25-count="video">до ${MAX_VIDEOS}</small>
+      </button>
+      <button type="button" data-seedance25-material="audio" class="seedance25-material">
+        <span aria-hidden="true">≋</span><strong>Аудио</strong><small data-seedance25-count="audio">до ${MAX_AUDIOS}</small>
+      </button>
     </div>
-    <div class="grid min-w-0 gap-2 sm:grid-cols-2">
-      <label class="grid min-w-0 gap-1 text-xs font-medium">
-        Точная длительность, сек
-        <input data-seedance25="exactDuration" type="number" min="4" max="30" placeholder="4–30" class="w-full rounded-md border bg-background px-2 py-2 text-xs" />
-      </label>
-      <label class="flex min-w-0 items-center gap-2 rounded-md border bg-background/60 px-2 py-2 text-xs font-medium">
-        <input data-seedance25="autoDuration" type="checkbox" />
-        Auto duration
-      </label>
-    </div>
-    <div class="grid min-w-0 gap-2 sm:grid-cols-3">
-      <label class="grid min-w-0 gap-1 text-xs font-medium">
-        Output
-        <select data-seedance25="outputFormat" class="w-full rounded-md border bg-background px-2 py-2 text-xs">
-          <option value="mp4">mp4</option>
-          <option value="mov">mov</option>
-        </select>
-      </label>
-      <label class="flex min-w-0 items-center gap-2 rounded-md border bg-background/60 px-2 py-2 text-xs font-medium">
-        <input data-seedance25="generateAudio" type="checkbox" />
-        Generate audio
-      </label>
-      <label class="flex min-w-0 items-center gap-2 rounded-md border bg-background/60 px-2 py-2 text-xs font-medium">
-        <input data-seedance25="returnLastFrame" type="checkbox" />
-        Return last frame
-      </label>
-    </div>
-    <label class="flex min-w-0 items-center gap-2 rounded-md border border-primary/30 bg-primary/10 px-2 py-2 text-xs font-medium">
-      <input data-seedance25="identityTransfer" type="checkbox" />
-      🎭 Замена персонажа · 1–3 фото одного человека + 1 исходное видео
-    </label>
-    <p class="text-[10px] text-muted-foreground">
-      В этом режиме фото задают внешность, а видео — только движение и сцену. Качество 480p / 720p / 1080p выбирается в параметрах генерации.
-    </p>
-    <label class="flex min-w-0 items-center gap-2 rounded-md border bg-background/60 px-2 py-2 text-xs font-medium">
-      <input data-seedance25="webSearch" type="checkbox" />
-      Web search grounding
-    </label>
+    <input data-seedance25="videoFiles" type="file" accept="video/mp4,video/quicktime,.mp4,.mov" multiple class="sr-only" />
+    <input data-seedance25="audioFiles" type="file" accept="audio/*,.mp3,.wav,.aac,.m4a,.ogg" multiple class="sr-only" />
+    <details class="seedance25-advanced apix-help">
+      <summary>Дополнительные настройки</summary>
+      <div class="grid min-w-0 gap-2 pt-2">
+        <p class="text-[10px] text-muted-foreground">Качество 480p / 720p / 1080p выбирается в общих параметрах ниже.</p>
+        <div class="grid min-w-0 gap-2 sm:grid-cols-2">
+          <label class="grid min-w-0 gap-1 text-xs font-medium">Ссылки на видео
+            <textarea data-seedance25="videoRefs" class="min-h-14 w-full rounded-md border bg-background px-2 py-2 text-xs" placeholder="Одна ссылка на строку"></textarea>
+          </label>
+          <label class="grid min-w-0 gap-1 text-xs font-medium">Ссылки на аудио
+            <textarea data-seedance25="audioRefs" class="min-h-14 w-full rounded-md border bg-background px-2 py-2 text-xs" placeholder="Одна ссылка на строку"></textarea>
+          </label>
+        </div>
+        <div class="grid min-w-0 gap-2 sm:grid-cols-2">
+          <label class="grid min-w-0 gap-1 text-xs font-medium">Точная длительность, сек
+            <input data-seedance25="exactDuration" type="number" min="4" max="30" placeholder="4–30" class="w-full rounded-md border bg-background px-2 py-2 text-xs" />
+          </label>
+          <label class="seedance25-check"><input data-seedance25="autoDuration" type="checkbox" />Автоматическая длительность</label>
+        </div>
+        <label class="grid min-w-0 gap-1 text-xs font-medium">Формат файла
+          <select data-seedance25="outputFormat" class="w-full rounded-md border bg-background px-2 py-2 text-xs"><option value="mp4">MP4</option><option value="mov">MOV</option></select>
+        </label>
+        <label class="seedance25-check"><input data-seedance25="generateAudio" type="checkbox" />Создавать звук</label>
+        <label class="seedance25-check"><input data-seedance25="returnLastFrame" type="checkbox" />Вернуть последний кадр</label>
+        <label class="seedance25-check"><input data-seedance25="webSearch" type="checkbox" />Использовать поиск в интернете</label>
+      </div>
+    </details>
   `;
 
   const exactDuration = panel.querySelector<HTMLInputElement>('[data-seedance25="exactDuration"]');
@@ -182,7 +165,6 @@ function renderPanel(): HTMLElement {
   const generateAudio = panel.querySelector<HTMLInputElement>('[data-seedance25="generateAudio"]');
   const returnLastFrame = panel.querySelector<HTMLInputElement>('[data-seedance25="returnLastFrame"]');
   const webSearch = panel.querySelector<HTMLInputElement>('[data-seedance25="webSearch"]');
-  const identityTransfer = panel.querySelector<HTMLInputElement>('[data-seedance25="identityTransfer"]');
   const videoFiles = panel.querySelector<HTMLInputElement>('[data-seedance25="videoFiles"]');
   const audioFiles = panel.querySelector<HTMLInputElement>('[data-seedance25="audioFiles"]');
   const videoRefs = panel.querySelector<HTMLTextAreaElement>('[data-seedance25="videoRefs"]');
@@ -194,11 +176,20 @@ function renderPanel(): HTMLElement {
   if (generateAudio) generateAudio.checked = current.generateAudio;
   if (returnLastFrame) returnLastFrame.checked = current.returnLastFrame;
   if (webSearch) webSearch.checked = current.webSearch;
-  if (identityTransfer) identityTransfer.checked = current.identityTransfer;
   if (videoRefs) videoRefs.value = current.videoRefs.join("\n");
   if (audioRefs) audioRefs.value = current.audioRefs.join("\n");
 
-  panel.addEventListener("input", () => {
+  panel.querySelector<HTMLButtonElement>('[data-seedance25-material="photo"]')?.addEventListener("click", () => {
+    const select = selectedModelSelect();
+    const root = select?.closest<HTMLElement>(".apix-generation-layout") || document.body;
+    genericReferenceCard(root)?.querySelector<HTMLInputElement>('input[type="file"]')?.click();
+  });
+  panel.querySelector<HTMLButtonElement>('[data-seedance25-material="video"]')?.addEventListener("click", () => videoFiles?.click());
+  panel.querySelector<HTMLButtonElement>('[data-seedance25-material="audio"]')?.addEventListener("click", () => audioFiles?.click());
+
+  const sync = () => {
+    const selectedVideos = Array.from(videoFiles?.files || []).slice(0, MAX_VIDEOS);
+    const selectedAudios = Array.from(audioFiles?.files || []).slice(0, MAX_AUDIOS);
     writeOptions({
       exactDuration: exactDuration?.value || "",
       autoDuration: Boolean(autoDuration?.checked),
@@ -206,14 +197,18 @@ function renderPanel(): HTMLElement {
       generateAudio: Boolean(generateAudio?.checked),
       returnLastFrame: Boolean(returnLastFrame?.checked),
       webSearch: Boolean(webSearch?.checked),
-      identityTransfer: Boolean(identityTransfer?.checked),
-      videoFiles: Array.from(videoFiles?.files || []).slice(0, MAX_VIDEOS),
-      audioFiles: Array.from(audioFiles?.files || []).slice(0, MAX_AUDIOS),
+      videoFiles: selectedVideos,
+      audioFiles: selectedAudios,
       videoRefs: splitLines(videoRefs?.value || "", MAX_VIDEOS),
       audioRefs: splitLines(audioRefs?.value || "", MAX_AUDIOS),
     });
-  });
-  panel.addEventListener("change", () => panel.dispatchEvent(new Event("input", { bubbles: true })));
+    const videoCount = panel.querySelector<HTMLElement>('[data-seedance25-count="video"]');
+    const audioCount = panel.querySelector<HTMLElement>('[data-seedance25-count="audio"]');
+    if (videoCount) videoCount.textContent = selectedVideos.length ? `Выбрано: ${selectedVideos.length}` : `до ${MAX_VIDEOS}`;
+    if (audioCount) audioCount.textContent = selectedAudios.length ? `Выбрано: ${selectedAudios.length}` : `до ${MAX_AUDIOS}`;
+  };
+  panel.addEventListener("input", sync);
+  panel.addEventListener("change", sync);
   return panel;
 }
 
@@ -281,21 +276,11 @@ function patchCreateVideo(): void {
       const videoRefs = unique([existingVideo, ...options.videoRefs, ...uploadedVideos]).slice(0, MAX_VIDEOS);
       body.video_url = videoRefs[0] || null;
 
-      if (options.identityTransfer) {
-        if (images.length < 1 || images.length > 3) {
-          throw new Error("Замена персонажа: загрузи 1–3 фото одного человека.");
-        }
-        if (videoRefs.length !== 1) {
-          throw new Error("Замена персонажа: нужен ровно один исходный видеоролик.");
-        }
-      }
-
       const audioIds = Array.isArray(body.audio_ids) ? body.audio_ids.map(String) : [];
       const audioRefs = unique([...audioIds, ...options.audioRefs, ...uploadedAudios]).slice(0, MAX_AUDIOS);
       const tokens = [
         token("output_format", options.outputFormat),
-        token("generate_audio", options.identityTransfer ? false : options.generateAudio),
-        token("identity_transfer", options.identityTransfer),
+        token("generate_audio", options.generateAudio),
         token("return_last_frame", options.returnLastFrame),
         token("web_search", options.webSearch),
         ...videoRefs.slice(1).map((url) => token("video_ref", url)),
