@@ -2338,3 +2338,7 @@ Steps: [x] root-cause and production preflight; [x] RED/green operator control;
   the branded circular medallion, four aligned outline glyphs, unchanged labels,
   active-state panel, focus treatment and no overflow. No paid or production
   mutation was used during verification.
+- PR #317 review found that a later legacy glow declaration replaced the new
+  inactive medallion's complete `box-shadow` stack. The obsolete declaration
+  was removed and the browser contract now requires the inactive Create control
+  to retain its inset black/lilac rings as well as its outer glow.

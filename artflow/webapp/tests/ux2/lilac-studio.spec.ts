@@ -139,6 +139,7 @@ test("bottom navigation uses four aligned outline glyphs and the branded APIX cr
   const box = await medallion.boundingBox();
   expect(Math.abs(box!.width - box!.height)).toBeLessThanOrEqual(1);
   expect(await medallion.evaluate(node => getComputedStyle(node).borderRadius)).toBe("50%");
+  expect(await medallion.evaluate(node => getComputedStyle(node).boxShadow)).toContain("inset");
   expect(await nav.getByRole("tab", { name: "Создать", exact: true }).getAttribute("aria-label")).toBe("Создать");
 });
 
