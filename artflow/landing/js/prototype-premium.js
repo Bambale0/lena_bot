@@ -2849,9 +2849,11 @@ function seedanceGuidedMaterialSummary(form = document.querySelector(".account-c
   if (!panel || panel.hidden) return null;
   const fileCount = (selector) => panel.querySelector(selector)?.files?.length || 0;
   const urlCount = (selector) => splitReferenceLinks(panel.querySelector(selector)?.value || "").length;
-  const photos = fileCount("[data-s25-image-files]") + urlCount("[data-s25-image-urls]");
-  const videos = fileCount("[data-s25-video-files]") + urlCount("[data-s25-video-urls]");
-  const audios = fileCount("[data-s25-audio-files]") + urlCount("[data-s25-audio-urls]");
+  const genericPhotos = referenceFiles(form).length + referenceLinkValues(form).length;
+  const genericVideos = selectedOptionValue(form, "video_url") ? 1 : 0;
+  const photos = Math.min(30, genericPhotos + fileCount("[data-s25-image-files]") + urlCount("[data-s25-image-urls]"));
+  const videos = Math.min(10, genericVideos + fileCount("[data-s25-video-files]") + urlCount("[data-s25-video-urls]"));
+  const audios = Math.min(10, fileCount("[data-s25-audio-files]") + urlCount("[data-s25-audio-urls]"));
   const parts = [
     photos ? `Фото: ${photos}` : "",
     videos ? `Видео: ${videos}` : "",
