@@ -255,7 +255,94 @@ def upgrade() -> None:
                                   ) > 0.000001
                               )
                           )
+                       OR EXISTS (
+                            SELECT 1
+                            FROM referral_lineage_repair_rows lineage
+                            JOIN users invalid_child ON invalid_child.id = lineage.user_id
+                            JOIN credit_ledger bonus
+                              ON bonus.user_id = lineage.old_referrer_id
+                             AND bonus.delta > 0
+                            WHERE lineage.batch_key = NEW.batch_key
+                              AND lineage.reason = 'impossible_direct_referrer'
+                              AND (
+                                (
+                                  bonus.entry_type = 'referral_first_topup_bonus'
+                                  AND bonus.source_type IS NOT DISTINCT FROM 'referral_user'
+                                  AND bonus.source_id IS NOT DISTINCT FROM lineage.user_id::text
+                                )
+                                OR (
+                                  bonus.entry_type = 'referral_signup_bonus'
+                                  AND bonus.source_type IS NOT DISTINCT FROM 'user'
+                                  AND bonus.source_id IS NOT DISTINCT FROM lineage.user_id::text
+                                  AND NOT EXISTS (
+                                    SELECT 1
+                                    FROM users source_owner
+                                    WHERE (
+                                      source_owner.id::text = bonus.source_id
+                                      OR (
+                                        source_owner.tg_id > 0
+                                        AND source_owner.tg_id::text = bonus.source_id
+                                      )
+                                    )
+                                    AND NOT EXISTS (
+                                      SELECT 1
+                                      FROM referral_lineage_repair_rows owner_lineage
+                                      WHERE owner_lineage.batch_key = NEW.batch_key
+                                        AND owner_lineage.reason = 'impossible_direct_referrer'
+                                        AND owner_lineage.old_referrer_id = bonus.user_id
+                                        AND owner_lineage.user_id = source_owner.id
+                                    )
+                                  )
+                                )
+                                OR (
+                                  bonus.entry_type = 'referral_signup_bonus'
+                                  AND bonus.source_type IS NOT DISTINCT FROM 'user'
+                                  AND invalid_child.tg_id > 0
+                                  AND bonus.source_id IS NOT DISTINCT FROM invalid_child.tg_id::text
+                                  AND NOT EXISTS (
+                                    SELECT 1
+                                    FROM users source_owner
+                                    WHERE (
+                                      source_owner.id::text = bonus.source_id
+                                      OR (
+                                        source_owner.tg_id > 0
+                                        AND source_owner.tg_id::text = bonus.source_id
+                                      )
+                                    )
+                                    AND NOT EXISTS (
+                                      SELECT 1
+                                      FROM referral_lineage_repair_rows owner_lineage
+                                      WHERE owner_lineage.batch_key = NEW.batch_key
+                                        AND owner_lineage.reason = 'impossible_direct_referrer'
+                                        AND owner_lineage.old_referrer_id = bonus.user_id
+                                        AND owner_lineage.user_id = source_owner.id
+                                    )
+                                  )
+                                )
+                              )
+                              AND NOT EXISTS (
+                                SELECT 1
+                                FROM referral_credit_repair_rows repaired
+                                WHERE repaired.batch_key = NEW.batch_key
+                                  AND repaired.original_ledger_id = bonus.id
+                              )
+                          )
                        OR NEW.summary_json IS NULL
+                       OR (NEW.summary_json::jsonb ->> 'invalid_credit_credits') IS NULL
+                       OR (NEW.summary_json::jsonb ->> 'balance_debit_credits') IS NULL
+                       OR (NEW.summary_json::jsonb ->> 'unrecovered_credits') IS NULL
+                       OR abs(
+                            (NEW.summary_json::jsonb ->> 'invalid_credit_credits')::double precision
+                            - NEW.invalid_credit_credits
+                          ) > 0.000001
+                       OR abs(
+                            (NEW.summary_json::jsonb ->> 'balance_debit_credits')::double precision
+                            - NEW.balance_debit_credits
+                          ) > 0.000001
+                       OR abs(
+                            (NEW.summary_json::jsonb ->> 'unrecovered_credits')::double precision
+                            - NEW.unrecovered_credits
+                          ) > 0.000001
                        OR NEW.applied_at IS NULL THEN
                         RAISE EXCEPTION 'invalid referral repair batch finalization';
                     END IF;
