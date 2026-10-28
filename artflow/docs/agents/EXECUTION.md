@@ -2301,3 +2301,12 @@ Steps: [x] root-cause and production preflight; [x] RED/green operator control;
   checks; merge/autodeploy; exact-SHA, migration, container and health checks;
   authenticated route update for Standard and Prime plus immutable audit
   verification.
+- PR #315 first exact-head gates all passed, but required Codex review correctly
+  blocked merge on a P1 durable-journal flaw: the KIE marker prevented the
+  Neironych fallback from starting and would have selected the wrong result
+  binder. A real SQLite checkout-context RED reproduced it. The amended flow
+  records a definite KIE rejection, atomically transfers `kie-submit:*` to a
+  Neironych submission marker before POST, switches in-memory binder ownership,
+  and rejects an impossible late KIE callback. Related admission/routing/feed/
+  callback tests pass 164/164; Ruff, compileall and diff check pass. Updated-head
+  CI and review are required again before merge.

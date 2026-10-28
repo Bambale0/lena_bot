@@ -118,12 +118,26 @@ def make_submission_context(session, gen_id: int, product_model: str, *, surface
     request_id = str(uuid4())
 
     async def before_submit(idempotency_key: str, payload_sha256: str) -> None:
-        if context.started or not await repo.begin_seedance_submission(
-            session, gen_id, request_id, idempotency_key, payload_sha256,
-            product_model=product_model, surface=surface,
-        ):
+        if context.started:
+            raise NeironychSubmissionUnknown(request_id, idempotency_key)
+        if context.kie_started:
+            admitted = (
+                context.kie_definitely_rejected
+                and await repo.begin_neironych_fallback_after_kie_rejection(
+                    session, gen_id, request_id, idempotency_key, payload_sha256,
+                    product_model=product_model, surface=surface,
+                )
+            )
+        else:
+            admitted = await repo.begin_seedance_submission(
+                session, gen_id, request_id, idempotency_key, payload_sha256,
+                product_model=product_model, surface=surface,
+            )
+        if not admitted:
             raise NeironychSubmissionUnknown(request_id, idempotency_key)
         context.started = True
+        context.kie_started = False
+        context.kie_definitely_rejected = False
 
     async def before_kie_submit() -> None:
         # The KIE fallback follows a confirmed Neironych admission rejection,

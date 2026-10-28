@@ -40,6 +40,10 @@ KIE-primary routing, only `KieDefiniteRejection` may use Neironych. A 5xx,
 timeout, unknown acceptance, malformed response, missing task ID or unavailable
 catalog may NOT create a second paid task. Already accepted tasks are
 reconciled on their original provider. KIE createTask is single-shot.
+After a definite KIE rejection, APIX atomically transfers the durable
+`kie-submit` marker to a Neironych submission marker before the fallback POST;
+the KIE marker remains immutable rejection evidence and cannot later bind a
+task over the Neironych fallback.
 
 Official KIE documentation:
 https://docs.kie.ai/market/wan/3-0-video

@@ -35,6 +35,9 @@ class SubmissionContext:
     # Provider-independent KIE admission, committed BEFORE any paid POST.
     before_kie_submit: Callable[[], Awaitable[None]] | None = None
     kie_started: bool = False
+    # Set only when KIE proves no task was accepted. This authorizes the
+    # durable journal transfer required before a Neironych fallback POST.
+    kie_definitely_rejected: bool = False
 
 
 class NeironychVideoTaskFailed(RuntimeError):
