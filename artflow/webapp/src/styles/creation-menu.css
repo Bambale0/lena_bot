@@ -1,0 +1,62 @@
+/* Creation choices share a frame motif, while secondary tools remain compact. */
+.creation-menu {
+  --creation-surface: var(--card);
+  --creation-frame: var(--background);
+  width: 100%;
+  max-width: 1040px;
+  gap: 24px;
+}
+
+.creation-menu .creation-menu-header { display: grid; gap: 8px; }
+.creation-menu .creation-menu-header h1 { margin: 0; color: var(--foreground); font-size: clamp(28px, 4vw, 36px); line-height: 1.15; font-weight: 650; letter-spacing: -.035em; text-shadow: none; }
+.creation-menu .creation-menu-header p { margin: 0; max-width: 55ch; color: var(--muted-foreground); font-size: 14px; line-height: 1.5; }
+.creation-featured { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.creation-choice { min-width: 0; overflow: hidden; display: flex; flex-direction: column; padding: 0; border: 1px solid var(--border); border-radius: 20px; background: var(--creation-surface); text-align: left; color: var(--foreground); cursor: pointer; }
+.creation-choice:disabled { opacity: .55; cursor: not-allowed; }
+.creation-choice:focus-visible, .creation-tool:focus-visible, .creation-shortcut:focus-visible { outline: 2px solid var(--ring); outline-offset: 4px; }
+.creation-choice:not(:disabled):hover { border-color: var(--primary); }
+.creation-choice-visual { display: grid; place-items: center; width: 100%; aspect-ratio: 1.9; color: var(--primary); background: color-mix(in srgb, var(--primary) 5%, var(--creation-frame)); }
+.creation-art { width: min(100%, 360px); height: 100%; display: block; }
+.creation-art-paper { fill: var(--creation-surface); stroke: currentColor; stroke-opacity: .75; stroke-width: 1.5; }
+.creation-choice-copy { display: grid; align-content: start; gap: 6px; padding: 20px 24px 24px; }
+.creation-choice-copy strong { color: var(--foreground); font-size: 24px; line-height: 1.2; font-weight: 650; letter-spacing: -.025em; }
+.creation-choice-copy > span { color: var(--muted-foreground); font-size: 14px; line-height: 1.45; }
+.creation-choice-copy small { margin-top: 4px; color: var(--muted-foreground); font-size: 12px; }
+.creation-tools { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 24px; }
+.creation-tool { display: flex; align-items: center; gap: 16px; min-width: 0; min-height: 88px; padding: 16px 4px; border: 0; border-bottom: 1px solid var(--border); border-radius: 4px; background: transparent; text-align: left; color: var(--foreground); cursor: pointer; }
+.creation-tool:disabled { opacity: .55; cursor: not-allowed; }
+.creation-tool:not(:disabled):hover .creation-tool-icon { color: var(--foreground); background: var(--accent); }
+.creation-tool-icon { display: grid; place-items: center; flex: 0 0 48px; width: 48px; height: 48px; color: var(--primary); border: 1px solid var(--border); border-radius: 14px; background: var(--creation-surface); }
+.creation-tool-icon svg { width: 23px; height: 23px; stroke-width: 1.6; }
+.creation-tool-copy { display: grid; gap: 4px; min-width: 0; }
+.creation-tool-copy strong { font-size: 16px; line-height: 1.3; font-weight: 600; }
+.creation-tool-copy > span, .creation-tool-copy small { color: var(--muted-foreground); font-size: 13px; line-height: 1.45; }
+.creation-shortcuts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 24px; }
+.creation-shortcut { display: flex; align-items: flex-start; gap: 12px; min-height: 64px; padding: 12px 4px; background: transparent; border: 0; border-radius: 4px; text-align: left; color: var(--foreground); cursor: pointer; }
+.creation-shortcut > svg { flex: 0 0 20px; width: 20px; height: 20px; color: var(--primary); margin-top: 2px; }
+.creation-shortcut > span { display: grid; gap: 4px; }
+.creation-shortcut strong { font-size: 14px; line-height: 1.4; font-weight: 600; }
+.creation-shortcut small { color: var(--muted-foreground); font-size: 12px; line-height: 1.5; }
+.creation-shortcut:hover strong { text-decoration: underline; text-underline-offset: 4px; }
+.creation-menu .ux2-drafts-section { padding-top: 4px; }
+.apix-shell[data-ui-version="3"] .creation-menu { --creation-surface: var(--studio-panel); --creation-frame: var(--background); }
+
+@media (max-width: 560px) {
+  .creation-menu { gap: 20px; }
+  .creation-featured { gap: 12px; }
+  .creation-choice { border-radius: 16px; }
+  .creation-choice-visual { aspect-ratio: 1.2; }
+  .creation-choice-copy { padding: 8px 16px 20px; gap: 8px; }
+  .creation-choice-copy strong { font-size: 20px; }
+  .creation-choice-copy > span { font-size: 13px; }
+  .creation-tools { gap: 0; grid-template-columns: minmax(0, 1fr); }
+  .creation-tool { min-height: 80px; padding: 12px 4px; }
+  .creation-shortcuts { grid-template-columns: minmax(0, 1fr); gap: 0; }
+}
+
+@media (max-width: 360px) {
+  .creation-featured { gap: 8px; }
+  .creation-choice-copy { padding: 8px 12px 16px; }
+  .creation-choice-copy strong { font-size: 18px; }
+  .creation-choice-copy > span { font-size: 12px; }
+}

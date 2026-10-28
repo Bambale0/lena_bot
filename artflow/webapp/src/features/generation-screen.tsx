@@ -1,7 +1,7 @@
 import { isKling4, KLING4_KEYFRAME, KLING4_REFERENCE, kling4Body, renameKling4Mentions } from "@/lib/kling4";
 import { Kling4Materials } from "@/components/kling4-materials";
 import { useEffect, useState, type ReactNode } from "react";
-import { AlertCircle, Film, ImageIcon, LoaderCircle, Orbit, Upload, WandSparkles, X } from "lucide-react";
+import { AlertCircle, Check, Film, ImageIcon, Layers2, LoaderCircle, Orbit, SlidersHorizontal, Upload, WandSparkles, X } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ import { cn, formatCredits, modelSupports, splitUrls } from "@/lib/utils";
 import { effectiveVideoAspectRatio, inspectDraftMedia, switchDraftModel } from "@/lib/draft-media";
 import { referenceMaterials, replaceReferenceMaterials, selectGenerationInputs } from "@/lib/reference-selection";
 import { ReferenceSelection } from "@/components/reference-selection";
+import { AspectRatioGlyph, CreationModeGlyph, creationModeHint } from "@/components/creation-controls";
 import type { PhotoUploadControls } from "@/lib/photo-upload-queue";
 
 import type { ReferenceChecker } from "@/lib/reference-availability";
@@ -67,9 +68,9 @@ function promptMaxLength(kind: "image" | "video" | "motion", modelKey: string | 
 }
 
 const titles = {
-  image: { title: "Фото", description: "Текст, edit-модели, референсы и пакетный результат.", icon: ImageIcon },
-  video: { title: "Видео", description: "Text-to-video, image-to-video и video-to-video.", icon: Film },
-  motion: { title: "Motion", description: "Фото персонажа и видео движения.", icon: Orbit },
+  image: { title: "Фото", description: "Опишите идею или добавьте свои фото.", icon: ImageIcon },
+  video: { title: "Видео", description: "Создайте сцену по описанию или своим материалам.", icon: Film },
+  motion: { title: "Motion", description: "Перенесите движение из видео на своего персонажа.", icon: Orbit },
 };
 
 function chipClass(active: boolean): string {
@@ -146,9 +147,9 @@ function videoBaseCost(model: ModelInfo | undefined, draft: GenerationDraft): nu
   return Number(model.credits ?? 0);
 }
 
-function LabeledChips({ label, children }: { label: string; children: ReactNode }) {
+function LabeledChips({ label, children, className }: { label: string; children: ReactNode; className?: string }) {
   return (
-    <div className="apix-parameter-group grid min-w-0 gap-1">
+    <div className={cn("apix-parameter-group grid min-w-0 gap-1", className)} role="group" aria-label={label}>
       <p className="text-xs font-medium">{label}</p>
       <div className="apix-parameter-chips flex min-w-0 flex-wrap gap-1.5">{children}</div>
     </div>
@@ -400,14 +401,15 @@ function GenerationScreen({
   };
 
   return (
-    <div className="apix-generation-layout grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1fr)_280px]">
+    <div className="apix-generation-layout creation-editor grid min-w-0 gap-3" data-creation-kind={kind}>
+      <div className="creation-editor-scroll">
       <fieldset disabled={kling4Uploading || (preserveMedia || selectionExists) && (submitting || (mediaUploading && !photoUploads))} className="apix-generation-main grid min-w-0 gap-2.5">
         <div className="apix-generation-titlebar flex min-w-0 items-center justify-between gap-2 px-0.5">
           <div className="flex min-w-0 items-center gap-2">
             <span className="apix-generation-icon grid size-8 shrink-0 place-items-center rounded-lg bg-primary/12 text-primary"><Icon className="size-4" /></span>
             <div className="min-w-0">
               <h1 className="apix-generation-title text-lg font-bold tracking-tight sm:text-xl">{copy.title}</h1>
-              <p className="apix-generation-subtitle truncate text-[11px] text-muted-foreground">{selectedModel?.display_name || copy.description}</p>
+              <p className="apix-generation-subtitle text-[11px] text-muted-foreground">{copy.description}</p>
             </div>
           </div>
           <Badge variant="outline" className="apix-generation-balance shrink-0">{formatCredits(user.credits)} кр.</Badge>
@@ -429,11 +431,10 @@ function GenerationScreen({
           </div>
         </div>}
 
-        <Card className="apix-generation-card min-w-0 overflow-hidden">
-          <CardHeader className="apix-generation-card-header pb-2"><CardTitle>Модель и идея</CardTitle></CardHeader>
-          <CardContent className="apix-generation-card-content grid min-w-0 gap-2.5">
+        <Card className="apix-generation-card creation-idea-panel min-w-0 overflow-hidden">
+          <CardContent className="apix-generation-card-content grid min-w-0 gap-2.5" data-generation-materials-host>
             <fieldset className="grid min-w-0 gap-2.5" disabled={preserveMedia && mediaUploading}>
-            <label className="grid min-w-0 gap-1 text-xs font-medium">
+            <label className="creation-model-field grid min-w-0 gap-1 text-xs font-medium">
               Модель
               <Select value={selectedModel?.key || ""} disabled={preserveMedia && (mediaUploading || submitting)} onChange={(event) => syncSelectedModel(event.target.value)}>
                 {ux2 && !selectedModel && draft.model && <option value="" disabled>Модель черновика недоступна — выберите другую</option>}
@@ -451,16 +452,18 @@ function GenerationScreen({
             </div>}
 
             {!kling4Selected && (modes.length > 1 || kind !== "image") ? (
-              <LabeledChips label="Режим">
+              <LabeledChips label="Режим" className="creation-modes">
                 {modes.map((mode) => (
-                  <button key={mode} type="button" aria-pressed={draft.mode === mode} className={cn(chipClass(draft.mode === mode), "shrink-0")} disabled={preserveMedia && (mediaUploading || submitting)} onClick={() => changeMode(mode)}>
-                    {grokPairedComposer ? (mode === "image" ? "По фото" : "По тексту") : modeLabel(mode)}
+                  <button key={mode} type="button" aria-label={grokPairedComposer ? (mode === "image" ? "По фото" : "По тексту") : modeLabel(mode)} aria-pressed={draft.mode === mode} className="creation-mode apix-focus-ring" disabled={preserveMedia && (mediaUploading || submitting)} onClick={() => changeMode(mode)}>
+                    <span className="creation-mode-art"><CreationModeGlyph mode={mode} /></span>
+                    <span className="creation-mode-copy"><strong>{grokPairedComposer ? (mode === "image" ? "По фото" : "По тексту") : modeLabel(mode)}</strong><small>{creationModeHint(mode)}</small></span>
+                    {draft.mode === mode && <Check className="creation-mode-check" aria-hidden="true" />}
                   </button>
                 ))}
               </LabeledChips>
             ) : null}
 
-            <label className="grid min-w-0 gap-1 text-xs font-medium">
+            <label className="creation-prompt-field grid min-w-0 gap-1 text-xs font-medium">
               Промпт
               <Textarea
                 className="apix-prompt-input min-h-24"
@@ -477,11 +480,14 @@ function GenerationScreen({
 
             {kling4Selected && onUploadKling4 ? <Kling4Materials key={`${user.id}:${draft.model}`} onBusyChange={setKling4Uploading} model={draft.model} value={draft.kling4 || {}} onChange={kling4 => onChange({ kling4, prompt: renameKling4Mentions(draft.kling4 || {}, kling4, draft.prompt) })} onUpload={onUploadKling4} /> : null}
             {showReferenceUploader ? (
-              <div className="apix-uploader-card grid min-w-0 gap-2 rounded-xl border border-border/75 bg-card/40 p-2">
+              <div className="apix-uploader-card grid min-w-0 gap-2 rounded-xl border border-border/75 bg-card/40 p-2" data-generation-reference-uploader data-has-reference-materials={allReferences.length > 0 || draft.referenceUrls.length > 0}>
                 <div className="apix-uploader-head flex min-w-0 flex-wrap items-center justify-between gap-2">
-                  <div className="min-w-0">
+                  <div className="creation-material-heading min-w-0">
+                    <span className="creation-material-icon"><ImageIcon aria-hidden="true" /></span>
+                    <div>
                     <p className="text-xs font-semibold">{kind === "motion" ? "Фото персонажа" : kind === "video" ? `Фото · до ${maxRefs}` : `Референсы · до ${maxRefs}`}</p>
-                    <p className="text-[10px] text-muted-foreground">Загрузи фото с устройства. Ссылки вставлять не нужно.</p>
+                    <p className="text-[10px] text-muted-foreground">Фото, стиль или композиция для вашей работы.</p>
+                    </div>
                   </div>
                   <label className={cn(chipClass(Boolean(remainingRefs) && !referenceUploading), "inline-flex shrink-0 cursor-pointer items-center gap-1.5") }>
                     {referenceUploading ? <LoaderCircle className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
@@ -585,14 +591,14 @@ function GenerationScreen({
           </CardContent>
         </Card>
 
-        <Card className="apix-generation-card min-w-0 overflow-hidden">
-          <CardHeader className="apix-generation-card-header pb-2"><CardTitle>Параметры</CardTitle></CardHeader>
+        <Card className="apix-generation-card creation-output-panel min-w-0 overflow-hidden">
+          <CardHeader className="apix-generation-card-header pb-2"><CardTitle className="creation-settings-title"><SlidersHorizontal aria-hidden="true" />Параметры</CardTitle></CardHeader>
           <CardContent className="apix-generation-card-content grid min-w-0 gap-3">
             <fieldset className="grid min-w-0 gap-3" disabled={preserveMedia && mediaUploading}>
             {ratios.length ? (
-              <LabeledChips label="Формат">
+              <LabeledChips label="Формат" className="creation-ratios">
                 {ratios.map((ratio) => (
-                  <button key={ratio} type="button" className={cn(chipClass(draft.aspectRatio === ratio), "shrink-0")} onClick={() => onChange({ aspectRatio: ratio })}>{ratio}</button>
+                  <button key={ratio} type="button" aria-label={ratio} aria-pressed={draft.aspectRatio === ratio} className="creation-ratio apix-focus-ring" onClick={() => onChange({ aspectRatio: ratio })}><AspectRatioGlyph ratio={ratio} /><span>{ratio === "auto" || ratio === "adaptive" ? "Авто" : ratio}</span></button>
                 ))}
               </LabeledChips>
             ) : null}
@@ -602,7 +608,7 @@ function GenerationScreen({
                 {qualities.length ? (
                   <LabeledChips label="Качество">
                     {qualities.map((quality) => (
-                      <button key={quality.value} type="button" className={cn(chipClass(draft.quality === quality.value), "shrink-0")} onClick={() => onChange({ quality: quality.value })}>
+                      <button key={quality.value} type="button" aria-pressed={draft.quality === quality.value} className={cn(chipClass(draft.quality === quality.value), "creation-quality-chip shrink-0")} onClick={() => onChange({ quality: quality.value })}>
                         {quality.label || quality.value}
                       </button>
                     ))}
@@ -612,7 +618,7 @@ function GenerationScreen({
                 {outputCounts.length > 1 ? (
                   <LabeledChips label="Результатов в задаче">
                     {outputCounts.map((count) => (
-                      <button key={count} type="button" className={cn(chipClass(draft.count === count), "min-w-8 shrink-0 px-2")} onClick={() => onChange({ count })}>{count}</button>
+                      <button key={count} type="button" aria-pressed={draft.count === count} className={cn(chipClass(draft.count === count), "min-w-8 shrink-0 px-2")} onClick={() => onChange({ count })}>{count}</button>
                     ))}
                   </LabeledChips>
                 ) : null}
@@ -643,13 +649,14 @@ function GenerationScreen({
                           if (nextDuration != null) onChange({ duration: nextDuration });
                         }}
                       />
-                      <div className="flex items-center justify-between gap-1 text-[10px] text-muted-foreground">
+                      <div className="creation-duration-options flex items-center justify-between gap-1 text-[10px] text-muted-foreground">
                         {durations.map((duration) => (
                           <button
                             key={duration}
                             type="button"
+                            aria-pressed={duration === selectedDuration}
                             className={cn(
-                              "apix-focus-ring min-w-0 rounded px-1 py-0.5 text-[10px] transition",
+                              "creation-duration-choice apix-focus-ring min-w-0 rounded px-1 py-0.5 text-[10px] transition",
                               duration === selectedDuration ? "font-semibold text-primary" : "text-muted-foreground hover:text-foreground",
                             )}
                             onClick={() => onChange({ duration })}
@@ -671,7 +678,7 @@ function GenerationScreen({
                 {resolutions.length ? (
                   <LabeledChips label="Разрешение">
                     {resolutions.map((resolution) => (
-                      <button key={resolution} type="button" className={cn(chipClass(draft.resolution === resolution), "shrink-0")} onClick={() => onChange({ resolution })}>{optionLabel(selectedModel?.quality_options, resolution)}</button>
+                      <button key={resolution} type="button" aria-pressed={draft.resolution === resolution} className={cn(chipClass(draft.resolution === resolution), "shrink-0")} onClick={() => onChange({ resolution })}>{optionLabel(selectedModel?.quality_options, resolution)}</button>
                     ))}
                   </LabeledChips>
                 ) : null}
@@ -679,7 +686,7 @@ function GenerationScreen({
                 {modeOptions.length ? (
                   <LabeledChips label="Вариант модели">
                     {modeOptions.map((mode) => (
-                      <button key={mode} type="button" className={cn(chipClass(draft.grokMode === mode), "shrink-0")} onClick={() => onChange({ grokMode: mode })}>{modeOptionLabel(mode)}</button>
+                      <button key={mode} type="button" aria-pressed={draft.grokMode === mode} className={cn(chipClass(draft.grokMode === mode), "shrink-0")} onClick={() => onChange({ grokMode: mode })}>{modeOptionLabel(mode)}</button>
                     ))}
                   </LabeledChips>
                 ) : null}
@@ -756,20 +763,22 @@ function GenerationScreen({
               </>
             )}
 
-            <LabeledChips label="Количество задач">
+            <LabeledChips label="Количество задач" className="creation-task-count">
               {TASK_COUNT_OPTIONS.map((count) => (
-                <button key={count} type="button" className={cn(chipClass(taskCount === count), "min-w-8 shrink-0 px-2")} onClick={() => onChange({ taskCount: count })}>{count}</button>
+                <button key={count} type="button" aria-pressed={taskCount === count} className={cn(chipClass(taskCount === count), "min-w-8 shrink-0 px-2")} onClick={() => onChange({ taskCount: count })}>{count}</button>
               ))}
             </LabeledChips>
             </fieldset>
           </CardContent>
         </Card>
       </fieldset>
+      </div>
 
       <aside className="apix-launch-bar xl:sticky xl:top-16 xl:self-start">
         <Card className="apix-launch-card border-primary/25 bg-popover/95 shadow-xl">
           <CardContent className="grid gap-2 p-2.5 sm:p-3">
             <div className="apix-launch-row flex items-center justify-between gap-2">
+              <div className="creation-launch-summary"><Layers2 aria-hidden="true" /><span><strong>{copy.title}</strong><small>{selectedModel?.display_name || "Выберите модель"}</small></span></div>
               <div>
                 <p className="text-[10px] text-muted-foreground">Стоимость</p>
                 <p className="text-lg font-bold leading-none">

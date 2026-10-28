@@ -113,7 +113,7 @@ test("video and trim survive an unsupported model and mode round trip", async ({
   await expect(page.getByTestId("draft-media-conflicts")).toContainText("не принимает исходное видео");
   expect((await stored(page)).video).toMatchObject({ videoUrl: "https://media.example.test/source.mp4", videoStart: 2, videoEnd: 7 });
   await modelSelect(page).selectOption("fixture-video-a");
-  await page.locator("button").filter({ hasText: /^Видео$/ }).click();
+  await page.getByRole("group", { name: "Режим", exact: true }).getByRole("button", { name: "Видео", exact: true }).click();
   await expect(page.getByLabel("Старт, сек")).toHaveValue("2");
   await expect(page.getByLabel("Конец, сек")).toHaveValue("7");
   await submit(page).click(); await expect.poll(() => posts.length).toBe(1);

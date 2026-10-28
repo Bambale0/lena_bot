@@ -2594,3 +2594,98 @@ Steps: [x] root-cause and production preflight; [x] RED/green operator control;
   covers Grok image-to-video feed repeats where the mode chooser is intentionally
   hidden. Final updated-head review and protected gates remain required. No paid
   provider request or mutable production control was used for verification.
+
+## 2026-10-29 — visual creation studio
+
+- Baseline: production/main `3b7d3745ab03ef60caeec10e13823cace2fa8d41`;
+  clean branch `feat/visual-creation-studio`. Igor rejected the creation form
+  shown in `image(7).png` and requested icons/image tiles and a deliberate UX/UI
+  redesign using `Bambale0/.agents` plus his supplied `frontend-design` brief.
+- Fresh audit: the screenshot is the React Lilac Studio, identified by its
+  admin-preview header and shared `GenerationScreen`, not standalone HTML.
+  The editor currently stacks two equally prominent purple cards and long text
+  chips; the wide layout reserves a separate column just for launch. Reuse the
+  catalog, draft/media state, upload controls, price confirmation and provider
+  enhancers. Creation entrypoints exist in `LilacCreate` and `CreateScreen`.
+- Design contract: **APIX Frame Studio**, a compact creative workspace. The
+  distinctive anchor is a set of framed, purpose-specific vector illustrations
+  for creation choices, echoed by literal aspect-ratio pictograms. Keep copy
+  left aligned; prompt/materials occupy the main column and output settings the
+  smaller column, with a clear persistent launch area and a single-column mobile
+  order. Use quiet surfaces and visible selected states, not identical floating
+  cards or decorative labels. Retain familiar catalog and quote controls.
+- Tokens: black canvas `#000000`, ink panel `#15101d`, violet surface `#241739`,
+  lilac action `#b994ff`, paper text `#f7f3ff`, muted text `#c1b4d3`; inherit
+  semantic theme variables outside Lilac. Typography uses the existing sans
+  stack (Manrope/system where available), 12/14/16/20/28/36px with restrained
+  weights. Spacing 4/8/12/16/24/32. One visual anchor, no automatic motion.
+  Review against the brief removed a generic gradient hero, repeated arrows,
+  numbered decorations and a second explanatory label above each heading.
+- Scope/parity: `site` and `mini_app` share the React menu/editor and receive
+  the same layout and icon treatment. Standalone Studio is inspected for
+  applicable route/parameter presentation parity. `telegram_bot` retains the
+  same task names, capabilities, catalog and confirmation semantics; CSS/grid
+  and visual aspect-ratio controls are not applicable to text messages.
+- No changes to database schema, prices, provider routes/contracts, runtime
+  settings, admission/permissions or stored media. No paid provider calls.
+  Provider enhancers must keep their existing DOM seams. Mutable availability,
+  ratios, resolutions and costs remain catalog-driven.
+- Acceptance: meaningful icons/illustrations; less visual clutter; usable
+  320/390/768/1440px layout; no horizontal overflow or bottom-nav obstruction;
+  44px primary touch targets, keyboard focus and reduced-motion support;
+  draft/prompt/media retained across navigation; quote/confirmation/launch
+  unchanged; error, empty, pending and unavailable states remain actionable.
+- Test seams: browser creation navigation and editor controls, draft/media
+  regressions, responsive geometry and rendered screenshots, existing unit,
+  typecheck/build and protected CI. Use existing Playwright fixtures; no tests
+  that merely restate CSS. Observability uses browser console/network evidence
+  and existing quote/upload error states, with no new sensitive telemetry.
+- Skills applied: supplied frontend-design; `.agents` frontend-design,
+  anti-ui-slop and frontend-ux-audit; Bambale0/skills TDD/code-review;
+  Bambale0/claw frontend-qa/release-hardening; wondelai refactoring-ui;
+  anthropics webapp-testing; local verification-before-completion and
+  requesting-code-review. Existing session authorizes the same protected PR,
+  exact-commit CI, normal merge/autodeploy and production verification flow.
+- Implementation: both creation menus now use original photo/film SVG
+  illustrations for the main choices and compact icon rows for other tools.
+  The shared editor separates idea/materials from output settings, adds
+  catalog-derived aspect-ratio pictograms and accessible selected mode tiles,
+  and reserves a launch area outside the form scroller. Short/keyboard-height
+  viewports return to normal page flow with space above the fixed navigation.
+- Provider integration: stable materials/uploader hooks keep H3 inside the
+  editor. Idempotent heading updates prevent its MutationObserver loop, and a
+  post-commit navigation notification initializes lazy panels on direct menu
+  entry. Preserved canonical/legacy photos, including excluded or unfinished
+  rows, retain their inspect/exclude/remove controls when switching to H3.
+  Seedance photo/video/audio SVG icons match in Mini App and standalone Studio;
+  the standalone asset token and shared build marker are refreshed.
+- Parity result: `site /app/` and `mini_app` share the complete React redesign;
+  `site /studio.html` receives matching Seedance material icons with its form
+  contract preserved. `telegram_bot` visual grid/SVG presentation is technically
+  inapplicable; existing labels, capabilities, prices and confirmation contracts
+  are preserved and remain covered by the protected navigation/provider gates.
+- Verification: final TypeScript check and Vite build pass; frontend unit suite
+  passes (23 test files in the local Node reporter); all seven pure web parity
+  assertions pass via direct Python execution; standalone JS syntax and
+  `git diff --check` pass. The initial complete UX2 run passed 312/313 cases;
+  its one failure was an obsolete exact text-content locator after mode tiles
+  gained explanatory hints. The locator now targets the mode group's accessible
+  button name while retaining every video/trim/payload assertion.
+- Regression evidence: six dedicated browser cases cover keyboard selection,
+  draft restoration and payloads, quote cancellation/requote/confirmation,
+  320/390/768/1440px geometry and actual file chooser interaction, H3 materials
+  and long duration lists, direct default-H3 entry, and preserved H3 photo
+  inclusion controls. The final H3 photo case was observed failing before its
+  visibility fix. The final focused rerun passes 19/19 cases (six creation and
+  thirteen media-preservation cases) against `index-h5rLVUIi.js`, including the
+  previously failing H3 preservation regression and video/trim round trip.
+- Independent spec/design and code/standards reviews pass with no remaining
+  critical or important findings. Rendered screenshots were inspected across
+  the acceptance widths; additional 844x390 and 390x300 browser measurements
+  confirm the launch action and price stay above navigation. No paid provider
+  request or mutable production control was used for local verification.
+- Steps: [x] fresh audit and design contract; [x] editor/menu implementation;
+  [x] interaction and visual review; [x] independent spec/standards review;
+  [x] final focused regression rerun; [ ] protected PR CI, merge-SHA deploy
+  and public delivery proof. Exact-head CI and deployment evidence will be
+  recorded in the PR after the protected delivery flow completes.

@@ -1,0 +1,194 @@
+/* The editor is a working surface: idea and materials first, output controls beside it. */
+.apix-shell .creation-editor {
+  --creation-panel: var(--card);
+  --creation-field: var(--background);
+  --creation-selected: color-mix(in srgb, var(--primary) 12%, var(--creation-panel));
+  width: 100%;
+  max-width: 1120px;
+  margin-inline: auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) !important;
+  gap: 16px;
+  font-family: Manrope, "SF Pro Text", ui-sans-serif, system-ui, sans-serif;
+}
+
+.apix-shell > main:has(> .creation-editor) { display: flex; flex-direction: column; overflow: hidden; }
+.apix-shell > main:has(> .creation-editor) > .ux2-editor-back { align-self: flex-start; flex-shrink: 0; }
+.apix-shell > main > .creation-editor { flex: 1; min-height: 0; overflow: hidden; grid-template-rows: minmax(0, 1fr) auto; }
+.creation-editor-scroll { min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+
+.apix-shell[data-ui-version="3"] .creation-editor {
+  --creation-panel: var(--studio-panel);
+  --creation-field: var(--background);
+}
+
+.apix-shell .creation-editor .apix-generation-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  align-content: start;
+  gap: 16px;
+  margin: 0;
+  padding: 0 4px 8px 0;
+  border: 0;
+}
+
+.apix-shell .creation-editor .apix-generation-main > :not(.apix-generation-card) { grid-column: 1 / -1; }
+.apix-shell .creation-editor .apix-generation-titlebar { padding: 0 4px 4px; }
+.apix-shell .creation-editor .apix-generation-titlebar > div { gap: 12px; }
+.apix-shell .creation-editor h1.apix-generation-title { color: var(--foreground); font-size: 28px; line-height: 1.2; letter-spacing: -.035em; font-weight: 650; text-shadow: none; }
+.apix-shell .creation-editor .apix-generation-icon { width: 44px; height: 44px; border: 1px solid var(--border); border-radius: 14px; background: var(--creation-panel); }
+.apix-shell .creation-editor .apix-generation-icon svg { width: 22px; height: 22px; stroke-width: 1.6; }
+.apix-shell .creation-editor .apix-generation-subtitle { margin-top: 4px; font-size: 12px; line-height: 1.4; }
+.apix-shell .creation-editor .apix-generation-balance { display: none; }
+
+.apix-shell .creation-editor .apix-generation-card {
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--creation-panel);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.apix-shell .creation-editor .apix-generation-card-header { padding: 20px 24px 16px; }
+.apix-shell .creation-editor .apix-generation-card-header h3 { color: var(--foreground); font-size: 18px; line-height: 1.3; letter-spacing: -.02em; font-weight: 600; text-shadow: none; }
+.apix-shell .creation-editor .apix-generation-card-content { padding: 0 24px 24px; gap: 20px; }
+.apix-shell .creation-editor .creation-idea-panel .apix-generation-card-content { padding-top: 24px; }
+.apix-shell .creation-editor .apix-generation-card-content > fieldset { gap: 20px; min-width: 0; }
+.apix-shell .creation-editor .creation-model-field { gap: 8px; color: var(--muted-foreground); }
+.apix-shell .creation-editor .creation-model-field select { min-height: 48px; padding: 12px 36px 12px 14px; color: var(--foreground); background-color: var(--creation-field); border-color: var(--border); border-radius: 10px; font-weight: 500; }
+.apix-shell .creation-editor .apix-parameter-group { gap: 10px; }
+.apix-shell .creation-editor .apix-parameter-group > p { color: var(--muted-foreground); font-size: 12px; font-weight: 500; line-height: 1.4; }
+.apix-shell .creation-editor .apix-parameter-chips { gap: 8px; }
+.apix-shell .creation-editor .apix-parameter-chips > button { min-width: 44px; min-height: 44px; font-size: 14px; border-radius: 10px; box-shadow: none; }
+.apix-shell .creation-editor button:disabled { cursor: not-allowed; opacity: .55; }
+
+.apix-shell .creation-editor .creation-modes > .apix-parameter-chips { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 8px; }
+.apix-shell .creation-editor button.creation-mode { position: relative; display: flex; align-items: center; gap: 12px; min-height: 76px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--creation-field); color: var(--foreground); text-align: left; }
+.apix-shell .creation-editor .creation-mode[aria-pressed="true"] { border-color: var(--primary); background: var(--creation-selected); box-shadow: inset 0 0 0 1px var(--primary); }
+.creation-mode-art { display: grid; place-items: center; flex: 0 0 28px; color: var(--primary); }
+.creation-mode-art svg { width: 26px; height: 26px; }
+.creation-mode-copy { display: grid; gap: 4px; padding-right: 16px; }
+.creation-mode-copy strong { font-size: 14px; line-height: 1.3; font-weight: 600; }
+.creation-mode-copy small { color: var(--muted-foreground); font-size: 12px; line-height: 1.35; }
+.apix-shell .creation-editor .creation-mode-check { position: absolute; right: 10px; top: 10px; width: 14px; height: 14px; color: var(--primary); }
+.apix-shell .creation-editor .creation-prompt-field { gap: 8px; color: var(--muted-foreground); }
+.apix-shell .creation-editor .apix-prompt-input { min-height: 176px; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--creation-field); color: var(--foreground); font-size: 16px; line-height: 1.6; resize: vertical; }
+.apix-shell .creation-editor .apix-prompt-input::placeholder { color: var(--muted-foreground); opacity: .8; }
+.apix-shell .creation-editor .creation-prompt-field > span { justify-self: end; font-size: 11px; line-height: 1.4; font-weight: 400; font-variant-numeric: tabular-nums; }
+
+.apix-shell .creation-editor .apix-uploader-card { gap: 12px; padding: 16px; border: 1px solid var(--border); border-radius: 14px; background: transparent; }
+.apix-shell .creation-editor .apix-uploader-head { gap: 12px; }
+.creation-material-heading { display: flex; align-items: center; gap: 12px; flex: 1 1 180px; }
+.creation-material-icon { flex: 0 0 40px; display: grid; place-items: center; width: 40px; height: 48px; border: 1px dashed var(--border); border-radius: 8px; color: var(--primary); background: var(--creation-field); }
+.creation-material-icon svg { width: 22px; height: 22px; stroke-width: 1.5; }
+.apix-shell .creation-editor .apix-uploader-head p:first-child { font-size: 14px; font-weight: 600; line-height: 1.4; }
+.apix-shell .creation-editor .apix-uploader-head p + p { max-width: 42ch; margin-top: 4px; font-size: 12px; line-height: 1.45; }
+.apix-shell .creation-editor .apix-uploader-head > label { min-height: 44px; padding: 10px 12px; font-size: 12px; border-radius: 10px; }
+.apix-shell .creation-editor .apix-uploader-head > label:focus-within { outline: 2px solid var(--ring); outline-offset: 3px; }
+.apix-shell .creation-editor .apix-uploader-head > label:has(input:disabled) { cursor: not-allowed; opacity: .55; }
+.apix-shell .creation-editor .apix-help { border-color: var(--border); }
+.apix-shell .creation-editor .apix-help > summary { min-height: 44px; color: var(--muted-foreground); font-size: 12px; }
+.apix-shell .creation-editor .apix-help[open] > summary { color: var(--foreground); }
+.apix-shell .creation-editor .seedance25-material { min-height: 100px; box-shadow: none; border-radius: 12px; }
+.apix-shell .creation-editor [data-h3-reference-files] input[type="file"] { width: 100%; min-height: 44px; padding: 8px; border: 1px solid var(--border); border-radius: 10px; background: var(--creation-field); color: var(--foreground); font-size: 12px; }
+
+.apix-shell .creation-editor .creation-settings-title { display: flex; align-items: center; gap: 10px; }
+.creation-settings-title svg { width: 18px; height: 18px; color: var(--muted-foreground); stroke-width: 1.6; }
+.apix-shell .creation-editor .creation-ratios > .apix-parameter-chips { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.apix-shell .creation-editor button.creation-ratio { display: grid; place-items: center; align-content: center; gap: 5px; min-width: 0; min-height: 72px; padding: 8px 4px; border: 1px solid var(--border); border-radius: 10px; background: var(--creation-field); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.apix-shell .creation-editor .creation-ratio svg { width: 36px; height: 32px; }
+.apix-shell .creation-editor .creation-ratio span { font-size: 12px; line-height: 1.2; }
+.apix-shell .creation-editor .creation-ratio[aria-pressed="true"] { color: var(--foreground); border-color: var(--primary); background: var(--creation-selected); box-shadow: inset 0 0 0 1px var(--primary); }
+.apix-shell .creation-editor .creation-ratio[aria-pressed="true"] svg { color: var(--primary); }
+.apix-shell .creation-editor .creation-task-count { padding-top: 20px; border-top: 1px solid var(--border); }
+.apix-shell .creation-editor .creation-output-panel .creation-quality-chip { min-width: 64px; }
+.apix-shell .creation-editor .creation-output-panel .apix-parameter-chips > button[aria-pressed="true"]:not(.creation-ratio) { border-color: var(--primary); color: var(--foreground); background: var(--creation-selected); }
+.apix-shell .creation-editor button.creation-duration-choice { min-width: 44px; min-height: 44px; padding: 8px; border-radius: 8px; font-size: 12px; }
+.apix-shell .creation-editor .creation-duration-choice[aria-pressed="true"] { background: var(--creation-selected); color: var(--foreground); }
+.apix-shell .creation-editor .creation-duration-options { flex-wrap: wrap; justify-content: flex-start; gap: 4px; }
+
+/* A reserved footer keeps actions visible without covering the scrolling form. */
+.apix-shell .creation-editor .apix-launch-bar {
+  position: static !important;
+  top: auto !important;
+  bottom: auto !important;
+  align-self: end;
+  width: 100%;
+  z-index: 40;
+}
+
+.apix-shell .creation-editor .apix-launch-card { border: 1px solid var(--border); border-radius: 16px; background: var(--popover); box-shadow: 0 8px 24px rgb(0 0 0 / .14); backdrop-filter: none; }
+.apix-shell .creation-editor .apix-launch-card > div { display: grid; gap: 8px; padding: 14px 16px; }
+.apix-shell .creation-editor .apix-launch-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 24px; }
+.creation-launch-summary { display: flex; align-items: center; gap: 12px; }
+.creation-launch-summary > svg { width: 22px; height: 22px; color: var(--primary); flex-shrink: 0; stroke-width: 1.6; }
+.creation-launch-summary > span { display: grid; gap: 4px; min-width: 0; }
+.creation-launch-summary strong { font-size: 14px; font-weight: 600; line-height: 1.3; }
+.creation-launch-summary small { max-width: 34ch; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted-foreground); font-size: 12px; line-height: 1.4; }
+.apix-shell .creation-editor .apix-launch-row > div > p:first-child { font-size: 12px; }
+.apix-shell .creation-editor .apix-launch-row > div > p:nth-child(2) { margin-top: 4px; font-size: 22px; font-weight: 650; line-height: 1.2; }
+.apix-shell .creation-editor .apix-submit-button { min-width: 192px !important; min-height: 48px; width: auto !important; border-radius: 11px; box-shadow: none; font-size: 14px; font-weight: 650; }
+.apix-shell .creation-editor .apix-launch-card [aria-live="polite"] { font-size: 12px; }
+
+@media (min-width: 940px) {
+  .apix-shell .creation-editor .apix-generation-main { grid-template-columns: minmax(0, 1fr) 328px; gap: 20px; }
+  .apix-shell .creation-editor .creation-idea-panel { grid-column: 1; }
+  .apix-shell .creation-editor .creation-output-panel { grid-column: 2; }
+  .apix-shell .creation-editor .creation-output-panel .apix-generation-card-header { padding-inline: 20px; }
+  .apix-shell .creation-editor .creation-output-panel .apix-generation-card-content { padding-inline: 20px; }
+  .apix-shell .creation-editor .creation-ratios > .apix-parameter-chips { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+@media (max-width: 560px) {
+  .apix-shell .creation-editor { gap: 12px; }
+  .apix-shell .creation-editor .apix-generation-main { gap: 12px; }
+  .apix-shell .creation-editor h1.apix-generation-title { font-size: 24px; }
+  .apix-shell .creation-editor .apix-generation-titlebar { padding: 0 0 4px; }
+  .apix-shell .creation-editor .apix-generation-card { border-radius: 16px; }
+  .apix-shell .creation-editor .apix-generation-card-header { padding: 16px 16px 12px; }
+  .apix-shell .creation-editor .apix-generation-card-header h3 { font-size: 16px; }
+  .apix-shell .creation-editor .apix-generation-card-content { padding: 0 16px 16px; gap: 16px; }
+  .apix-shell .creation-editor .creation-idea-panel .apix-generation-card-content { padding-top: 16px; }
+  .apix-shell .creation-editor .apix-generation-card-content > fieldset { gap: 16px; }
+  .apix-shell .creation-editor .creation-modes > .apix-parameter-chips { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .apix-shell .creation-editor button.creation-mode { gap: 8px; min-height: 72px; padding: 10px; }
+  .creation-mode-art { flex-basis: 22px; }
+  .creation-mode-art svg { width: 22px; height: 22px; }
+  .creation-mode-copy { padding-right: 4px; }
+  .creation-mode-copy small { font-size: 11px; }
+  .apix-shell .creation-editor .creation-mode-check { right: 6px; top: 6px; width: 12px; height: 12px; }
+  .apix-shell .creation-editor .apix-prompt-input { min-height: 136px; padding: 12px; font-size: 16px; }
+  .apix-shell .creation-editor .apix-uploader-card { padding: 12px; }
+  .creation-material-icon { display: none; }
+  .creation-material-heading { flex-basis: 144px; }
+  .apix-shell .creation-editor .apix-uploader-head p:first-child { font-size: 13px; }
+  .apix-shell .creation-editor .apix-uploader-head p + p { font-size: 11px; }
+  .apix-shell .creation-editor .apix-uploader-head > label { padding-inline: 10px; }
+  .apix-shell .creation-editor .apix-launch-card > div { padding: 12px; }
+  .apix-shell .creation-editor .apix-launch-row { grid-template-columns: minmax(0, 1fr) minmax(132px, 1fr); gap: 12px; }
+  .apix-shell .creation-editor .creation-launch-summary { display: none; }
+  .apix-shell .creation-editor .apix-submit-button { width: 100% !important; min-width: 0 !important; }
+  .apix-shell .creation-editor .apix-launch-row > div > p:nth-child(2) { font-size: 20px; }
+}
+
+@media (max-width: 360px) {
+  .apix-shell[data-ui-version="3"] .apix-app-header { grid-template-columns: minmax(85px, 1fr) 44px 78px auto; gap: 4px; }
+  .apix-shell[data-ui-version="3"] .ux2-wordmark { grid-template-columns: 31px auto; gap: 6px; }
+  .apix-shell[data-ui-version="3"] .ux2-wordmark strong { font-size: 20px; }
+  .apix-shell[data-ui-version="3"] .apix-balance-button { padding-inline: 6px; font-size: 12px; }
+  .apix-shell .creation-editor .creation-ratios > .apix-parameter-chips { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .apix-shell .creation-editor .apix-generation-card-header { padding-inline: 12px; }
+  .apix-shell .creation-editor .apix-generation-card-content { padding-inline: 12px; }
+  .apix-shell .creation-editor button.creation-mode { gap: 6px; padding-inline: 8px; }
+  .creation-mode-copy small { max-width: 12ch; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .apix-shell .creation-editor *, .creation-menu * { scroll-behavior: auto; transition: none; animation: none; }
+}
+
+/* A keyboard or landscape viewport needs the whole scroll area for editing. */
+.apix-shell[data-short="true"] > main:has(> .creation-editor) { display: block; overflow-y: auto; margin-bottom: calc(var(--apix-nav-reserve) + 8px); padding-bottom: 8px !important; scroll-padding-bottom: 8px !important; }
+.apix-shell[data-short="true"] > main > .creation-editor { grid-template-rows: auto auto; overflow: visible; }
+.apix-shell[data-short="true"] .creation-editor-scroll { overflow: visible; }
