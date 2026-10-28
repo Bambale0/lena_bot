@@ -118,6 +118,20 @@ def test_admin_mapping_cannot_substitute_another_model_family_or_variant(model, 
         validate_route(model, "neironych_kie", native)
 
 
+def test_admin_accepts_kie_primary_with_neironych_fallback_policy():
+    from api.web.admin import WanRoutingUpdate
+    from core.wan30_routing_policy import validate_route
+
+    validate_route("wan/3-0-video", "kie_neironych", "wan-3")
+    body = WanRoutingUpdate(
+        policy="kie_neironych",
+        neironych_model_id="wan-3",
+        expected_revision=2,
+    )
+
+    assert body.policy == "kie_neironych"
+
+
 @pytest.mark.asyncio
 async def test_admin_can_switch_to_kie_without_primary_key_or_catalog(monkeypatch):
     from api.neironych_seedance import NeironychSeedanceClient

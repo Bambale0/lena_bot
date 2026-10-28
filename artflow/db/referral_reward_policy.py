@@ -156,29 +156,6 @@ async def award_referral_first_topup(
     return True
 
 
-async def settle_referral_first_topup_for_user(
-    session: AsyncSession,
-    user_id: int,
-) -> bool:
-    """Settle an already-paid first top-up after a referral is bound late."""
-    transaction = (
-        await session.execute(
-            select(Transaction)
-            .where(
-                Transaction.user_id == int(user_id),
-                Transaction.status == TransactionStatus.paid,
-                Transaction.amount_rub > 0,
-                Transaction.credits > 0,
-            )
-            .order_by(Transaction.created_at.asc(), Transaction.id.asc())
-            .limit(1)
-        )
-    ).scalar_one_or_none()
-    if transaction is None:
-        return False
-    return await award_referral_first_topup(session, transaction)
-
-
 async def _paid_transaction_by_id(session: AsyncSession, tx_id: int) -> Transaction | None:
     return (
         await session.execute(
@@ -194,24 +171,20 @@ def install_referral_reward_policy(
     repo_module: Any,
     *,
     award_func: Callable[[AsyncSession, Transaction], Awaitable[bool]] | None = None,
-    settle_func: Callable[[AsyncSession, int], Awaitable[bool]] | None = None,
 ) -> None:
     """Install the production referral policy at the shared repository seam.
 
     Legacy signup-credit writes are suppressed. Successful transaction confirmation
     paths are wrapped so every payment provider can trigger the first-topup reward,
     including a provider retry after payment confirmation committed but reward delivery
-    was interrupted. Late referral binding also settles an already-qualified first paid
-    top-up, so the reward cannot be stranded by event ordering.
+    was interrupted.
     """
     if getattr(repo_module, "_referral_reward_policy_installed", False):
         return
 
     reward = award_func or award_referral_first_topup
-    settle = settle_func or settle_referral_first_topup_for_user
 
     original_add_credits = repo_module.add_credits
-    original_bind_user_referrer_once = repo_module.bind_user_referrer_once
     original_confirm_transaction = repo_module.confirm_transaction
     original_confirm_transaction_and_add_credits = repo_module.confirm_transaction_and_add_credits
     original_confirm_transaction_by_id = repo_module.confirm_transaction_by_id
@@ -244,26 +217,6 @@ def install_referral_reward_policy(
             source_id=source_id,
             note=note,
         )
-
-    @wraps(original_bind_user_referrer_once)
-    async def bind_user_referrer_once(
-        session,
-        user_id,
-        *,
-        referrer,
-        referrer_l2=None,
-        referrer_l3=None,
-    ):
-        bound = await original_bind_user_referrer_once(
-            session,
-            user_id,
-            referrer=referrer,
-            referrer_l2=referrer_l2,
-            referrer_l3=referrer_l3,
-        )
-        if bound:
-            await settle(session, int(user_id))
-        return bound
 
     @wraps(original_confirm_transaction)
     async def confirm_transaction(session, external_id):
@@ -309,14 +262,12 @@ def install_referral_reward_policy(
         return tx
 
     repo_module.add_credits = add_credits
-    repo_module.bind_user_referrer_once = bind_user_referrer_once
     repo_module.confirm_transaction = confirm_transaction
     repo_module.confirm_transaction_and_add_credits = confirm_transaction_and_add_credits
     repo_module.confirm_transaction_by_id = confirm_transaction_by_id
     repo_module._referral_reward_policy_installed = True
     repo_module._referral_reward_policy_originals = {
         "add_credits": original_add_credits,
-        "bind_user_referrer_once": original_bind_user_referrer_once,
         "confirm_transaction": original_confirm_transaction,
         "confirm_transaction_and_add_credits": original_confirm_transaction_and_add_credits,
         "confirm_transaction_by_id": original_confirm_transaction_by_id,

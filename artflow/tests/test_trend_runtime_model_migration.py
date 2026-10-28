@@ -18,7 +18,9 @@ def test_trend_runtime_model_repair_precedes_the_single_migration_head() -> None
     config = Config()
     config.set_main_option("script_location", "db/migrations")
     scripts = ScriptDirectory.from_config(config)
-    assert scripts.get_heads() == ["052_trend_categories"]
+    assert scripts.get_heads() == ["054_referral_lineage"]
+    assert scripts.get_revision("054_referral_lineage").down_revision == "053_wan_kie_primary_fallback"
+    assert scripts.get_revision("053_wan_kie_primary_fallback").down_revision == "052_trend_categories"
     assert scripts.get_revision("052_trend_categories").down_revision == "051_qwen_ops_audit_actor"
     assert (
         scripts.get_revision("051_qwen_ops_audit_actor").down_revision

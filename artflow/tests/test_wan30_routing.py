@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from api.kieai_client import KieDefiniteRejection, KieSubmissionOutcomeUnknown
 from api.neironych_seedance import NeironychSeedanceError, NeironychSubmissionUnknown
 from api.wan30_contract import Wan30Request
 from api.wan30_routing import Wan30Submitted, submit_wan30
@@ -125,6 +126,103 @@ async def test_admin_disabled_standby_never_posts_to_kie_on_rejection():
     with pytest.raises(NeironychSeedanceError):
         await submit_wan30(req(), neironych_model_id="wan-3", fetch_neironych_models=AsyncMock(return_value=["wan-3"]),
                            send_neironych=AsyncMock(side_effect=rejection), send_kie=kie, allow_kie=False)
+    kie.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_kie_primary_definite_rejection_uses_neironych_fallback_once():
+    kie = AsyncMock(side_effect=KieDefiniteRejection("request rejected before acceptance"))
+    neironych = AsyncMock(return_value="fallback_123")
+
+    result = await submit_wan30(
+        req(),
+        policy="kie_neironych",
+        neironych_model_id="wan-real-approved-model",
+        fetch_neironych_models=AsyncMock(return_value=["wan-real-approved-model"]),
+        send_neironych=neironych,
+        send_kie=kie,
+    )
+
+    assert result == Wan30Submitted(
+        task_id="neironych:fallback_123", provider="neironych"
+    )
+    kie.assert_awaited_once()
+    neironych.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_kie_primary_unknown_outcome_never_posts_to_neironych():
+    unknown = KieSubmissionOutcomeUnknown("response lost after paid POST")
+    neironych = AsyncMock()
+
+    with pytest.raises(KieSubmissionOutcomeUnknown, match="response lost"):
+        await submit_wan30(
+            req(),
+            policy="kie_neironych",
+            neironych_model_id="wan-real-approved-model",
+            fetch_neironych_models=AsyncMock(return_value=["wan-real-approved-model"]),
+            send_neironych=neironych,
+            send_kie=AsyncMock(side_effect=unknown),
+        )
+
+    neironych.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_kie_primary_success_does_not_read_catalog_or_post_to_neironych():
+    catalog = AsyncMock(side_effect=AssertionError("fallback catalog must stay lazy"))
+    neironych = AsyncMock()
+
+    result = await submit_wan30(
+        req(),
+        policy="kie_neironych",
+        neironych_model_id="wan-real-approved-model",
+        fetch_neironych_models=catalog,
+        send_neironych=neironych,
+        send_kie=AsyncMock(return_value="kie_primary_123"),
+    )
+
+    assert result == Wan30Submitted(task_id="kie_primary_123", provider="kieai")
+    catalog.assert_not_awaited()
+    neironych.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_kie_only_policy_ignores_available_neironych_mapping():
+    catalog = AsyncMock(side_effect=AssertionError("KIE-only must not read catalog"))
+    neironych = AsyncMock()
+
+    result = await submit_wan30(
+        req(),
+        policy="kie_only",
+        neironych_model_id="wan-real-approved-model",
+        fetch_neironych_models=catalog,
+        send_neironych=neironych,
+        send_kie=AsyncMock(return_value="kie_only_123"),
+    )
+
+    assert result == Wan30Submitted(task_id="kie_only_123", provider="kieai")
+    catalog.assert_not_awaited()
+    neironych.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_neironych_only_policy_never_posts_to_kie_after_rejection():
+    rejection = NeironychSeedanceError(
+        "balance", status_code=402, payload={"detail": "insufficient_balance"}
+    )
+    kie = AsyncMock()
+
+    with pytest.raises(NeironychSeedanceError):
+        await submit_wan30(
+            req(),
+            policy="neironych_only",
+            neironych_model_id="wan-real-approved-model",
+            fetch_neironych_models=AsyncMock(return_value=["wan-real-approved-model"]),
+            send_neironych=AsyncMock(side_effect=rejection),
+            send_kie=kie,
+        )
+
     kie.assert_not_awaited()
 
 

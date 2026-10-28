@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.config import settings
 from db.models import WanRoutingAudit, WanRoutingSetting
 
-WanPolicy = Literal["neironych_kie", "neironych_only", "kie_only"]
+WanPolicy = Literal["neironych_kie", "kie_neironych", "neironych_only", "kie_only"]
 MODELS = {"standard": "wan/3-0-video", "prime": "wan/3-0-video-prime"}
 
 
@@ -31,7 +31,7 @@ class WanRoute:
 
 
 def validate_route(model: str, policy: str, native_id: str) -> None:
-    if model not in MODELS.values() or policy not in {"neironych_kie", "neironych_only", "kie_only"}:
+    if model not in MODELS.values() or policy not in {"neironych_kie", "kie_neironych", "neironych_only", "kie_only"}:
         raise ValueError("Unsupported Wan routing policy")
     if not re.fullmatch(r"[A-Za-z0-9_./-]{1,80}", native_id or ""):
         raise ValueError("Invalid Neironych model ID")

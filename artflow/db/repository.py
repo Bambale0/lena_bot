@@ -558,33 +558,6 @@ async def bind_user_telegram(
     return user
 
 
-async def bind_user_referrer_once(
-    session: AsyncSession,
-    user_id: int,
-    *,
-    referrer: User,
-    referrer_l2: User | None = None,
-    referrer_l3: User | None = None,
-) -> bool:
-    result = await session.execute(
-        update(User)
-        .where(
-            User.id == user_id,
-            User.referrer_id.is_(None),
-            User.referrer_l2_id.is_(None),
-            User.referrer_l3_id.is_(None),
-        )
-        .values(
-            referrer_id=referrer.id,
-            referrer_l2_id=referrer_l2.id if referrer_l2 else None,
-            referrer_l3_id=referrer_l3.id if referrer_l3 else None,
-        )
-        .returning(User.id)
-    )
-    await session.commit()
-    return result.scalar_one_or_none() is not None
-
-
 async def set_user_language(session: AsyncSession, user_id: int, language: str) -> None:
     await session.execute(
         update(User)
@@ -1418,6 +1391,117 @@ async def begin_kie_video_submission(
     return True
 
 
+async def begin_neironych_fallback_after_kie_rejection(
+    session: AsyncSession, gen_id: int, client_request_id: str,
+    idempotency_key: str, payload_sha256: str, *,
+    product_model: str, surface: str = "miniapp",
+) -> bool:
+    """Atomically transfer a definitely rejected KIE attempt to Neironych."""
+    from core.seedance_reconciliation import PRODUCT_MODELS
+
+    if str(uuid.UUID(client_request_id)) != client_request_id:
+        raise ValueError("Invalid submission UUID")
+    if product_model not in PRODUCT_MODELS or not idempotency_key:
+        raise ValueError("Invalid submission identity")
+    if len(payload_sha256) != 64 or any(
+        char not in "0123456789abcdef" for char in payload_sha256
+    ):
+        raise ValueError("Invalid submission fingerprint")
+
+    gen = await _locked_seedance_generation(session, gen_id)
+    params = parse_input_params(gen.input_params) if gen is not None else {}
+    callback = params.get(KIE_VIDEO_CALLBACK_KEY)
+    kie = params.get(KIE_VIDEO_SUBMISSION_KEY)
+    expected_task = ("web:" if surface == "web" else "") + f"kie-submit:{gen_id}"
+    if (
+        gen is None
+        or gen.status not in (GenerationStatus.pending, GenerationStatus.processing)
+        or gen.gen_type != GenerationType.video
+        or gen.model != product_model
+        or gen.task_id != expected_task
+        or params.get(SEEDANCE_SUBMISSION_KEY)
+        or not isinstance(callback, dict)
+        or callback.get("generation_id") != gen_id
+        or callback.get("surface") != surface
+        or not isinstance(kie, dict)
+        or kie.get("state") != "definite_rejected_neironych_pending"
+        or kie.get("origin") != "kie_primary"
+        or kie.get("correlation_id") != gen_id
+    ):
+        await session.commit()
+        return False
+
+    now = datetime.now(timezone.utc).isoformat()
+    kie.update({
+        "state": "definite_rejected_fallback_neironych",
+        "fallback_started_at": now,
+    })
+    params[KIE_VIDEO_SUBMISSION_KEY] = kie
+    params[SEEDANCE_SUBMISSION_KEY] = {
+        "client_request_id": client_request_id,
+        "idempotency_key": idempotency_key,
+        "payload_sha256": payload_sha256,
+        "product_model": product_model,
+        "state": "submitting",
+        "started_at": now,
+        "origin": "kie_definite_rejection",
+    }
+    params[RECONCILIATION_KEY] = {"required": False}
+    gen.task_id = (
+        ("web:" if surface == "web" else "")
+        + "neironych-submit:"
+        + client_request_id
+    )
+    gen.status = GenerationStatus.processing
+    gen.input_params = json.dumps(params, ensure_ascii=False)
+    await session.commit()
+    await _publish_generation_update(gen)
+    return True
+
+
+async def mark_kie_video_definite_rejection(
+    session: AsyncSession, gen_id: int,
+) -> bool:
+    """Durably prove KIE accepted no task before any fallback preparation."""
+    gen = await _locked_seedance_generation(session, gen_id)
+    params = parse_input_params(gen.input_params) if gen is not None else {}
+    callback = params.get(KIE_VIDEO_CALLBACK_KEY)
+    kie = params.get(KIE_VIDEO_SUBMISSION_KEY)
+    expected_task = (
+        ("web:" if isinstance(callback, dict) and callback.get("surface") == "web" else "")
+        + f"kie-submit:{gen_id}"
+    )
+    if (
+        gen is None
+        or gen.status not in (GenerationStatus.pending, GenerationStatus.processing)
+        or gen.gen_type != GenerationType.video
+        or gen.model not in {"wan/3-0-video", "wan/3-0-video-prime"}
+        or gen.task_id != expected_task
+        or not isinstance(callback, dict)
+        or callback.get("generation_id") != gen_id
+        or not isinstance(kie, dict)
+        or kie.get("origin") != "kie_primary"
+        or kie.get("correlation_id") != gen_id
+    ):
+        await session.commit()
+        return False
+    if kie.get("state") == "definite_rejected_neironych_pending":
+        await session.commit()
+        return True
+    if kie.get("state") != "submitting":
+        await session.commit()
+        return False
+    kie.update({
+        "state": "definite_rejected_neironych_pending",
+        "rejected_at": datetime.now(timezone.utc).isoformat(),
+    })
+    params[KIE_VIDEO_SUBMISSION_KEY] = kie
+    gen.input_params = json.dumps(params, ensure_ascii=False)
+    await session.commit()
+    await _publish_generation_update(gen)
+    return True
+
+
 async def mark_kie_video_submission_unknown(
     session: AsyncSession, gen_id: int,
 ) -> bool:
@@ -1487,6 +1571,13 @@ async def bind_kie_video_callback(
         # The webhook still needs to read the terminal row after returning.
         await session.commit()
         return gen
+    kie_entry = params.get(KIE_VIDEO_SUBMISSION_KEY)
+    if isinstance(kie_entry, dict) and kie_entry.get("state") in {
+        "definite_rejected_neironych_pending",
+        "definite_rejected_fallback_neironych",
+    }:
+        await session.rollback()
+        return None
     current = str(gen.task_id or "")
     if current and not current.startswith((
         "neironych-submit:", "web:neironych-submit:",

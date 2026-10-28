@@ -78,6 +78,17 @@ def test_expiry_lane_scans_wan_kie_pending_with_1h_deadline():
     assert "wan/3-0-video" in sql
     assert "wan/3-0-video-prime" in sql
 
+
+def test_resumed_neironych_fallback_uses_its_own_expiry_clock():
+    sql = str(recovery._expired_seedance_query().compile(
+        dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True},
+    ))
+    assert "CASE WHEN" in sql
+    assert (
+        "THEN coalesce(CAST(jsonb_extract_path_text(CAST(generations.input_params "
+        "AS JSONB), 'neironych_submission', 'started_at') AS TIMESTAMP WITH TIME ZONE)"
+    ) in sql
+
 @pytest.mark.asyncio
 async def test_neironych_wan_mirrors_result_before_finalizing(monkeypatch):
     from contextlib import asynccontextmanager

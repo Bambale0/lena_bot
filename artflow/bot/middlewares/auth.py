@@ -166,6 +166,7 @@ class AuthMiddleware(BaseMiddleware):
             return None
 
         db_user = await repo.get_user_by_tg_id(session, tg_user.id)
+        was_existing_user = db_user is not None
         update: Update | None = event if isinstance(event, Update) else data.get("event_update")
         raw_payload = _extract_start_payload(update)
         start_payload = parse_start_payload(raw_payload)
@@ -219,58 +220,18 @@ class AuthMiddleware(BaseMiddleware):
                     "🎉 По твоей ссылке пришёл новый пользователь!\n"
                     f"+{settings.REFERRAL_L1_CREDITS} 💋 начислим после его первого пополнения.",
                 )
-        elif (
-            ref_code
-            and not db_user.is_banned
-            and db_user.referrer_id is None
-            and db_user.referrer_l2_id is None
-            and db_user.referrer_l3_id is None
-        ):
-            referrer, referrer_l2, referrer_l3 = await _resolve_referral_chain(
-                session,
-                ref_code,
-                tg_user_id=tg_user.id,
-                current_user_id=db_user.id,
-            )
-            if referrer:
-                if settings.REFERRAL_FREEZE:
-                    logger.warning("Referral freeze active: skip late-bind tg_id=%s user_id=%s referrer_id=%s", tg_user.id, db_user.id, referrer.id)
-                    data["db_user"] = db_user
-                    return await handler(event, data)
-                logger.info("Referral late-bind attempt: tg_id=%s user_id=%s referrer_id=%s", tg_user.id, db_user.id, referrer.id)
-                bound = await repo.bind_user_referrer_once(
-                    session,
-                    db_user.id,
-                    referrer=referrer,
-                    referrer_l2=referrer_l2,
-                    referrer_l3=referrer_l3,
-                )
-                if bound:
-                    logger.info("Referral late-bind success: tg_id=%s -> referrer_id=%s; reward deferred until first paid top-up", tg_user.id, referrer.id)
-                    db_user = await repo.get_user_by_tg_id(session, tg_user.id)
-                else:
-                    logger.info("Referral late-bind skipped: tg_id=%s user_id=%s already_bound_or_race=true", tg_user.id, db_user.id)
-            else:
-                logger.info("Referral late-bind without resolvable referrer: tg_id=%s ref_code=%s entrypoint=%s", tg_user.id, start_payload.raw or ref_code, entrypoint)
-
-            # Referral code not found — notify user
-            if bot:
-                try:
-                    await _notify_referral(
-                        bot,
-                        tg_user.id,
-                        "ℹ️ Реферальный бонус не начислен.\n"
-                        "Код приглашения не найден или ссылка некорректна.\n\n"
-                        "💡 Попросите у партнёра новую ссылку.",
-                    )
-                except Exception:
-                    pass
-
         elif db_user.is_banned:
             return  # Просто игнорируем забаненных
 
-        # User has ref_code but already has a referrer — notify them
-        if ref_code and db_user and getattr(db_user, "referrer_id", None) and not db_user.is_banned:
+        # Referral lineage is immutable after account creation. Shared links may carry
+        # a referral code, but an existing account must never be rebound to it.
+        if ref_code and was_existing_user and db_user and not db_user.is_banned:
+            logger.info(
+                "Referral payload ignored for existing account: tg_id=%s user_id=%s entrypoint=%s",
+                tg_user.id,
+                db_user.id,
+                entrypoint,
+            )
             if bot:
                 try:
                     await _notify_referral(

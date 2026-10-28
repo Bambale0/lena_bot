@@ -22360,6 +22360,7 @@
             "type": "string",
             "enum": [
               "neironych_kie",
+              "kie_neironych",
               "neironych_only",
               "kie_only"
             ],

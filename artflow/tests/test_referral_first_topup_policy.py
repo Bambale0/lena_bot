@@ -33,7 +33,6 @@ def _session(*execute_results):
 def _policy_repo(**overrides):
     values = {
         "add_credits": AsyncMock(return_value=0.0),
-        "bind_user_referrer_once": AsyncMock(return_value=False),
         "get_user_by_id": AsyncMock(return_value=SimpleNamespace(credits=0.0)),
         "confirm_transaction": AsyncMock(return_value=None),
         "confirm_transaction_and_add_credits": AsyncMock(return_value=None),
@@ -144,7 +143,6 @@ async def test_policy_suppresses_signup_credit_but_preserves_other_credit_writes
     install_referral_reward_policy(
         repo,
         award_func=AsyncMock(return_value=False),
-        settle_func=AsyncMock(return_value=False),
     )
 
     deferred_balance = await repo.add_credits(
@@ -185,43 +183,9 @@ async def test_payment_retry_recovers_missing_first_topup_reward() -> None:
     install_referral_reward_policy(
         repo,
         award_func=award,
-        settle_func=AsyncMock(return_value=False),
     )
 
     result = await repo.confirm_transaction_and_add_credits(object(), "paid-101")
 
     assert result is None
     award.assert_awaited_once_with(ANY, paid_tx)
-
-
-@pytest.mark.asyncio
-async def test_late_referral_bind_settles_existing_first_paid_topup() -> None:
-    original_bind = AsyncMock(return_value=True)
-    settle = AsyncMock(return_value=True)
-    repo = _policy_repo(bind_user_referrer_once=original_bind)
-    session = object()
-    referrer = SimpleNamespace(id=7)
-
-    install_referral_reward_policy(
-        repo,
-        award_func=AsyncMock(return_value=False),
-        settle_func=settle,
-    )
-
-    bound = await repo.bind_user_referrer_once(
-        session,
-        22,
-        referrer=referrer,
-        referrer_l2=None,
-        referrer_l3=None,
-    )
-
-    assert bound is True
-    original_bind.assert_awaited_once_with(
-        session,
-        22,
-        referrer=referrer,
-        referrer_l2=None,
-        referrer_l3=None,
-    )
-    settle.assert_awaited_once_with(session, 22)

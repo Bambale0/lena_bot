@@ -1,5 +1,55 @@
 # Execution ledger — Studio capability completion (2026-10-24)
 
+## Active 2026-10-28 — Referral lineage immutability and production repair
+
+- Baseline `602fe401cdf3705116e40604717686faac57e005`; branch
+  `fix/referral-lineage-immutability-20261028`; PR #319. User-authorized scope:
+  prevent referral assignment after account creation, repair all provably
+  impossible production ancestry, and reconcile only money caused by those
+  edges. Pricing, provider routing, permissions and paid generation are outside
+  scope.
+- Root cause: Telegram and web authentication accepted a referral payload for an
+  already-created unbound account. Production evidence includes user 1
+  (`LeLu88`, created 2026-05-12) incorrectly pointing to user 12327 (`Relen16`,
+  created 2026-09-30). Account chronology makes that direct edge impossible.
+- Data preflight: 10 direct edges have child `created_at` earlier than parent;
+  no current direct-graph cycle. The bounded repair clears those roots and only
+  their stored L2/L3 propagation. A 2026-10-28 dry-run found 1,138 affected
+  lineage rows at that snapshot. A broad canonical rebuild was rejected because
+  it would also rewrite unrelated legacy gaps.
+- Finance preflight: 168 nonzero referral-commission groups, totaling 3,304 RUB,
+  were paid to user 12327 through the false branch. Current referral balance was
+  2,224 RUB after an approved 2,300 RUB withdrawal, so apply must debit at most
+  the available balance, append full reversal evidence, and record 1,080 RUB as
+  unrecovered rather than creating a negative user balance. Read-only SQL found
+  zero invalid `referral_first_topup_bonus` or legacy signup-credit ledger rows
+  for all 10 impossible roots. The repair nevertheless detects either event type
+  and fails closed for a separately approved spent-credit correction if any
+  appears before apply.
+- Implementation: referral resolution remains only on INSERT paths; the shared
+  late-bind repository seam and settlement wrapper are removed. Revision
+  `054_referral_lineage` adds exact audited-update and append-only evidence
+  triggers. The repair is dry-run by default, serializes same-key runs with a
+  transaction advisory lock, then takes `EXCLUSIVE` table barriers in payment
+  lock order (`transactions`, `users`, `credit_ledger`, commission ledger),
+  recomputes under lock, and commits lineage/audit/reversals atomically.
+- Acceptance: existing accounts never resolve or bind referral payloads on bot,
+  shared links or web auth; new accounts retain valid referral creation;
+  ordinary SQL lineage UPDATE fails; only an exact applying audit row can pass;
+  evidence cannot be changed/deleted; rerunning the same batch is a no-op;
+  non-null recipient transfers and invalid credit bonuses fail closed; after
+  apply no impossible direct edge or false propagated ancestry remains.
+- Verification: independent review found and closed fail-closed finance,
+  concurrency, ORM and PostgreSQL-test gaps. Local Ruff and focused suites pass;
+  Windows full-suite exceptions remain the documented platform/temp-path
+  limitations. PR CI first exposed an Alembic version-column length error; the
+  revision ID was shortened and the fresh exact-head backend, PostgreSQL
+  migration/trigger, referral, provider, bot and webapp gates all passed.
+- Release status: exact-head PR checks green; merge/release, exact production
+  SHA/migration/health verification, repeat dry-run, one apply batch
+  `referral-lineage-20261028`, and post-apply audit are still required. No paid
+  provider request is permitted for verification.
+
 ## Active 2026-10-26 — Trend category shelves
 
 Baseline `179d7a01e5a6328d9cb0642fa8fe9523e12fbafe`; Phase A implementation head
@@ -2293,3 +2343,94 @@ Steps: [x] root-cause and production preflight; [x] RED/green operator control;
   --check` is clean. Independent review found no P0-P2 issue. The locked OCR
   CLI was also attempted, but no LLM endpoint is configured, so it produced no
   review findings. No paid request or production mutation was performed.
+## 2026-10-28 — Wan KIE primary with Neironych fallback
+
+- Baseline `ac790307fbda56ad7b70fc8b14032ebf40b2588c`; branch
+  `fix/wan-kie-primary-neironych-fallback-20261028`. The owner corrected the
+  requested route from KIE-only to **KIE primary, Neironych fallback** for both
+  Wan 3.0 variants.
+- Safety contract: fallback is permitted only after `KieDefiniteRejection`,
+  which proves the paid KIE task was not accepted. Timeout, 5xx, malformed
+  response, missing task ID and every other uncertain KIE outcome stop without
+  a Neironych POST. Both provider sends retain their existing durable journal
+  requirements and provider task identity.
+- Control plane adds audited policy `kie_neironych`, revision-checked writes,
+  catalog/key validation and an expand-only migration `053`. Existing rows are
+  not changed by deployment; the production switch must be made afterward by
+  an authenticated administrator and verified in the audit table.
+- Surfaces: shared backend behavior covers site, Mini App and Telegram bot;
+  APIX Studio and the Telegram admin page both expose `KIE → Нейроныч`. Prices,
+  balances, access policy, credentials and provider payload contracts remain
+  unchanged. No paid generation is used for verification.
+- TDD evidence so far: the new route and control-policy tests failed before the
+  implementation and now pass; the static admin browser scenario failed on the
+  absent option and now passes 8/8 device cases; the APIX Studio payload flow
+  passes. Focused Wan provider/routing/runtime/repeat suite passes 120 tests;
+  migration chain has one head at `053_wan_kie_primary_fallback`.
+- Final local gates: Ruff, compileall, diff check, TypeScript, Vite production
+  build and 148 frontend units pass. Offline PostgreSQL Alembic SQL shows one
+  transactional constraint replacement and head update. The broad Windows
+  Python 3.14 run retains unrelated current-main/platform fixture failures;
+  exact-head protected CI on the repository Python is authoritative. No focused
+  Wan, migration-chain or changed-surface test failed.
+- Remaining gates: full relevant lint/tests/review; PR and exact-head protected
+  checks; merge/autodeploy; exact-SHA, migration, container and health checks;
+  authenticated route update for Standard and Prime plus immutable audit
+  verification.
+- PR #315 first exact-head gates all passed, but required Codex review correctly
+  blocked merge on a P1 durable-journal flaw: the KIE marker prevented the
+  Neironych fallback from starting and would have selected the wrong result
+  binder. A real SQLite checkout-context RED reproduced it. The amended flow
+  records a definite KIE rejection, atomically transfers `kie-submit:*` to a
+  Neironych submission marker before POST, switches in-memory binder ownership,
+  and rejects an impossible late KIE callback. Related admission/routing/feed/
+  callback tests pass 164/164; Ruff, compileall and diff check pass. Updated-head
+  CI and review are required again before merge.
+- PR #315 merged as `530fdd17`; its updated-head review then identified a P2
+  crash window before the Neironych catalog check. Follow-up work persists the
+  confirmed no-task KIE response as `definite_rejected_neironych_pending`
+  immediately, transfers only from that durable state, and lets the bounded
+  recovery worker resume the first Neironych POST with the original validated
+  Wan request and idempotency key without replaying KIE. A synthetic restart
+  regression covers the durable marker, resumed fallback, result binding and
+  exactly-one KIE POST. Production route policy remains `kie_only` until this
+  follow-up passes exact-head gates, review, merge and deployment verification.
+- Follow-up PR #318 review identified three recovery correctness gaps. The
+  amendment immediately refunds a resumed Neironych admission rejection under
+  the exact task-id lock, preserves the original KIE `rejected_at` and records
+  `fallback_started_at` separately, and makes the SQL expiry lane use the
+  active Neironych submission clock so recovered rows cannot starve the batch.
+  Focused admission/timeout/recovery coverage passes 132/132; updated-head CI
+  and review remain required before production policy activation.
+
+## 2026-10-28 — lilac branded bottom-navigation icons
+
+- Baseline `ac79030`; branch `feat/lilac-nav-icons-v5`. The approved reference
+  uses a restrained five-item bottom bar with consistent outline glyphs and a
+  circular branded Create medallion. APIX keeps its black/lilac palette and the
+  existing labels/actions: `Главная`, `Идеи`, `Создать`, `Пополнить`, `Профиль`.
+- Scope is Mini App presentation only: no navigation route, balance/top-up,
+  permission, backend, schema, price or provider change. The four semantic
+  destinations retain Lucide outline icons; Create receives an accessible,
+  CSS-rendered APIX aperture mark inside the existing touch target.
+- Acceptance: five existing destinations and accessible names unchanged;
+  exactly four consistent outline glyphs plus one circular brand mark; selected
+  state remains visible beyond color alone; touch targets stay at least 44px;
+  no horizontal overflow at 320/375/390px or phone landscape; focus, safe area,
+  press feedback and reduced-motion behavior remain intact.
+- Direction: **Lilac Noir navigation medallions** — luxury/refined, with the
+  branded circular Create control as the sole visual anchor. Guidance: UI UX
+  Pro Max and `.agents` frontend-design. Steps: [x] source/reference preflight;
+  [x] RED visual contract; [x] React/CSS implementation; [x] focused/full
+  frontend checks and screenshot review; [ ] protected PR and production proof.
+- Evidence: the new contract failed against the previous build with zero of four
+  expected outline-glyph wrappers, then passed after implementation. TypeScript
+  and Vite production build passed; all 148 unit tests and all 285 maintained
+  UX2 browser journeys passed. The final 390px screenshot was inspected with
+  the branded circular medallion, four aligned outline glyphs, unchanged labels,
+  active-state panel, focus treatment and no overflow. No paid or production
+  mutation was used during verification.
+- PR #317 review found that a later legacy glow declaration replaced the new
+  inactive medallion's complete `box-shadow` stack. The obsolete declaration
+  was removed and the browser contract now requires the inactive Create control
+  to retain its inset black/lilac rings as well as its outer glow.

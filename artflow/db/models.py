@@ -439,6 +439,113 @@ class ReferralCommissionLedger(Base):
     )
 
 
+class ReferralLineageRepairBatch(Base):
+    __tablename__ = "referral_lineage_repair_batches"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('applying', 'applied')",
+            name="ck_referral_lineage_repair_status",
+        ),
+    )
+
+    batch_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    operator: Mapped[str] = mapped_column(String(128), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    invalid_edge_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    changed_user_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    invalid_commission_rub: Mapped[float] = mapped_column(Float, nullable=False, server_default="0")
+    balance_debit_rub: Mapped[float] = mapped_column(Float, nullable=False, server_default="0")
+    unrecovered_rub: Mapped[float] = mapped_column(Float, nullable=False, server_default="0")
+    summary_json: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ReferralLineageRepairRow(Base):
+    __tablename__ = "referral_lineage_repair_rows"
+    __table_args__ = (
+        UniqueConstraint(
+            "batch_key",
+            "user_id",
+            name="uq_referral_lineage_repair_batch_user",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    batch_key: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("referral_lineage_repair_batches.batch_key", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    user_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    old_referrer_id: Mapped[int | None] = mapped_column(Integer)
+    old_referrer_l2_id: Mapped[int | None] = mapped_column(Integer)
+    old_referrer_l3_id: Mapped[int | None] = mapped_column(Integer)
+    new_referrer_id: Mapped[int | None] = mapped_column(Integer)
+    new_referrer_l2_id: Mapped[int | None] = mapped_column(Integer)
+    new_referrer_l3_id: Mapped[int | None] = mapped_column(Integer)
+    reason: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class ReferralFinanceRepairRow(Base):
+    __tablename__ = "referral_finance_repair_rows"
+    __table_args__ = (
+        UniqueConstraint(
+            "batch_key",
+            "transaction_id",
+            "recipient_user_id",
+            "level",
+            name="uq_referral_finance_repair_batch_event",
+        ),
+        Index("ix_referral_finance_repair_rows_recipient", "recipient_user_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    batch_key: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("referral_lineage_repair_batches.batch_key", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    transaction_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("transactions.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    payer_user_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    recipient_user_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    level: Mapped[int] = mapped_column(Integer, nullable=False)
+    amount_rub: Mapped[float] = mapped_column(Float, nullable=False)
+    balance_debit_rub: Mapped[float] = mapped_column(Float, nullable=False)
+    unrecovered_rub: Mapped[float] = mapped_column(Float, nullable=False)
+    reversal_ledger_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("referral_commission_ledger.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class ReferralWithdrawalRequest(Base):
     __tablename__ = "referral_withdrawal_requests"
 
@@ -861,7 +968,7 @@ class WanRoutingSetting(Base):
     __tablename__ = "wan_routing_settings"
     __table_args__ = (
         CheckConstraint("model_key IN ('wan/3-0-video','wan/3-0-video-prime')", name="ck_wan_route_model"),
-        CheckConstraint("policy IN ('neironych_kie','neironych_only','kie_only')", name="ck_wan_route_policy"),
+        CheckConstraint("policy IN ('neironych_kie','kie_neironych','neironych_only','kie_only')", name="ck_wan_route_policy"),
         CheckConstraint("revision >= 0", name="ck_wan_route_revision"),
     )
     model_key: Mapped[str] = mapped_column(String(64), primary_key=True)

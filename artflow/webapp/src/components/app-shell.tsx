@@ -228,7 +228,10 @@ function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen, ux2 =
                 )}
                 onClick={() => id === "topup" ? onBalanceOpen() : navigate(id)}
               >
-                {lilac && id === "create" ? <span className="lilac-create-action"><Icon aria-hidden="true" /></span> : <Icon className="size-[18px]" />}
+                {lilac ? id === "create"
+                  ? <span className="lilac-create-action" aria-hidden="true"><span className="lilac-create-mark" /></span>
+                  : <span className="lilac-nav-glyph" aria-hidden="true"><Icon /></span>
+                  : <Icon className="size-[18px]" aria-hidden="true" />}
                 <span className="apix-nav-label leading-none">{label}</span>
               </button>
             );

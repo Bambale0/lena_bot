@@ -18,7 +18,7 @@
   <p id="wan-status" role="status" aria-live="polite">Проверяем доступ…</p>
   <form id="wan-routing" hidden>
     <label>Модель<select name="variant"><option value="standard">Wan 3.0</option><option value="prime">Wan 3.0 Prime</option></select></label>
-    <label>Маршрут<select name="policy"><option value="neironych_kie">Нейроныч основной, KIE резерв</option><option value="neironych_only">Только Нейроныч</option><option value="kie_only">Только KIE</option></select></label>
+    <label>Маршрут<select name="policy"><option value="neironych_kie">Нейроныч основной, KIE резерв</option><option value="kie_neironych">KIE основной, Нейроныч резерв</option><option value="neironych_only">Только Нейроныч</option><option value="kie_only">Только KIE</option></select></label>
     <label>ID модели Нейроныча<input name="neironych_model_id" maxlength="80" pattern="[A-Za-z0-9_./-]+" required></label>
     <p>Сохранение маршрута Нейроныча проверяет доступность ID в его каталоге. Платная генерация не запускается. При неопределённом исходе повторная отправка запрещена.</p>
     <button type="submit" class="button">Проверить и сохранить</button>
