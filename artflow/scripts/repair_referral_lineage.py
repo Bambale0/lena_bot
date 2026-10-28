@@ -188,21 +188,28 @@ def find_invalid_credit_bonuses(
     credit_entries: Iterable[object],
 ) -> list[object]:
     by_id = {int(user.id): user for user in users}
-    invalid_sources: dict[int, set[str]] = {}
+    invalid_sources: dict[int, set[tuple[str, str, str]]] = {}
     for edge in invalid_edges:
         child = by_id[edge.user_id]
-        source_ids = {str(edge.user_id)}
         tg_id = int(getattr(child, "tg_id", 0) or 0)
-        if tg_id > 0:
-            source_ids.add(str(tg_id))
-        invalid_sources.setdefault(edge.invalid_referrer_id, set()).update(source_ids)
+        signup_source_id = str(tg_id if tg_id > 0 else edge.user_id)
+        invalid_sources.setdefault(edge.invalid_referrer_id, set()).update(
+            {
+                ("referral_first_topup_bonus", "referral_user", str(edge.user_id)),
+                ("referral_signup_bonus", "user", signup_source_id),
+            }
+        )
 
     return [
         entry
         for entry in credit_entries
-        if entry.entry_type in {"referral_first_topup_bonus", "referral_signup_bonus"}
-        and float(entry.delta or 0) > 0
-        and str(entry.source_id or "") in invalid_sources.get(int(entry.user_id), set())
+        if float(entry.delta or 0) > 0
+        and (
+            str(entry.entry_type or ""),
+            str(entry.source_type or ""),
+            str(entry.source_id or ""),
+        )
+        in invalid_sources.get(int(entry.user_id), set())
     ]
 
 

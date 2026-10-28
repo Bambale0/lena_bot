@@ -182,6 +182,7 @@ def test_invalid_late_bind_credit_bonus_is_selected_for_audited_reversal() -> No
             user_id=4,
             delta=3.0,
             entry_type="referral_first_topup_bonus",
+            source_type="referral_user",
             source_id="1",
         ),
         SimpleNamespace(
@@ -189,6 +190,7 @@ def test_invalid_late_bind_credit_bonus_is_selected_for_audited_reversal() -> No
             user_id=4,
             delta=3.0,
             entry_type="referral_signup_bonus",
+            source_type="user",
             source_id="111",
         ),
         SimpleNamespace(
@@ -196,7 +198,34 @@ def test_invalid_late_bind_credit_bonus_is_selected_for_audited_reversal() -> No
             user_id=4,
             delta=3.0,
             entry_type="referral_first_topup_bonus",
+            source_type="referral_user",
             source_id="999",
+        ),
+        # Numeric identifiers can collide across namespaces; neither is the
+        # source format written for this invalid child's event type.
+        SimpleNamespace(
+            id=10,
+            user_id=4,
+            delta=3.0,
+            entry_type="referral_first_topup_bonus",
+            source_type="referral_user",
+            source_id="111",
+        ),
+        SimpleNamespace(
+            id=11,
+            user_id=4,
+            delta=3.0,
+            entry_type="referral_signup_bonus",
+            source_type="user",
+            source_id="1",
+        ),
+        SimpleNamespace(
+            id=12,
+            user_id=4,
+            delta=3.0,
+            entry_type="referral_signup_bonus",
+            source_type="referral_user",
+            source_id="111",
         ),
     ]
 
