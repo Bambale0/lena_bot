@@ -397,6 +397,48 @@ async def test_telegram_login_returns_conflict_when_binding_fails(monkeypatch) -
 
 
 @pytest.mark.asyncio
+async def test_telegram_login_does_not_late_bind_existing_user(monkeypatch) -> None:
+    existing_user = SimpleNamespace(
+        id=7,
+        tg_id=123456,
+        referrer_id=None,
+        referrer_l2_id=None,
+        referrer_l3_id=None,
+    )
+    login_user = {
+        "id": 123456,
+        "username": "existing_user",
+        "first_name": "Existing",
+        "last_name": "User",
+        "photo_url": None,
+    }
+    resolve_referral_chain = AsyncMock(return_value=(None, None, None))
+    monkeypatch.setattr(auth, "verify_telegram_login_data", lambda _payload: login_user)
+    monkeypatch.setattr(auth.repo, "get_user_by_tg_id", AsyncMock(return_value=existing_user))
+    monkeypatch.setattr(auth, "_resolve_referral_chain", resolve_referral_chain)
+    monkeypatch.setattr(auth, "_auth_payload", lambda user, response=None: {"user_id": user.id})
+
+    result = await auth.telegram_login(
+        auth.TelegramLoginRequest(
+            id=123456,
+            username="existing_user",
+            first_name="Existing",
+            last_name="User",
+            auth_date=123,
+            hash="hash",
+            referral_code="REFCODE",
+        ),
+        response=Response(),
+        request=SimpleNamespace(cookies={}),
+        session=object(),
+        x_web_auth_token=None,
+    )
+
+    assert result == {"ok": True, "data": {"user_id": 7}}
+    resolve_referral_chain.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_auth_config_exposes_registration_captcha(monkeypatch) -> None:
     monkeypatch.setattr(auth.settings, "WEB_CAPTCHA_ENABLED", True, raising=False)
     monkeypatch.setattr(auth.settings, "WEB_CAPTCHA_PROVIDER", "turnstile", raising=False)
