@@ -16,6 +16,7 @@ import httpx
 from api.neironych_admission import pre_admission_unavailable_trace
 from core.neironych_seedance_contract import (
     SEEDANCE_MODELS,
+    SeedanceCapabilityUnavailable,
     SeedanceContractError,
     canonical_seedance_model,
     normalize_seedance_request,
@@ -410,6 +411,8 @@ class NeironychSeedanceClient:
         try:
             rid = str(uuid.UUID(client_request_id)) if client_request_id is not None else str(uuid.uuid4())
             body = normalize_seedance_request(canonical_model, payload)
+        except SeedanceCapabilityUnavailable:
+            raise
         except (ValueError, SeedanceContractError) as exc:
             raise NeironychSeedanceError(str(exc), status_code=422) from exc
         body["model"] = model

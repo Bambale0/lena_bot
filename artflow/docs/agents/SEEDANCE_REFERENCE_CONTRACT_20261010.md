@@ -22,6 +22,22 @@ Quote rounding and source-derived output seconds must agree. Admission hashes,
 idempotency, uncertain-submit reconciliation, refunds and history are untouched.
 No retry of historical failures and no new paid tests in this work.
 
+## Capability gates for unpriced operations
+
+APIX does not currently expose Seedance 2.5 `extend`, `draft`, or
+`draft_task`. Continuation needs its own source-duration quote and settlement;
+the two-stage draft flow has separate draft/final billing and finalization
+state. Until those product contracts are implemented, the shared request
+normalizer rejects these fields with a specific local capability error before
+durable admission or any provider POST. Provider routing treats this error as
+non-fallbackable, so it cannot start the same unsupported operation through a
+second provider.
+
+This gate applies to the shared backend used by site, Mini App and Telegram,
+including the administrator raw-payload escape hatch. Existing text,
+reference, frame and edit behavior and the configured Neironych-primary/KIE
+fallback order are unchanged.
+
 Only already-owned local media may be probed; no new remote fetch/SSRF surface.
 Fail closed before provider POST and durable admission when metadata is missing.
 Log model/mode/counts/dimensions only, never prompts, media URLs or credentials.
