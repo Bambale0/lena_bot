@@ -347,14 +347,6 @@ async def _resolve_referral_chain(
     return referrer, referrer_l2, referrer_l3
 
 
-def _has_referrer(user) -> bool:
-    return bool(
-        getattr(user, "referrer_id", None)
-        or getattr(user, "referrer_l2_id", None)
-        or getattr(user, "referrer_l3_id", None)
-    )
-
-
 def _referral_bonus_source_id(user) -> str:
     try:
         tg_id = int(getattr(user, "tg_id", 0) or 0)
@@ -373,33 +365,6 @@ async def _award_referral_signup_bonus(session: AsyncSession, referrer, user) ->
         source_id=_referral_bonus_source_id(user),
         note="L1 referral signup bonus",
     )
-
-
-async def _bind_existing_user_referral(
-    session: AsyncSession,
-    user,
-    referral_code: str | None,
-):
-    if not user or _has_referrer(user):
-        return user
-    referrer, referrer_l2, referrer_l3 = await _resolve_referral_chain(
-        session,
-        referral_code,
-        current_user=user,
-    )
-    if not referrer:
-        return user
-    bound = await repo.bind_user_referrer_once(
-        session,
-        user.id,
-        referrer=referrer,
-        referrer_l2=referrer_l2,
-        referrer_l3=referrer_l3,
-    )
-    if not bound:
-        return user
-    await _award_referral_signup_bonus(session, referrer, user)
-    return await repo.get_user_by_id(session, user.id) or user
 
 
 def _auth_payload(user, response: Response | None = None) -> dict:
@@ -842,9 +807,6 @@ async def telegram_login(
         )
         if referrer:
             await _award_referral_signup_bonus(session, referrer, user)
-    else:
-        user = await _bind_existing_user_referral(session, user, referral_code)
-
     return ok(_auth_payload(user, response=response))
 
 
@@ -1072,5 +1034,4 @@ async def contact_auth_verify(
             )
             if referrer:
                 await _award_referral_signup_bonus(session, referrer, user)
-    user = await _bind_existing_user_referral(session, user, body.referral_code)
     return ok(_auth_payload(user, response=response))

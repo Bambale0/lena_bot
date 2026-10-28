@@ -126,7 +126,7 @@ async def test_auth_middleware_skips_suspicious_referrer(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_auth_middleware_late_binds_referral_for_existing_user_without_referrer(monkeypatch) -> None:
+async def test_auth_middleware_does_not_late_bind_existing_user(monkeypatch) -> None:
     db_user = SimpleNamespace(
         id=2,
         tg_id=222,
@@ -136,21 +136,10 @@ async def test_auth_middleware_late_binds_referral_for_existing_user_without_ref
         referrer_l2_id=None,
         referrer_l3_id=None,
     )
-    rebound_user = SimpleNamespace(
-        id=2,
-        tg_id=222,
-        is_banned=False,
-        language="ru",
-        referrer_id=10,
-        referrer_l2_id=None,
-        referrer_l3_id=None,
-    )
-    referrer = SimpleNamespace(id=10, tg_id=1000, referrer_id=None)
-    get_user_by_tg_id = AsyncMock(side_effect=[db_user, rebound_user])
+    get_user_by_tg_id = AsyncMock(return_value=db_user)
+    get_user_by_referral_code = AsyncMock()
     monkeypatch.setattr("bot.middlewares.auth.repo.get_user_by_tg_id", get_user_by_tg_id)
-    monkeypatch.setattr("bot.middlewares.auth.repo.get_user_by_referral_code", AsyncMock(return_value=referrer))
-    monkeypatch.setattr("bot.middlewares.auth.repo.bind_user_referrer_once", AsyncMock(return_value=True))
-    monkeypatch.setattr("bot.middlewares.auth.repo.add_credits", AsyncMock(return_value=35))
+    monkeypatch.setattr("bot.middlewares.auth.repo.get_user_by_referral_code", get_user_by_referral_code)
     handler = AsyncMock(return_value="handled")
 
     data = {
@@ -162,11 +151,12 @@ async def test_auth_middleware_late_binds_referral_for_existing_user_without_ref
     result = await AuthMiddleware()(handler, make_message(user_id=222), data)
 
     assert result == "handled"
-    assert data["db_user"] is rebound_user
+    assert data["db_user"] is db_user
+    get_user_by_referral_code.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_auth_middleware_binds_referral_from_shared_trend_payload(monkeypatch) -> None:
+async def test_auth_middleware_shared_trend_does_not_late_bind_existing_user(monkeypatch) -> None:
     db_user = SimpleNamespace(
         id=2,
         tg_id=222,
@@ -176,23 +166,10 @@ async def test_auth_middleware_binds_referral_from_shared_trend_payload(monkeypa
         referrer_l2_id=None,
         referrer_l3_id=None,
     )
-    rebound_user = SimpleNamespace(
-        id=2,
-        tg_id=222,
-        is_banned=False,
-        language="ru",
-        referrer_id=10,
-        referrer_l2_id=None,
-        referrer_l3_id=None,
-    )
-    referrer = SimpleNamespace(id=10, tg_id=1000, referrer_id=None)
-    get_user_by_tg_id = AsyncMock(side_effect=[db_user, rebound_user])
-    get_user_by_referral_code = AsyncMock(return_value=referrer)
-    bind_user_referrer_once = AsyncMock(return_value=True)
+    get_user_by_tg_id = AsyncMock(return_value=db_user)
+    get_user_by_referral_code = AsyncMock()
     monkeypatch.setattr("bot.middlewares.auth.repo.get_user_by_tg_id", get_user_by_tg_id)
     monkeypatch.setattr("bot.middlewares.auth.repo.get_user_by_referral_code", get_user_by_referral_code)
-    monkeypatch.setattr("bot.middlewares.auth.repo.bind_user_referrer_once", bind_user_referrer_once)
-    monkeypatch.setattr("bot.middlewares.auth.repo.add_credits", AsyncMock(return_value=35))
     handler = AsyncMock(return_value="handled")
 
     data = {
@@ -204,13 +181,12 @@ async def test_auth_middleware_binds_referral_from_shared_trend_payload(monkeypa
     result = await AuthMiddleware()(handler, make_message(user_id=222), data)
 
     assert result == "handled"
-    get_user_by_referral_code.assert_awaited_once_with(data["session"], "REFCODE")
-    bind_user_referrer_once.assert_awaited_once()
-    assert data["db_user"] is rebound_user
+    get_user_by_referral_code.assert_not_awaited()
+    assert data["db_user"] is db_user
 
 
 @pytest.mark.asyncio
-async def test_auth_middleware_late_bind_rejects_descendant_referrer(monkeypatch) -> None:
+async def test_auth_middleware_does_not_resolve_descendant_for_existing_user(monkeypatch) -> None:
     db_user = SimpleNamespace(
         id=1,
         tg_id=111,
@@ -220,20 +196,14 @@ async def test_auth_middleware_late_bind_rejects_descendant_referrer(monkeypatch
         referrer_l2_id=None,
         referrer_l3_id=None,
     )
-    descendant_referrer = SimpleNamespace(id=9, tg_id=999, referrer_id=1)
     get_user_by_tg_id = AsyncMock(return_value=db_user)
-    bind_user_referrer_once = AsyncMock(return_value=True)
+    get_user_by_referral_code = AsyncMock()
     add_credits = AsyncMock()
 
     monkeypatch.setattr("bot.middlewares.auth.repo.get_user_by_tg_id", get_user_by_tg_id)
     monkeypatch.setattr(
         "bot.middlewares.auth.repo.get_user_by_referral_code",
-        AsyncMock(return_value=descendant_referrer),
-    )
-    monkeypatch.setattr("bot.middlewares.auth.repo.get_user_by_id", AsyncMock(return_value=db_user))
-    monkeypatch.setattr(
-        "bot.middlewares.auth.repo.bind_user_referrer_once",
-        bind_user_referrer_once,
+        get_user_by_referral_code,
     )
     monkeypatch.setattr("bot.middlewares.auth.repo.add_credits", add_credits)
     handler = AsyncMock(return_value="handled")
@@ -248,7 +218,7 @@ async def test_auth_middleware_late_bind_rejects_descendant_referrer(monkeypatch
 
     assert result == "handled"
     assert data["db_user"] is db_user
-    bind_user_referrer_once.assert_not_awaited()
+    get_user_by_referral_code.assert_not_awaited()
     add_credits.assert_not_awaited()
 
 

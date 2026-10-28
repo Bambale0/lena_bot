@@ -558,33 +558,6 @@ async def bind_user_telegram(
     return user
 
 
-async def bind_user_referrer_once(
-    session: AsyncSession,
-    user_id: int,
-    *,
-    referrer: User,
-    referrer_l2: User | None = None,
-    referrer_l3: User | None = None,
-) -> bool:
-    result = await session.execute(
-        update(User)
-        .where(
-            User.id == user_id,
-            User.referrer_id.is_(None),
-            User.referrer_l2_id.is_(None),
-            User.referrer_l3_id.is_(None),
-        )
-        .values(
-            referrer_id=referrer.id,
-            referrer_l2_id=referrer_l2.id if referrer_l2 else None,
-            referrer_l3_id=referrer_l3.id if referrer_l3 else None,
-        )
-        .returning(User.id)
-    )
-    await session.commit()
-    return result.scalar_one_or_none() is not None
-
-
 async def set_user_language(session: AsyncSession, user_id: int, language: str) -> None:
     await session.execute(
         update(User)

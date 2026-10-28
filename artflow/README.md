@@ -35,7 +35,7 @@ alembic upgrade head
 python run_polling.py
 ```
 
-The current Alembic head is `046_tribute_catalog`; use `alembic heads` to check the active branch rather than a copied migration count. The application also runs migrations in its Compose startup command.
+The current Alembic head is `054_referral_lineage_immutability`; use `alembic heads` to check the active branch rather than a copied migration count. The application also runs migrations in its Compose startup command.
 
 Build the Mini App from `artflow/webapp/`:
 
@@ -67,6 +67,14 @@ pytest -q tests/test_trend_run_reliability.py tests/test_payment_webhooks.py
 Changes reach `main` through a reviewed PR with native squash auto-merge. On a successful `main` CI run, Production Autodeploy builds the frontend, applies migrations and checks the public health endpoint. Do not manually rebuild or restart the production server for ordinary releases. See [Production autodeploy](docs/production-autodeploy.md) for the deploy and rollback contract.
 
 Secrets belong in the production `.env` and must not be committed. For configuration names and examples, use [.env.example](.env.example). The public health checks are `/health` and `/api/v1/health`.
+
+Referral ancestry is assigned only when an account is created and is immutable afterward. The incident-repair tool is dry-run by default:
+
+```bash
+python -m scripts.repair_referral_lineage
+```
+
+An approved repair requires both `--apply` and a named `--operator`; it records append-only lineage and finance evidence in PostgreSQL and is idempotent by `--batch-key`.
 
 Supplier-cost reconciliation for failed image HTTP 5xx, delayed Nexus callbacks and refunded Seedance tasks (Neironych or Kie) continues silently:
 provider outcomes, unresolved-liability states and credit-ledger changes stay available in
