@@ -254,7 +254,9 @@ def _exercise_postgres_triggers(connection) -> None:
     connection.execute(
         sa.text(
             "CREATE TABLE credit_ledger ("
-            "id integer PRIMARY KEY, user_id integer NOT NULL REFERENCES users(id))"
+            "id integer PRIMARY KEY, user_id integer NOT NULL REFERENCES users(id), "
+            "delta double precision NOT NULL, balance_after double precision NOT NULL, "
+            "entry_type varchar(64) NOT NULL, source_type varchar(64), source_id varchar(128))"
         )
     )
     migration = importlib.import_module("db.migrations.versions.054_referral_lineage_immutability")
@@ -321,7 +323,13 @@ def _exercise_postgres_triggers(connection) -> None:
         "DELETE FROM referral_finance_repair_rows WHERE id=1",
     )
     connection.execute(
-        sa.text("INSERT INTO credit_ledger (id,user_id) VALUES (30,2),(31,2)")
+        sa.text(
+            "INSERT INTO credit_ledger "
+            "(id,user_id,delta,balance_after,entry_type,source_type,source_id) VALUES "
+            "(30,2,5,8,'referral_signup_bonus','user','1'),"
+            "(31,2,-3,5,'referral_bonus_reversal','referral_lineage_repair',"
+            "'trigger-test:30')"
+        )
     )
     connection.execute(
         sa.text(
@@ -337,7 +345,13 @@ def _exercise_postgres_triggers(connection) -> None:
     )
     _expect_db_error(connection, "DELETE FROM referral_credit_repair_rows WHERE id=1")
     connection.execute(
-        sa.text("INSERT INTO credit_ledger (id,user_id) VALUES (32,2),(33,2)")
+        sa.text(
+            "INSERT INTO credit_ledger "
+            "(id,user_id,delta,balance_after,entry_type,source_type,source_id) VALUES "
+            "(32,2,1,5,'referral_signup_bonus','user','1'),"
+            "(33,2,-1,4,'referral_bonus_reversal','referral_lineage_repair',"
+            "'trigger-test:32')"
+        )
     )
     _expect_db_error(
         connection,
@@ -353,7 +367,15 @@ def _exercise_postgres_triggers(connection) -> None:
             "summary_json='{}', applied_at=now() WHERE batch_key='trigger-test'"
         )
     )
-    connection.execute(sa.text("INSERT INTO credit_ledger (id,user_id) VALUES (34,2),(35,2)"))
+    connection.execute(
+        sa.text(
+            "INSERT INTO credit_ledger "
+            "(id,user_id,delta,balance_after,entry_type,source_type,source_id) VALUES "
+            "(34,2,1,4,'referral_signup_bonus','user','1'),"
+            "(35,2,-1,3,'referral_bonus_reversal','referral_lineage_repair',"
+            "'trigger-test:34')"
+        )
+    )
     _expect_db_error(
         connection,
         "INSERT INTO referral_credit_repair_rows "

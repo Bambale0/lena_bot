@@ -170,6 +170,26 @@ def upgrade() -> None:
                                 WHERE r.batch_key = NEW.batch_key
                               ), 0)
                           ) > 0.000001
+                       OR EXISTS (
+                            SELECT 1
+                            FROM referral_credit_repair_rows r
+                            JOIN credit_ledger original ON original.id = r.original_ledger_id
+                            JOIN credit_ledger reversal ON reversal.id = r.reversal_ledger_id
+                            WHERE r.batch_key = NEW.batch_key
+                              AND (
+                                original.user_id <> r.user_id
+                                OR original.entry_type <> r.entry_type
+                                OR abs(original.delta - r.amount_credits) > 0.000001
+                                OR reversal.user_id <> r.user_id
+                                OR reversal.entry_type <> 'referral_bonus_reversal'
+                                OR reversal.source_type <> 'referral_lineage_repair'
+                                OR reversal.source_id <> (
+                                    NEW.batch_key || ':' || r.original_ledger_id::text
+                                )
+                                OR abs(reversal.delta + r.balance_debit_credits) > 0.000001
+                                OR reversal.balance_after < -0.000001
+                              )
+                          )
                        OR NEW.summary_json IS NULL
                        OR NEW.applied_at IS NULL THEN
                         RAISE EXCEPTION 'invalid referral repair batch finalization';
