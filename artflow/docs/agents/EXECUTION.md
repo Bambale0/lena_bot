@@ -2326,3 +2326,35 @@ Steps: [x] root-cause and production preflight; [x] RED/green operator control;
   active Neironych submission clock so recovered rows cannot starve the batch.
   Focused admission/timeout/recovery coverage passes 132/132; updated-head CI
   and review remain required before production policy activation.
+
+## 2026-10-28 — lilac branded bottom-navigation icons
+
+- Baseline `ac79030`; branch `feat/lilac-nav-icons-v5`. The approved reference
+  uses a restrained five-item bottom bar with consistent outline glyphs and a
+  circular branded Create medallion. APIX keeps its black/lilac palette and the
+  existing labels/actions: `Главная`, `Идеи`, `Создать`, `Пополнить`, `Профиль`.
+- Scope is Mini App presentation only: no navigation route, balance/top-up,
+  permission, backend, schema, price or provider change. The four semantic
+  destinations retain Lucide outline icons; Create receives an accessible,
+  CSS-rendered APIX aperture mark inside the existing touch target.
+- Acceptance: five existing destinations and accessible names unchanged;
+  exactly four consistent outline glyphs plus one circular brand mark; selected
+  state remains visible beyond color alone; touch targets stay at least 44px;
+  no horizontal overflow at 320/375/390px or phone landscape; focus, safe area,
+  press feedback and reduced-motion behavior remain intact.
+- Direction: **Lilac Noir navigation medallions** — luxury/refined, with the
+  branded circular Create control as the sole visual anchor. Guidance: UI UX
+  Pro Max and `.agents` frontend-design. Steps: [x] source/reference preflight;
+  [x] RED visual contract; [x] React/CSS implementation; [x] focused/full
+  frontend checks and screenshot review; [ ] protected PR and production proof.
+- Evidence: the new contract failed against the previous build with zero of four
+  expected outline-glyph wrappers, then passed after implementation. TypeScript
+  and Vite production build passed; all 148 unit tests and all 285 maintained
+  UX2 browser journeys passed. The final 390px screenshot was inspected with
+  the branded circular medallion, four aligned outline glyphs, unchanged labels,
+  active-state panel, focus treatment and no overflow. No paid or production
+  mutation was used during verification.
+- PR #317 review found that a later legacy glow declaration replaced the new
+  inactive medallion's complete `box-shadow` stack. The obsolete declaration
+  was removed and the browser contract now requires the inactive Create control
+  to retain its inset black/lilac rings as well as its outer glow.
