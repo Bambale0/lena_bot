@@ -558,6 +558,18 @@ class ReferralCreditRepairRow(Base):
             name="uq_referral_credit_repair_batch_ledger",
         ),
         Index("ix_referral_credit_repair_rows_user", "user_id"),
+        CheckConstraint(
+            "amount_credits > 0",
+            name="ck_referral_credit_repair_positive_amount",
+        ),
+        CheckConstraint(
+            "balance_debit_credits >= 0 AND unrecovered_credits >= 0",
+            name="ck_referral_credit_repair_nonnegative_allocation",
+        ),
+        CheckConstraint(
+            "abs(amount_credits - balance_debit_credits - unrecovered_credits) <= 0.000001",
+            name="ck_referral_credit_repair_allocation_total",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

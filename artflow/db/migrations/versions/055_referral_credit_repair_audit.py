@@ -63,6 +63,18 @@ def upgrade() -> None:
             "original_ledger_id",
             name="uq_referral_credit_repair_batch_ledger",
         ),
+        sa.CheckConstraint(
+            "amount_credits > 0",
+            name="ck_referral_credit_repair_positive_amount",
+        ),
+        sa.CheckConstraint(
+            "balance_debit_credits >= 0 AND unrecovered_credits >= 0",
+            name="ck_referral_credit_repair_nonnegative_allocation",
+        ),
+        sa.CheckConstraint(
+            "abs(amount_credits - balance_debit_credits - unrecovered_credits) <= 0.000001",
+            name="ck_referral_credit_repair_allocation_total",
+        ),
     )
     op.create_index(
         "ix_referral_credit_repair_rows_user",

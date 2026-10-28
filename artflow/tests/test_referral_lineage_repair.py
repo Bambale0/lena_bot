@@ -65,6 +65,13 @@ def test_referral_lineage_migration_is_current_head() -> None:
     assert ReferralLineageRepairRow.__table__.c.user_id.nullable is False
     assert ReferralFinanceRepairRow.__table__.c.reversal_ledger_id.nullable is False
     assert ReferralCreditRepairRow.__table__.c.reversal_ledger_id.nullable is False
+    assert {
+        constraint.name for constraint in ReferralCreditRepairRow.__table__.constraints
+    } >= {
+        "ck_referral_credit_repair_positive_amount",
+        "ck_referral_credit_repair_nonnegative_allocation",
+        "ck_referral_credit_repair_allocation_total",
+    }
 
     repair_source = Path("scripts/repair_referral_lineage.py").read_text(encoding="utf-8")
     assert "LOCK TABLE transactions, users, credit_ledger" in repair_source
@@ -330,13 +337,6 @@ def _exercise_postgres_triggers(connection) -> None:
     )
     _expect_db_error(connection, "DELETE FROM referral_credit_repair_rows WHERE id=1")
     connection.execute(
-        sa.text(
-            "UPDATE referral_lineage_repair_batches SET status='applied', "
-            "balance_debit_credits=3, unrecovered_credits=2, "
-            "summary_json='{}', applied_at=now() WHERE batch_key='trigger-test'"
-        )
-    )
-    connection.execute(
         sa.text("INSERT INTO credit_ledger (id,user_id) VALUES (32,2),(33,2)")
     )
     _expect_db_error(
@@ -344,7 +344,22 @@ def _exercise_postgres_triggers(connection) -> None:
         "INSERT INTO referral_credit_repair_rows "
         "(batch_key,original_ledger_id,user_id,entry_type,amount_credits,"
         "balance_debit_credits,unrecovered_credits,reversal_ledger_id) "
-        "VALUES ('trigger-test',32,2,'referral_signup_bonus',1,1,0,33)",
+        "VALUES ('trigger-test',32,2,'referral_signup_bonus',1,-1,2,33)",
+    )
+    connection.execute(
+        sa.text(
+            "UPDATE referral_lineage_repair_batches SET status='applied', "
+            "balance_debit_credits=3, unrecovered_credits=2, "
+            "summary_json='{}', applied_at=now() WHERE batch_key='trigger-test'"
+        )
+    )
+    connection.execute(sa.text("INSERT INTO credit_ledger (id,user_id) VALUES (34,2),(35,2)"))
+    _expect_db_error(
+        connection,
+        "INSERT INTO referral_credit_repair_rows "
+        "(batch_key,original_ledger_id,user_id,entry_type,amount_credits,"
+        "balance_debit_credits,unrecovered_credits,reversal_ledger_id) "
+        "VALUES ('trigger-test',34,2,'referral_signup_bonus',1,1,0,35)",
     )
     _expect_db_error(
         connection,
