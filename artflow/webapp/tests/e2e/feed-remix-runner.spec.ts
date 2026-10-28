@@ -3,7 +3,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 async function expandRepeatControls(dialog: Locator) {
   await expect(dialog.getByText("Настройки повтора", { exact: true })).toBeVisible();
   for (const panel of await dialog.locator("details").all()) {
-    if (await panel.getAttribute("open") === null) await panel.locator("summary").click();
+    if (await panel.getAttribute("open") === null) await panel.locator(":scope > summary").click();
   }
 }
 

@@ -2502,6 +2502,10 @@ Steps: [x] root-cause and production preflight; [x] RED/green operator control;
   Grok text/photo choice. The site now mirrors the real sibling model, price,
   required photo, confirmation label and payload in both modes; a browser
   regression covers quote and launch for each variant, including cache-busted
-  runtime assets. The final independent review has no Critical or Important
+  runtime assets. The first updated-head smoke run exposed a strict-selector
+  failure after the new nested advanced panel appeared; the repeat helper now
+  targets each panel's direct summary, and the failed Seedance repeat journey
+  passes on iPhone SE, iPhone 13, Pixel 5 and desktop. The final independent
+  review has no Critical or Important
   finding. No paid
   provider request or mutable production control was used for verification.
