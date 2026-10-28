@@ -130,6 +130,35 @@ async def test_kie_generic_failure_does_not_authorize_second_provider_post(monke
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("primary", ["neironych", "kieai"])
+async def test_capability_gate_never_falls_back_to_a_paid_provider(monkeypatch, primary):
+    from core import neironych_seedance_contract as seedance_contract
+
+    monkeypatch.setattr(
+        seedance_provider_routing.settings, "SEEDANCE_PRIMARY_PROVIDER", primary,
+    )
+    error = seedance_contract.SeedanceCapabilityUnavailable(
+        "Seedance 2.5 draft/draft_task пока недоступен в APIX."
+    )
+    primary_submit = AsyncMock(side_effect=error)
+    fallback_submit = AsyncMock(return_value="second-paid-post")
+    providers = {
+        "neironych": primary_submit if primary == "neironych" else fallback_submit,
+        "kieai": primary_submit if primary == "kieai" else fallback_submit,
+    }
+
+    with pytest.raises(seedance_contract.SeedanceCapabilityUnavailable):
+        await seedance_provider_routing.submit_seedance(
+            "bytedance/seedance-2-5",
+            kie=providers["kieai"],
+            neironych=providers["neironych"],
+        )
+
+    primary_submit.assert_awaited_once()
+    fallback_submit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_legacy_review_notice_is_suppressed_without_changing_money():
     gen = generation()
     gen.input_params = json.dumps(
