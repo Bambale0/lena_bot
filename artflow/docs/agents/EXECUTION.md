@@ -2266,3 +2266,30 @@ Steps: [x] root-cause and production preflight; [x] RED/green operator control;
   bottom bar. The smoke now addresses both navigation regions by accessible
   name; its four iPhone SE/iPhone 13/Pixel 5/Desktop cases pass locally. Product
   behavior was unchanged by this test correction.
+
+## 2026-10-28 — Seedance 2.5 extend/draft capability safety
+
+- Baseline: `ac790307`; branch `fix/seedance25-operation-gates-20261028` in an
+  isolated checkout.
+- Current state: the provider documents `extend`, `draft` and `draft_task`, but
+  APIX has no separate source-duration settlement for continuation and no
+  two-stage draft/final billing state. Raw draft fields could pass through the
+  forward-compatible normalizer; extend returned only a generic contract error.
+- Outcome: return a precise local capability error for all three operations
+  before admission or provider POST. Treat that typed error as
+  non-fallbackable while preserving the configured Neironych-primary/KIE order
+  and all existing unknown-submit reconciliation rules.
+- Scope/parity: one shared backend gate covers site, Mini App and Telegram;
+  there is no new UI capability. No tariff, provider order, schema, balance,
+  migration, credential or production change. No paid generation is used.
+- Test seams: raw normalizer, typed builder, real in-memory HTTP client with an
+  admission callback, and both provider-order branches.
+- Steps: [x] contract/routing preflight; [x] RED tests; [x] minimal gate and
+  documentation; [x] focused verification and independent review; [ ] PR and
+  exact-head CI.
+- Verification: 202 focused contract, runtime, uncertainty and fallback tests
+  passed with UTF-8 and an isolated pytest temp directory. Changed Python files
+  pass Ruff and compileall; provider contract inventory is valid; `git diff
+  --check` is clean. Independent review found no P0-P2 issue. The locked OCR
+  CLI was also attempted, but no LLM endpoint is configured, so it produced no
+  review findings. No paid request or production mutation was performed.

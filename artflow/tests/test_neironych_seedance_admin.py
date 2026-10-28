@@ -13,6 +13,7 @@ from api.neironych_seedance import (
     NeironychSeedanceError,
     parse_seedance_prices,
 )
+from core import neironych_seedance_contract as seedance_contract
 from core.neironych_seedance_contract import (
     SeedanceContractError,
     build_seedance_payload,
@@ -155,6 +156,70 @@ def test_prompt_reference_integrity_fails_before_paid_submit() -> None:
                 "reference_images": [{"url": "https://cdn.example/only.jpg"}],
             },
         )
+
+
+@pytest.mark.parametrize(
+    ("payload", "reason"),
+    [
+        ({"omni_reference_task_type": "extend"}, "extend.*тари"),
+        ({"draft": True}, "draft/draft_task.*биллинг"),
+        ({"draft_task": {"id": "finished-request"}}, "draft/draft_task.*биллинг"),
+    ],
+)
+def test_unpriced_seedance25_operations_have_explicit_capability_gate(
+    payload: dict, reason: str,
+) -> None:
+    with pytest.raises(seedance_contract.SeedanceCapabilityUnavailable, match=reason):
+        normalize_seedance_request("seedance-2.5", payload)
+
+
+@pytest.mark.parametrize("mode", ["extend", "draft", "draft_task"])
+def test_unpriced_seedance25_builder_modes_have_explicit_capability_gate(mode: str) -> None:
+    with pytest.raises(seedance_contract.SeedanceCapabilityUnavailable):
+        build_seedance_payload(
+            model="seedance-2.5",
+            mode=mode,
+            prompt="continue",
+            resolution="480p",
+            duration=4,
+            aspect_ratio="16:9",
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"omni_reference_task_type": "extend"},
+        {"draft": True},
+        {"draft_task": {"id": "finished-request"}},
+    ],
+)
+async def test_capability_gate_runs_before_admission_and_provider_post(payload: dict) -> None:
+    requests: list[httpx.Request] = []
+    before_submit = AsyncMock()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(202, json={"request_id": "must-not-exist"})
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="https://provider.example",
+    ) as http_client:
+        client = NeironychSeedanceClient(
+            "secret", "https://provider.example", client=http_client,
+        )
+        with pytest.raises(seedance_contract.SeedanceCapabilityUnavailable):
+            await client.create_video(
+                model="seedance-2.5",
+                payload=payload,
+                idempotency_key="apix-seedance-capability-gate",
+                before_submit=before_submit,
+            )
+
+    before_submit.assert_not_awaited()
+    assert requests == []
 
 
 def test_prompt_limit_is_40000_utf8_bytes() -> None:

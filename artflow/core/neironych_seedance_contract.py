@@ -11,6 +11,10 @@ class SeedanceContractError(ValueError):
     """Request is invalid for the documented Neironych Seedance contract."""
 
 
+class SeedanceCapabilityUnavailable(SeedanceContractError):
+    """The provider operation is intentionally disabled in the APIX product."""
+
+
 @dataclass(frozen=True, slots=True)
 class SeedanceSpec:
     model: str
@@ -75,6 +79,15 @@ _ALWAYS_DROP_FIELDS = {
     "seed",
     "watermark",
 }
+
+_EXTEND_UNAVAILABLE = (
+    "Seedance 2.5 extend пока недоступен в APIX: отдельный тариф и учет "
+    "продолжительности еще не настроены."
+)
+_DRAFT_UNAVAILABLE = (
+    "Seedance 2.5 draft/draft_task пока недоступен в APIX: двухэтапный "
+    "биллинг и финализация еще не настроены."
+)
 
 
 def canonical_seedance_model(model: str) -> str:
@@ -208,6 +221,12 @@ def normalize_seedance_request(model: str, input_data: dict[str, Any]) -> dict[s
     for field in _ALWAYS_DROP_FIELDS:
         payload.pop(field, None)
 
+    task_type = str(payload.get("omni_reference_task_type") or "").strip().lower()
+    if "draft" in payload or "draft_task" in payload:
+        raise SeedanceCapabilityUnavailable(_DRAFT_UNAVAILABLE)
+    if task_type == "extend":
+        raise SeedanceCapabilityUnavailable(_EXTEND_UNAVAILABLE)
+
     if payload.get("generate_audio") is False and model != "seedance-2.5":
         raise SeedanceContractError("Seedance не поддерживает generate_audio=false.")
     if "generate_audio" in payload and not isinstance(payload["generate_audio"], bool):
@@ -215,7 +234,6 @@ def normalize_seedance_request(model: str, input_data: dict[str, Any]) -> dict[s
 
     prompt = _validate_prompt(payload)
 
-    task_type = str(payload.get("omni_reference_task_type") or "").strip().lower()
     if task_type:
         if model != "seedance-2.5":
             payload.pop("omni_reference_task_type", None)
@@ -360,6 +378,10 @@ def build_seedance_payload(
 ) -> dict[str, Any]:
     spec = get_seedance_spec(model)
     mode = str(mode or "").strip().lower()
+    if mode == "extend":
+        raise SeedanceCapabilityUnavailable(_EXTEND_UNAVAILABLE)
+    if mode in {"draft", "draft_task"}:
+        raise SeedanceCapabilityUnavailable(_DRAFT_UNAVAILABLE)
     if mode not in {"text", "reference", "frame", "edit", "raw"}:
         raise SeedanceContractError("Неизвестный режим Seedance.")
     if mode == "edit" and not spec.supports_edit:
