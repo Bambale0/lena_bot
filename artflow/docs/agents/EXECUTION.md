@@ -1,5 +1,55 @@
 # Execution ledger — Studio capability completion (2026-10-24)
 
+## Active 2026-10-28 — Referral lineage immutability and production repair
+
+- Baseline `602fe401cdf3705116e40604717686faac57e005`; branch
+  `fix/referral-lineage-immutability-20261028`; PR #319. User-authorized scope:
+  prevent referral assignment after account creation, repair all provably
+  impossible production ancestry, and reconcile only money caused by those
+  edges. Pricing, provider routing, permissions and paid generation are outside
+  scope.
+- Root cause: Telegram and web authentication accepted a referral payload for an
+  already-created unbound account. Production evidence includes user 1
+  (`LeLu88`, created 2026-05-12) incorrectly pointing to user 12327 (`Relen16`,
+  created 2026-09-30). Account chronology makes that direct edge impossible.
+- Data preflight: 10 direct edges have child `created_at` earlier than parent;
+  no current direct-graph cycle. The bounded repair clears those roots and only
+  their stored L2/L3 propagation. A 2026-10-28 dry-run found 1,138 affected
+  lineage rows at that snapshot. A broad canonical rebuild was rejected because
+  it would also rewrite unrelated legacy gaps.
+- Finance preflight: 168 nonzero referral-commission groups, totaling 3,304 RUB,
+  were paid to user 12327 through the false branch. Current referral balance was
+  2,224 RUB after an approved 2,300 RUB withdrawal, so apply must debit at most
+  the available balance, append full reversal evidence, and record 1,080 RUB as
+  unrecovered rather than creating a negative user balance. Read-only SQL found
+  zero invalid `referral_first_topup_bonus` or legacy signup-credit ledger rows
+  for all 10 impossible roots. The repair nevertheless detects either event type
+  and fails closed for a separately approved spent-credit correction if any
+  appears before apply.
+- Implementation: referral resolution remains only on INSERT paths; the shared
+  late-bind repository seam and settlement wrapper are removed. Revision
+  `054_referral_lineage` adds exact audited-update and append-only evidence
+  triggers. The repair is dry-run by default, serializes same-key runs with a
+  transaction advisory lock, then takes `EXCLUSIVE` table barriers in payment
+  lock order (`transactions`, `users`, `credit_ledger`, commission ledger),
+  recomputes under lock, and commits lineage/audit/reversals atomically.
+- Acceptance: existing accounts never resolve or bind referral payloads on bot,
+  shared links or web auth; new accounts retain valid referral creation;
+  ordinary SQL lineage UPDATE fails; only an exact applying audit row can pass;
+  evidence cannot be changed/deleted; rerunning the same batch is a no-op;
+  non-null recipient transfers and invalid credit bonuses fail closed; after
+  apply no impossible direct edge or false propagated ancestry remains.
+- Verification: independent review found and closed fail-closed finance,
+  concurrency, ORM and PostgreSQL-test gaps. Local Ruff and focused suites pass;
+  Windows full-suite exceptions remain the documented platform/temp-path
+  limitations. PR CI first exposed an Alembic version-column length error; the
+  revision ID was shortened and the fresh exact-head backend, PostgreSQL
+  migration/trigger, referral, provider, bot and webapp gates all passed.
+- Release status: exact-head PR checks green; merge/release, exact production
+  SHA/migration/health verification, repeat dry-run, one apply batch
+  `referral-lineage-20261028`, and post-apply audit are still required. No paid
+  provider request is permitted for verification.
+
 ## Active 2026-10-26 — Trend category shelves
 
 Baseline `179d7a01e5a6328d9cb0642fa8fe9523e12fbafe`; Phase A implementation head

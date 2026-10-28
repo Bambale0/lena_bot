@@ -112,17 +112,19 @@ async def test_auth_middleware_skips_suspicious_referrer(monkeypatch) -> None:
     monkeypatch.setattr("bot.middlewares.auth.ensure_referrer_allowed", AsyncMock(return_value=False))
     monkeypatch.setattr("bot.middlewares.auth.repo.create_user", create_user)
     handler = AsyncMock(return_value="handled")
+    bot = AsyncMock()
 
     data = {
         "session": AsyncMock(),
         "event_from_user": make_user(user_id=222),
         "event_update": make_update_with_start_payload("REFCODE"),
-        "bot": AsyncMock(),
+        "bot": bot,
     }
     result = await AuthMiddleware()(handler, make_message(user_id=222), data)
 
     assert result == "handled"
     assert create_user.await_args.kwargs["referrer"] is None
+    bot.send_message.assert_not_awaited()
 
 
 @pytest.mark.asyncio

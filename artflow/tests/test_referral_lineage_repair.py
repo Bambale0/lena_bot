@@ -21,7 +21,11 @@ from db.models import (
     ReferralLineageRepairBatch,
     ReferralLineageRepairRow,
 )
-from scripts.repair_referral_lineage import build_finance_plan, build_lineage_plan
+from scripts.repair_referral_lineage import (
+    build_finance_plan,
+    build_lineage_plan,
+    find_invalid_credit_bonuses,
+)
 
 
 def _user(user_id: int, created_at: datetime, refs=(None, None, None)):
@@ -54,6 +58,10 @@ def test_referral_lineage_migration_is_current_head() -> None:
     assert ReferralLineageRepairBatch.__table__.c.batch_key.type.length == 64
     assert ReferralLineageRepairRow.__table__.c.user_id.nullable is False
     assert ReferralFinanceRepairRow.__table__.c.reversal_ledger_id.nullable is False
+
+    repair_source = Path("scripts/repair_referral_lineage.py").read_text(encoding="utf-8")
+    assert "LOCK TABLE transactions, users, credit_ledger" in repair_source
+    assert "referral_commission_ledger IN EXCLUSIVE MODE" in repair_source
 
 
 def test_lineage_plan_repairs_only_impossible_edge_and_its_propagation() -> None:
@@ -146,6 +154,41 @@ def test_finance_plan_fails_closed_for_non_null_recipient_transfer() -> None:
 
     with pytest.raises(RuntimeError, match="cannot transfer commission"):
         build_finance_plan(lineage_changes, [])
+
+
+def test_invalid_late_bind_credit_bonus_is_detected_fail_closed() -> None:
+    users = [
+        SimpleNamespace(id=1, tg_id=111),
+        SimpleNamespace(id=4, tg_id=444),
+    ]
+    invalid_edges = [SimpleNamespace(user_id=1, invalid_referrer_id=4)]
+    entries = [
+        SimpleNamespace(
+            id=7,
+            user_id=4,
+            delta=3.0,
+            entry_type="referral_first_topup_bonus",
+            source_id="1",
+        ),
+        SimpleNamespace(
+            id=8,
+            user_id=4,
+            delta=3.0,
+            entry_type="referral_signup_bonus",
+            source_id="111",
+        ),
+        SimpleNamespace(
+            id=9,
+            user_id=4,
+            delta=3.0,
+            entry_type="referral_first_topup_bonus",
+            source_id="999",
+        ),
+    ]
+
+    assert [
+        entry.id for entry in find_invalid_credit_bonuses(invalid_edges, users, entries)
+    ] == [7, 8]
 
 
 def _expect_db_error(connection, statement: str) -> None:

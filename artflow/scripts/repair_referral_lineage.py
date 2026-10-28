@@ -19,7 +19,7 @@ from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from core.config import settings
-from db.models import ReferralCommissionLedger, User
+from db.models import CreditLedgerEntry, ReferralCommissionLedger, User
 
 MONEY = Decimal("0.01")
 repair_engine = create_async_engine(settings.DATABASE_URL, pool_pre_ping=True)
@@ -171,9 +171,57 @@ def build_finance_plan(
     return corrections
 
 
+def find_invalid_credit_bonuses(
+    invalid_edges: Sequence[InvalidEdge],
+    users: Sequence[object],
+    credit_entries: Iterable[object],
+) -> list[object]:
+    by_id = {int(user.id): user for user in users}
+    invalid_sources: dict[int, set[str]] = {}
+    for edge in invalid_edges:
+        child = by_id[edge.user_id]
+        source_ids = {str(edge.user_id)}
+        tg_id = int(getattr(child, "tg_id", 0) or 0)
+        if tg_id > 0:
+            source_ids.add(str(tg_id))
+        invalid_sources.setdefault(edge.invalid_referrer_id, set()).update(source_ids)
+
+    return [
+        entry
+        for entry in credit_entries
+        if entry.entry_type in {"referral_first_topup_bonus", "referral_signup_bonus"}
+        and float(entry.delta or 0) > 0
+        and str(entry.source_id or "") in invalid_sources.get(int(entry.user_id), set())
+    ]
+
+
 async def _load_plan(session):
     users = list((await session.scalars(select(User).order_by(User.id))).all())
     invalid_edges, lineage_changes = build_lineage_plan(users)
+    invalid_recipient_ids = sorted({edge.invalid_referrer_id for edge in invalid_edges})
+    credit_entries: list[CreditLedgerEntry] = []
+    if invalid_recipient_ids:
+        credit_entries = list(
+            (
+                await session.scalars(
+                    select(CreditLedgerEntry).where(
+                        CreditLedgerEntry.user_id.in_(invalid_recipient_ids),
+                        CreditLedgerEntry.entry_type.in_(
+                            ["referral_first_topup_bonus", "referral_signup_bonus"]
+                        ),
+                    )
+                )
+            ).all()
+        )
+    invalid_credit_bonuses = find_invalid_credit_bonuses(
+        invalid_edges, users, credit_entries
+    )
+    if invalid_credit_bonuses:
+        entry_ids = sorted(int(entry.id) for entry in invalid_credit_bonuses)
+        raise RuntimeError(
+            "Automatic repair stopped: invalid referral credit bonuses require "
+            f"a separately approved spent-credit correction; ledger_entry_ids={entry_ids}"
+        )
     payer_ids = sorted({change.user_id for change in lineage_changes})
     ledger_entries: list[ReferralCommissionLedger] = []
     if payer_ids:
@@ -245,7 +293,10 @@ async def apply_repair(batch_key: str, operator: str, reason: str) -> dict:
         # Hold a brief table-level write barrier so a registration or payment cannot
         # inherit the bad chain while the plan is being recomputed and committed.
         await session.execute(
-            text("LOCK TABLE users, referral_commission_ledger " "IN SHARE ROW EXCLUSIVE MODE")
+            text(
+                "LOCK TABLE transactions, users, credit_ledger, "
+                "referral_commission_ledger IN EXCLUSIVE MODE"
+            )
         )
         invalid_edges, lineage_changes, corrections = await _load_plan(session)
         base_summary = _summary(invalid_edges, lineage_changes, corrections)

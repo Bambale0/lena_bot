@@ -166,6 +166,7 @@ class AuthMiddleware(BaseMiddleware):
             return None
 
         db_user = await repo.get_user_by_tg_id(session, tg_user.id)
+        was_existing_user = db_user is not None
         update: Update | None = event if isinstance(event, Update) else data.get("event_update")
         raw_payload = _extract_start_payload(update)
         start_payload = parse_start_payload(raw_payload)
@@ -224,7 +225,7 @@ class AuthMiddleware(BaseMiddleware):
 
         # Referral lineage is immutable after account creation. Shared links may carry
         # a referral code, but an existing account must never be rebound to it.
-        if ref_code and db_user and not db_user.is_banned:
+        if ref_code and was_existing_user and db_user and not db_user.is_banned:
             logger.info(
                 "Referral payload ignored for existing account: tg_id=%s user_id=%s entrypoint=%s",
                 tg_user.id,
