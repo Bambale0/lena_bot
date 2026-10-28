@@ -270,3 +270,77 @@ async def test_lost_kie_journal_ack_preserves_kie_identity_for_reconciliation(ki
         assert json.loads(row.input_params)[repo.KIE_VIDEO_SUBMISSION_KEY]["state"] == "submission_unknown"
         assert not await repo.begin_kie_video_submission(db, 73, context.client_request_id)
         assert session.get(User, 42).credits == 100
+
+
+@pytest.mark.asyncio
+async def test_wan_kie_primary_definite_rejection_transfers_journal_to_neironych(
+    monkeypatch, kie_transaction_db,
+):
+    """The real checkout context must change ownership before the fallback POST."""
+    import json
+
+    from sqlalchemy.orm import Session
+
+    from api import kieai_client, wan30_provider
+    from api.wan30_contract import Wan30Request
+    from core import seedance_reconciliation as reconciliation
+    from core.wan30_routing_policy import WanRoute
+    from db import repository as repo
+    from db.models import Generation, GenerationStatus, User
+    from tests.test_kie_seedance_callback import LocalAsyncSession
+
+    with Session(kie_transaction_db, expire_on_commit=False) as session:
+        row = session.get(Generation, 73)
+        row.task_id = None
+        row.input_params = "{}"
+        row.status = GenerationStatus.pending
+        row.model = "wan/3-0-video"
+        session.commit()
+        db = LocalAsyncSession(session)
+        assert await repo.register_kie_video_callback(db, row.id, surface="miniapp")
+        context = reconciliation.make_submission_context(db, row.id, row.model)
+
+        monkeypatch.setattr(
+            wan30_provider,
+            "get_wan30_route",
+            AsyncMock(return_value=WanRoute(
+                row.model, "kie_neironych", "wan-3", 3, "database", 42,
+            )),
+        )
+        monkeypatch.setattr(wan30_provider.settings, "NEIRONYCH_API_KEY", "synthetic")
+        monkeypatch.setattr(
+            NeironychSeedanceClient, "list_models", AsyncMock(return_value=["wan-3"]),
+        )
+        monkeypatch.setattr(
+            kieai_client, "create_task",
+            AsyncMock(side_effect=kieai_client.KieDefiniteRejection("synthetic reject")),
+        )
+
+        async def neironych_paid(**kwargs):
+            await kwargs["before_submit"](
+                kwargs["idempotency_key"], "c" * 64,
+            )
+            persisted = session.get(Generation, 73)
+            marker = json.loads(persisted.input_params)
+            assert persisted.task_id == "neironych-submit:" + context.client_request_id
+            assert marker[repo.KIE_VIDEO_SUBMISSION_KEY]["state"] == (
+                "definite_rejected_fallback_neironych"
+            )
+            return "neironych-fallback-73"
+
+        monkeypatch.setattr(wan30_provider, "post_wan30_neironych", neironych_paid)
+        result = await wan30_provider.submit_wan30_provider(
+            Wan30Request(model=row.model, prompt="Synthetic paper boat"),
+            idempotency_key="synthetic-wan-73",
+            submission_context=context,
+        )
+
+        assert result.provider == "neironych"
+        assert context.started is True and context.kie_started is False
+        assert await reconciliation.persist_submission_result(
+            db, 73, context, result.task_id,
+        )
+        assert session.get(Generation, 73).task_id == "neironych:neironych-fallback-73"
+        assert await repo.bind_kie_video_callback(db, 73, "impossible-late-kie") is None
+        assert session.get(Generation, 73).task_id == "neironych:neironych-fallback-73"
+        assert session.get(User, 42).credits == 100

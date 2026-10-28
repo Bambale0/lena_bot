@@ -60,10 +60,10 @@ test("Wan exposes native mapping and sends revision only after confirmation", as
   const { writes } = await setup(page);
   await page.getByRole("button", { name: "Маршруты провайдеров", exact: true }).click();
   await expect(page.getByLabel("Нативный ID Wan")).toHaveValue("wan-3.0");
-  await page.getByLabel("Политика Wan").selectOption("neironych_only");
+  await page.getByLabel("Политика Wan").selectOption("kie_neironych");
   await page.getByRole("button", { name: "Проверить маршрут" }).click(); expect(writes).toHaveLength(0);
   await confirm(page); await expect(page.getByText("Настройка сохранена и проверена.", { exact: true })).toBeVisible();
-  expect(writes[0].body).toEqual({ policy: "neironych_only", neironych_model_id: "wan-3.0", expected_revision: 2 });
+  expect(writes[0].body).toEqual({ policy: "kie_neironych", neironych_model_id: "wan-3.0", expected_revision: 2 });
 });
 test("Qwen and Nano validate distinct providers and use real route payloads", async ({ page }) => {
   const { writes } = await setup(page); await page.getByRole("button", { name: "Маршруты провайдеров", exact: true }).click();

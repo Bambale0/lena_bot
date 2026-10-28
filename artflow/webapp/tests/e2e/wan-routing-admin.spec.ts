@@ -30,10 +30,10 @@ test("admin changes both models without redeploy and conflict never replays a wr
   });
   await page.goto("/wan-routing-admin.html");
   await expect(page.getByLabel("ID модели Нейроныча")).toHaveValue("wan-3");
-  await page.getByRole("combobox", { name: "Маршрут", exact: true }).selectOption("kie_only");
+  await page.getByRole("combobox", { name: "Маршрут", exact: true }).selectOption("kie_neironych");
   await page.getByRole("button", { name: "Проверить и сохранить" }).click();
   await expect(page.getByRole("status")).toContainText("Сохранено");
-  expect(writes[0]).toEqual({ variant: "standard", policy: "kie_only", neironych_model_id: "wan-3", expected_revision: 1 });
+  expect(writes[0]).toEqual({ variant: "standard", policy: "kie_neironych", neironych_model_id: "wan-3", expected_revision: 1 });
   await page.getByRole("combobox", { name: "Модель", exact: true }).selectOption("prime");
   await expect(page.getByLabel("ID модели Нейроныча")).toHaveValue("wan-3-prime");
   await page.getByRole("button", { name: "Проверить и сохранить" }).click();

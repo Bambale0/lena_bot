@@ -1,4 +1,4 @@
-"""Paid Wan3 submission route: verified Neironych primary, KIE standby.
+"""Paid Wan3 submission route with an administrator-selected primary.
 
 Never fallback after ambiguous acceptance (timeouts, 5xx, non-JSON, missing ID).
 A model not advertised by Neironych /v1/models is not sent a paid test POST.
@@ -9,6 +9,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
+from api.kieai_client import KieDefiniteRejection
 from api.neironych_seedance import (
     NeironychPreSubmitFailure,
     NeironychSeedanceError,
@@ -20,6 +21,7 @@ from api.wan30_contract import (
     build_neironych_wan30_payload,
     wan30_supported_by_neironych,
 )
+from core.wan30_routing_policy import WanPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +56,7 @@ def _confirmed_no_neironych_submission(exc: NeironychSeedanceError) -> bool:
 async def submit_wan30(
     request: Wan30Request,
     *,
+    policy: WanPolicy = "neironych_kie",
     neironych_model_id: str,
     fetch_neironych_models: Callable[[], Awaitable[list[str]]],
     send_neironych: Callable[[dict], Awaitable[str]],
@@ -62,6 +65,36 @@ async def submit_wan30(
 ) -> Wan30Submitted:
     kie_payload = build_kie_wan30_payload(request)  # all validation before POST
     primary_model = str(neironych_model_id or "").strip()
+    if policy == "kie_only":
+        task_id = await send_kie(kie_payload)
+        return Wan30Submitted(task_id=task_id, provider="kieai")
+    if policy == "neironych_only":
+        allow_kie = False
+    if policy == "kie_neironych":
+        try:
+            task_id = await send_kie(kie_payload)
+            return Wan30Submitted(task_id=task_id, provider="kieai")
+        except KieDefiniteRejection:
+            logger.warning(
+                "Wan3 KIE rejected before acceptance; Neironych backup model=%s",
+                request.model,
+            )
+        if not primary_model or not wan30_supported_by_neironych(request):
+            raise RuntimeError("Neironych fallback is unavailable for this Wan request")
+        try:
+            current_models = await fetch_neironych_models()
+        except Exception as exc:
+            raise RuntimeError("Neironych fallback catalog is unavailable") from exc
+        if primary_model not in current_models:
+            raise RuntimeError("Neironych fallback model is unavailable")
+        fallback_payload = build_neironych_wan30_payload(
+            request, provider_model=primary_model,
+        )
+        task_id = await send_neironych(fallback_payload)
+        if not isinstance(task_id, str) or not task_id.strip():
+            raise RuntimeError("Neironych Wan accepted work without verified task ID")
+        return Wan30Submitted(task_id=f"neironych:{task_id}", provider="neironych")
+
     if primary_model and wan30_supported_by_neironych(request):
         try:
             current_models = await fetch_neironych_models()

@@ -2266,3 +2266,47 @@ Steps: [x] root-cause and production preflight; [x] RED/green operator control;
   bottom bar. The smoke now addresses both navigation regions by accessible
   name; its four iPhone SE/iPhone 13/Pixel 5/Desktop cases pass locally. Product
   behavior was unchanged by this test correction.
+
+## 2026-10-28 — Wan KIE primary with Neironych fallback
+
+- Baseline `ac790307fbda56ad7b70fc8b14032ebf40b2588c`; branch
+  `fix/wan-kie-primary-neironych-fallback-20261028`. The owner corrected the
+  requested route from KIE-only to **KIE primary, Neironych fallback** for both
+  Wan 3.0 variants.
+- Safety contract: fallback is permitted only after `KieDefiniteRejection`,
+  which proves the paid KIE task was not accepted. Timeout, 5xx, malformed
+  response, missing task ID and every other uncertain KIE outcome stop without
+  a Neironych POST. Both provider sends retain their existing durable journal
+  requirements and provider task identity.
+- Control plane adds audited policy `kie_neironych`, revision-checked writes,
+  catalog/key validation and an expand-only migration `053`. Existing rows are
+  not changed by deployment; the production switch must be made afterward by
+  an authenticated administrator and verified in the audit table.
+- Surfaces: shared backend behavior covers site, Mini App and Telegram bot;
+  APIX Studio and the Telegram admin page both expose `KIE → Нейроныч`. Prices,
+  balances, access policy, credentials and provider payload contracts remain
+  unchanged. No paid generation is used for verification.
+- TDD evidence so far: the new route and control-policy tests failed before the
+  implementation and now pass; the static admin browser scenario failed on the
+  absent option and now passes 8/8 device cases; the APIX Studio payload flow
+  passes. Focused Wan provider/routing/runtime/repeat suite passes 120 tests;
+  migration chain has one head at `053_wan_kie_primary_fallback`.
+- Final local gates: Ruff, compileall, diff check, TypeScript, Vite production
+  build and 148 frontend units pass. Offline PostgreSQL Alembic SQL shows one
+  transactional constraint replacement and head update. The broad Windows
+  Python 3.14 run retains unrelated current-main/platform fixture failures;
+  exact-head protected CI on the repository Python is authoritative. No focused
+  Wan, migration-chain or changed-surface test failed.
+- Remaining gates: full relevant lint/tests/review; PR and exact-head protected
+  checks; merge/autodeploy; exact-SHA, migration, container and health checks;
+  authenticated route update for Standard and Prime plus immutable audit
+  verification.
+- PR #315 first exact-head gates all passed, but required Codex review correctly
+  blocked merge on a P1 durable-journal flaw: the KIE marker prevented the
+  Neironych fallback from starting and would have selected the wrong result
+  binder. A real SQLite checkout-context RED reproduced it. The amended flow
+  records a definite KIE rejection, atomically transfers `kie-submit:*` to a
+  Neironych submission marker before POST, switches in-memory binder ownership,
+  and rejects an impossible late KIE callback. Related admission/routing/feed/
+  callback tests pass 164/164; Ruff, compileall and diff check pass. Updated-head
+  CI and review are required again before merge.

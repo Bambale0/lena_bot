@@ -15,7 +15,7 @@ export interface ModelCost { id: number; model_key: string; gen_type: string; di
 export interface PricePlan { id: number; key: string; label: string; credits: number; price_rub: number; price_stars: number | null; sort_order: number; is_active: boolean; }
 export interface Pricing { models: ModelCost[]; price_plans: PricePlan[]; }
 export interface AdminPrompt { id: number; title: string; prompt_text?: string; description?: string; model?: string; status: string; is_mine?: boolean; }
-export interface WanRoute { model_key: string; policy: "neironych_kie" | "neironych_only" | "kie_only"; neironych_model_id: string; revision: number; source: string; updated_by_admin_tg_id: number | null; credential_configured?: boolean; }
+export interface WanRoute { model_key: string; policy: "neironych_kie" | "kie_neironych" | "neironych_only" | "kie_only"; neironych_model_id: string; revision: number; source: string; updated_by_admin_tg_id: number | null; credential_configured?: boolean; }
 export interface QwenRoute { mode: string; primary_provider: "neironych" | "kie"; backup_provider: "neironych" | "kie" | null; source: string; updated_by_admin_tg_id: number | null; }
 export interface NanoRoute { model_key: string; primary_provider: "neironych" | "nexus"; source: string; updated_by_admin_tg_id: number | null; }
 export interface RecoveryPolicy { provider: string; auto_refund_seconds: number; source: string; updated_by_admin_tg_id: number | null; }
