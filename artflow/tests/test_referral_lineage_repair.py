@@ -23,6 +23,7 @@ from db.models import (
     ReferralLineageRepairRow,
 )
 from scripts.repair_referral_lineage import (
+    _summary,
     allocate_credit_corrections,
     build_finance_plan,
     build_lineage_plan,
@@ -305,6 +306,22 @@ def test_credit_reversal_debits_available_balance_and_records_spent_remainder() 
         (8, 0.0, 5.0, 0.0),
         (9, 3.0, 0.0, 7.0),
     ]
+
+
+def test_empty_repair_summary_uses_decimal_zero_totals() -> None:
+    assert _summary([], [], [], []) == {
+        "invalid_edge_count": 0,
+        "changed_user_count": 0,
+        "lineage_change_counts": {},
+        "finance_correction_count": 0,
+        "invalid_commission_rub": 0.0,
+        "invalid_commission_by_recipient": {},
+        "credit_correction_count": 0,
+        "invalid_credit_credits": 0.0,
+        "invalid_credits_by_recipient": {},
+        "invalid_credit_ledger_ids": [],
+        "invalid_edges": [],
+    }
 
 
 def _expect_db_error(connection, statement: str) -> None:

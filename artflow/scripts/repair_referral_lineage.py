@@ -320,7 +320,9 @@ async def _load_plan(session):
 
 
 def _summary(invalid_edges, lineage_changes, corrections, credit_corrections) -> dict:
-    invalid_commission = sum(Decimal(str(item.amount_rub)) for item in corrections)
+    invalid_commission = sum(
+        (Decimal(str(item.amount_rub)) for item in corrections), Decimal("0")
+    )
     commission_by_recipient: dict[int, Decimal] = defaultdict(lambda: Decimal("0"))
     for item in corrections:
         commission_by_recipient[item.recipient_user_id] += Decimal(str(item.amount_rub))
