@@ -59,6 +59,9 @@ def test_referral_lineage_migration_is_current_head() -> None:
     ).read_text(encoding="utf-8")
     assert "trg_referral_credit_repair_rows_append_only" in credit_source
     assert "enforce_referral_repair_row_insert" in credit_source
+    assert "FROM referral_lineage_repair_batches b\n                WHERE b.batch_key = NEW.batch_key\n                FOR UPDATE" in credit_source
+    assert "lock_referral_credit_ledger_evidence" in credit_source
+    assert "trg_referral_credit_repair_rows_ledger_lock" in credit_source
     assert "sum(r.unrecovered_credits)" in credit_source
 
     assert ReferralLineageRepairBatch.__table__.c.batch_key.type.length == 64
@@ -417,6 +420,7 @@ def _exercise_postgres_triggers(connection) -> None:
             "VALUES ('trigger-test',30,2,'referral_signup_bonus',5,3,2,31)"
         )
     )
+    _expect_db_error(connection, "UPDATE credit_ledger SET delta=0 WHERE id=31")
     _expect_db_error(
         connection,
         "UPDATE referral_credit_repair_rows SET amount_credits=4 WHERE id=1",
@@ -446,21 +450,11 @@ def _exercise_postgres_triggers(connection) -> None:
         "VALUES ('trigger-test',32,2,'referral_signup_bonus',1,1,0,31)",
     )
     connection.execute(sa.text("INSERT INTO users (id,tg_id) VALUES (111,999)"))
-    connection.execute(sa.text("UPDATE credit_ledger SET source_id='111' WHERE id=30"))
-    _expect_db_error(
-        connection,
-        "UPDATE referral_lineage_repair_batches SET status='applied', "
-        "balance_debit_credits=3, unrecovered_credits=2, "
-        "summary_json=jsonb_build_object('invalid_credit_credits',5,"
-        "'balance_debit_credits',3,'unrecovered_credits',2), "
-        "applied_at=now() WHERE batch_key='trigger-test'",
-    )
-    connection.execute(sa.text("UPDATE credit_ledger SET source_id='1' WHERE id=30"))
     connection.execute(
         sa.text(
             "INSERT INTO credit_ledger "
             "(id,user_id,delta,balance_after,entry_type,source_type,source_id) VALUES "
-            "(37,2,1,6,'referral_signup_bonus','user','1')"
+            "(37,2,1,6,'referral_signup_bonus','user','111')"
         )
     )
     _expect_db_error(
@@ -472,16 +466,54 @@ def _exercise_postgres_triggers(connection) -> None:
         "applied_at=now() WHERE batch_key='trigger-test'",
     )
     connection.execute(sa.text("DELETE FROM credit_ledger WHERE id=37"))
-    connection.execute(sa.text("UPDATE credit_ledger SET balance_after=1000 WHERE id=31"))
+    connection.execute(
+        sa.text(
+            "INSERT INTO users (id,tg_id,credits) VALUES (3,333,-1), (4,444,0)"
+        )
+    )
+    connection.execute(
+        sa.text(
+            "INSERT INTO referral_lineage_repair_batches "
+            "(batch_key,operator,reason,status,invalid_credit_credits) "
+            "VALUES ('negative-credit-test','pytest','negative credit test','applying',5)"
+        )
+    )
+    connection.execute(
+        sa.text("SELECT set_config('apix.referral_repair_batch','negative-credit-test',true)")
+    )
+    connection.execute(
+        sa.text(
+            "INSERT INTO referral_lineage_repair_rows "
+            "(batch_key,user_id,old_referrer_id,new_referrer_id,reason) "
+            "VALUES ('negative-credit-test',4,3,NULL,'impossible_direct_referrer')"
+        )
+    )
+    connection.execute(
+        sa.text(
+            "INSERT INTO credit_ledger "
+            "(id,user_id,delta,balance_after,entry_type,source_type,source_id) VALUES "
+            "(50,3,5,2,'referral_signup_bonus','user','4'),"
+            "(51,3,-3,-1,'referral_bonus_reversal','referral_lineage_repair',"
+            "'negative-credit-test:50')"
+        )
+    )
+    connection.execute(
+        sa.text(
+            "INSERT INTO referral_credit_repair_rows "
+            "(batch_key,original_ledger_id,user_id,entry_type,amount_credits,"
+            "balance_debit_credits,unrecovered_credits,reversal_ledger_id) "
+            "VALUES ('negative-credit-test',50,3,'referral_signup_bonus',5,3,2,51)"
+        )
+    )
     _expect_db_error(
         connection,
         "UPDATE referral_lineage_repair_batches SET status='applied', "
         "balance_debit_credits=3, unrecovered_credits=2, "
         "summary_json=jsonb_build_object('invalid_credit_credits',5,"
         "'balance_debit_credits',3,'unrecovered_credits',2), "
-        "applied_at=now() WHERE batch_key='trigger-test'",
+        "applied_at=now() WHERE batch_key='negative-credit-test'",
     )
-    connection.execute(sa.text("UPDATE credit_ledger SET balance_after=5 WHERE id=31"))
+    connection.execute(sa.text("SELECT set_config('apix.referral_repair_batch','trigger-test',true)"))
     _expect_db_error(
         connection,
         "UPDATE referral_lineage_repair_batches SET status='applied', "

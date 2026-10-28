@@ -90,13 +90,18 @@ def upgrade() -> None:
             """
             CREATE OR REPLACE FUNCTION enforce_referral_repair_row_insert()
             RETURNS trigger AS $$
+            DECLARE
+                batch_status varchar(32);
             BEGIN
-                IF current_setting('apix.referral_repair_batch', true) IS DISTINCT FROM NEW.batch_key
-                   OR NOT EXISTS (
-                        SELECT 1
-                        FROM referral_lineage_repair_batches b
-                        WHERE b.batch_key = NEW.batch_key AND b.status = 'applying'
-                   ) THEN
+                IF current_setting('apix.referral_repair_batch', true) IS DISTINCT FROM NEW.batch_key THEN
+                    RAISE EXCEPTION 'referral repair evidence requires an applying batch';
+                END IF;
+
+                SELECT b.status INTO batch_status
+                FROM referral_lineage_repair_batches b
+                WHERE b.batch_key = NEW.batch_key
+                FOR UPDATE;
+                IF NOT FOUND OR batch_status <> 'applying' THEN
                     RAISE EXCEPTION 'referral repair evidence requires an applying batch';
                 END IF;
                 RETURN NEW;
@@ -116,6 +121,28 @@ def upgrade() -> None:
                 FOR EACH ROW EXECUTE FUNCTION enforce_referral_repair_row_insert()
                 """
             )
+        op.execute(
+            """
+            CREATE OR REPLACE FUNCTION lock_referral_credit_ledger_evidence()
+            RETURNS trigger AS $$
+            BEGIN
+                PERFORM ledger.id
+                FROM credit_ledger ledger
+                WHERE ledger.id IN (NEW.original_ledger_id, NEW.reversal_ledger_id)
+                ORDER BY ledger.id
+                FOR UPDATE;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+            """
+        )
+        op.execute(
+            """
+            CREATE TRIGGER trg_referral_credit_repair_rows_ledger_lock
+            BEFORE INSERT ON referral_credit_repair_rows
+            FOR EACH ROW EXECUTE FUNCTION lock_referral_credit_ledger_evidence()
+            """
+        )
         op.execute(
             """
             CREATE TRIGGER trg_referral_credit_repair_rows_append_only
@@ -242,6 +269,7 @@ def upgrade() -> None:
                                     NEW.batch_key || ':' || r.original_ledger_id::text
                                 )
                                 OR abs(reversal.delta + r.balance_debit_credits) > 0.000001
+                                OR reversal.balance_after < -0.000001
                                 OR abs(
                                     reversal.balance_after
                                     - repaired_user.credits
@@ -274,50 +302,12 @@ def upgrade() -> None:
                                   bonus.entry_type = 'referral_signup_bonus'
                                   AND bonus.source_type IS NOT DISTINCT FROM 'user'
                                   AND bonus.source_id IS NOT DISTINCT FROM lineage.user_id::text
-                                  AND NOT EXISTS (
-                                    SELECT 1
-                                    FROM users source_owner
-                                    WHERE (
-                                      source_owner.id::text = bonus.source_id
-                                      OR (
-                                        source_owner.tg_id > 0
-                                        AND source_owner.tg_id::text = bonus.source_id
-                                      )
-                                    )
-                                    AND NOT EXISTS (
-                                      SELECT 1
-                                      FROM referral_lineage_repair_rows owner_lineage
-                                      WHERE owner_lineage.batch_key = NEW.batch_key
-                                        AND owner_lineage.reason = 'impossible_direct_referrer'
-                                        AND owner_lineage.old_referrer_id = bonus.user_id
-                                        AND owner_lineage.user_id = source_owner.id
-                                    )
-                                  )
                                 )
                                 OR (
                                   bonus.entry_type = 'referral_signup_bonus'
                                   AND bonus.source_type IS NOT DISTINCT FROM 'user'
                                   AND invalid_child.tg_id > 0
                                   AND bonus.source_id IS NOT DISTINCT FROM invalid_child.tg_id::text
-                                  AND NOT EXISTS (
-                                    SELECT 1
-                                    FROM users source_owner
-                                    WHERE (
-                                      source_owner.id::text = bonus.source_id
-                                      OR (
-                                        source_owner.tg_id > 0
-                                        AND source_owner.tg_id::text = bonus.source_id
-                                      )
-                                    )
-                                    AND NOT EXISTS (
-                                      SELECT 1
-                                      FROM referral_lineage_repair_rows owner_lineage
-                                      WHERE owner_lineage.batch_key = NEW.batch_key
-                                        AND owner_lineage.reason = 'impossible_direct_referrer'
-                                        AND owner_lineage.old_referrer_id = bonus.user_id
-                                        AND owner_lineage.user_id = source_owner.id
-                                    )
-                                  )
                                 )
                               )
                               AND NOT EXISTS (
@@ -356,17 +346,15 @@ def upgrade() -> None:
 
         op.execute(
             """
-            CREATE OR REPLACE FUNCTION protect_finalized_referral_credit_ledger()
+            CREATE OR REPLACE FUNCTION protect_referral_credit_ledger_evidence()
             RETURNS trigger AS $$
             BEGIN
                 IF EXISTS (
                     SELECT 1
                     FROM referral_credit_repair_rows r
-                    JOIN referral_lineage_repair_batches b ON b.batch_key = r.batch_key
-                    WHERE b.status = 'applied'
-                      AND (r.original_ledger_id = OLD.id OR r.reversal_ledger_id = OLD.id)
+                    WHERE r.original_ledger_id = OLD.id OR r.reversal_ledger_id = OLD.id
                 ) THEN
-                    RAISE EXCEPTION 'finalized referral credit evidence is immutable';
+                    RAISE EXCEPTION 'referral credit evidence is immutable';
                 END IF;
                 IF TG_OP = 'DELETE' THEN
                     RETURN OLD;
@@ -378,9 +366,9 @@ def upgrade() -> None:
         )
         op.execute(
             """
-            CREATE TRIGGER trg_credit_ledger_finalized_referral_evidence
+            CREATE TRIGGER trg_credit_ledger_referral_evidence
             BEFORE UPDATE OR DELETE ON credit_ledger
-            FOR EACH ROW EXECUTE FUNCTION protect_finalized_referral_credit_ledger()
+            FOR EACH ROW EXECUTE FUNCTION protect_referral_credit_ledger_evidence()
             """
         )
 
@@ -393,10 +381,15 @@ def downgrade() -> None:
         )
     if bind.dialect.name == "postgresql":
         op.execute(
-            "DROP TRIGGER IF EXISTS trg_credit_ledger_finalized_referral_evidence "
+            "DROP TRIGGER IF EXISTS trg_credit_ledger_referral_evidence "
             "ON credit_ledger"
         )
-        op.execute("DROP FUNCTION IF EXISTS protect_finalized_referral_credit_ledger()")
+        op.execute("DROP FUNCTION IF EXISTS protect_referral_credit_ledger_evidence()")
+        op.execute(
+            "DROP TRIGGER IF EXISTS trg_referral_credit_repair_rows_ledger_lock "
+            "ON referral_credit_repair_rows"
+        )
+        op.execute("DROP FUNCTION IF EXISTS lock_referral_credit_ledger_evidence()")
         for table_name in (
             "referral_lineage_repair_rows",
             "referral_finance_repair_rows",
