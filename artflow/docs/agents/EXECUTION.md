@@ -2485,8 +2485,8 @@ Steps: [x] root-cause and production preflight; [x] RED/green operator control;
   implementation; [x] focused and full local gates; [x] independent review;
   [ ] protected PR, exact-head CI, merge/autodeploy and public asset/health proof.
 - Verification evidence: 148 frontend unit tests, TypeScript and the Vite
-  production build pass. The final maintained browser gates cover 289 UX2,
-  300 user journeys and 392 four-device E2E cases (981 total). In the last full
+  production build pass. The final maintained browser gates cover 290 UX2,
+  300 user journeys and 392 four-device E2E cases (982 total). In the earlier full
   UX2 run 287 cases passed together; two unrelated startup timeouts then passed
   2/2 in an isolated single-worker rerun. The
   complete focused backend model/catalog matrix passes across image/video
@@ -2511,6 +2511,9 @@ Steps: [x] root-cause and production preflight; [x] RED/green operator control;
   text mode. The Seedance bundle and shared runtime are now cache-busted; its
   three material tiles mount above closed advanced settings; switching Grok to
   text explicitly clears photo files/links and explains the action. The focused
-  standalone suite passes 7/7 and parity/backend-compatibility coverage passes
-  24/24. Final updated-head review and protected gates remain required. No paid
+  standalone suite passes 8/8 and parity/backend-compatibility coverage passes
+  24/24. A further review pass added pre-review validation for empty Grok photo
+  mode, includes every guided Seedance file/link count in the confirmation, and
+  covers Grok image-to-video feed repeats where the mode chooser is intentionally
+  hidden. Final updated-head review and protected gates remain required. No paid
   provider request or mutable production control was used for verification.

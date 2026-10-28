@@ -2013,7 +2013,13 @@ function grokVideoPair(model = currentModel()) {
 
 function selectedGrokVideoMode(form = document.querySelector(".account-composer"), model = currentModel()) {
   if (state.generationKind !== "video" || !grokVideoPair(model)) return "";
-  const value = String(form?.querySelector("[name='video_mode']")?.value || state.videoScenarioMode || "text");
+  const sourceModel = String(state.feedRepeat?.source?.model || state.routeModelKey || "");
+  if (isFeedRemixMode()) {
+    if (/grok-imagine\/image-to-video/.test(sourceModel)) return "image";
+    if (/grok-imagine\/text-to-video/.test(sourceModel)) return "text";
+  }
+  const input = form?.querySelector("[name='video_mode']");
+  const value = String((input && !input.disabled ? input.value : "") || state.videoScenarioMode || "text");
   return value === "image" ? "image" : "text";
 }
 
@@ -2233,6 +2239,9 @@ async function loadFeedRepeat() {
   state.feedRepeat = { scope, authEpoch, source, override: null, offer: null, historyChecked: false, historyText: "" };
   state.generationKind = "video";
   state.routeModelKey = source.model;
+  if (/grok-imagine\/(?:text|image)-to-video/.test(String(source.model || ""))) {
+    state.videoScenarioMode = /grok-imagine\/image-to-video/.test(String(source.model || "")) ? "image" : "text";
+  }
   state.routeSourceReferenceUrl = "";
 }
 
@@ -2707,8 +2716,10 @@ function generationScenarioLabel(form, model = currentModel()) {
     return ({ text: "С нуля", reference: "По референсу", edit: "Улучшить фото" }[state.routeFlow || "text"] || "С нуля");
   }
   if (state.generationKind !== "video") return "По описанию";
-  const grokMode = selectedGrokVideoMode(form, model);
+  const grokMode = selectedGrokVideoMode(form);
   if (grokMode) return grokMode === "image" ? "По фото" : "По тексту";
+  const seedanceMaterials = seedanceGuidedMaterialSummary(form);
+  if (seedanceMaterials) return seedanceMaterials.total ? "По материалам" : "По тексту";
   if (selectedComposerValue("video_url", form)) return "По видео";
   return referenceFiles(form).length || referenceLinkValues(form).length ? "По фото" : "По тексту";
 }
@@ -2833,7 +2844,25 @@ function updatePromptInjectionStatus(form = document.querySelector(".account-com
     : "Акценты не выбраны";
 }
 
+function seedanceGuidedMaterialSummary(form = document.querySelector(".account-composer")) {
+  const panel = form?.querySelector("[data-seedance25-studio]");
+  if (!panel || panel.hidden) return null;
+  const fileCount = (selector) => panel.querySelector(selector)?.files?.length || 0;
+  const urlCount = (selector) => splitReferenceLinks(panel.querySelector(selector)?.value || "").length;
+  const photos = fileCount("[data-s25-image-files]") + urlCount("[data-s25-image-urls]");
+  const videos = fileCount("[data-s25-video-files]") + urlCount("[data-s25-video-urls]");
+  const audios = fileCount("[data-s25-audio-files]") + urlCount("[data-s25-audio-urls]");
+  const parts = [
+    photos ? `Фото: ${photos}` : "",
+    videos ? `Видео: ${videos}` : "",
+    audios ? `Аудио: ${audios}` : "",
+  ].filter(Boolean);
+  return { photos, videos, audios, total: photos + videos + audios, label: parts.join(" · ") || "без материалов" };
+}
+
 function referenceSummary(form) {
+  const seedanceMaterials = seedanceGuidedMaterialSummary(form);
+  if (seedanceMaterials) return seedanceMaterials.label;
   const files = referenceFiles(form);
   if (files.length === 1) return `фото: ${files[0].name}`;
   if (files.length > 1) return `${files.length} фото`;
@@ -2928,13 +2957,22 @@ function openGenerationReview(form) {
     toast("Опишите, что нужно создать.", "danger");
     return;
   }
+  if (selectedGrokVideoMode(form) === "image" && !referenceFiles(form).length && !referenceLinkValues(form).length) {
+    const references = form.querySelector("[data-reference-section]");
+    if (references) {
+      references.hidden = false;
+      references.open = true;
+    }
+    toast("Для режима «По фото» сначала добавьте исходное фото.", "danger");
+    return;
+  }
   state.pendingGenerationForm = form;
   const modal = ensureGenerationReviewModal();
   const model = currentRequestModel(form);
   const estimate = estimateGenerationCost(model, form);
   const rows = [
     ["Формат", generationKindLabel()],
-    ["Сценарий", generationScenarioLabel(form, model)],
+    ["Сценарий", generationScenarioLabel(form)],
     ["Модель", cleanModelName(model?.name || model?.key || "не выбрана")],
     ["Качество", selectedOptionText(form, "quality") || "Стандарт"],
     ["Формат кадра", selectedOptionText(form, "aspect_ratio") || "Авто"],
