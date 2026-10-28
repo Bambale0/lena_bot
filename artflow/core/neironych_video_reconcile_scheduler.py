@@ -1,6 +1,7 @@
 """Fair, bounded background recovery for Neironych Seedance 2/2.5 videos.
 
-The provider GET and eventual media download never submit another paid POST.
+Provider GET and eventual media download never replay an uncertain paid POST.
+A WAN KIE attempt durably proven rejected may make its first Neironych POST.
 DB transitions and Telegram notice claims remain guarded by repository locks.
 """
 from __future__ import annotations
@@ -8,12 +9,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import redis.asyncio as aioredis
-from sqlalchemy import DateTime, and_, cast, func, or_, select
+from sqlalchemy import DateTime, and_, case, cast, func, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
 
 from api import neironych_seedance_runtime
@@ -83,6 +84,16 @@ def _eligible_video_query():
                 ~Generation.task_id.like("kie-submit:%"),
                 ~Generation.task_id.like("web:kie-submit:%"),
             ),
+            and_(
+                Generation.model.in_(("wan/3-0-video", "wan/3-0-video-prime")),
+                or_(
+                    Generation.task_id.like("kie-submit:%"),
+                    Generation.task_id.like("web:kie-submit:%"),
+                ),
+                Generation.input_params.like(
+                    '%"state": "definite_rejected_neironych_pending"%'
+                ),
+            ),
         ),
         Generation.created_at <= cutoff,
     )
@@ -127,10 +138,25 @@ def _expired_seedance_query():
     kie_started = func.jsonb_extract_path_text(
         params_json, repo.KIE_VIDEO_SUBMISSION_KEY, "started_at"
     )
-    started = func.coalesce(
-        cast(kie_started, DateTime(timezone=True)),
-        cast(neironych_started, DateTime(timezone=True)),
-        Generation.created_at,
+    neironych_task = or_(
+        Generation.task_id.like("neironych:%"),
+        Generation.task_id.like("web:neironych:%"),
+        Generation.task_id.like("neironych-submit:%"),
+        Generation.task_id.like("web:neironych-submit:%"),
+    )
+    started = case(
+        (
+            neironych_task,
+            func.coalesce(
+                cast(neironych_started, DateTime(timezone=True)),
+                Generation.created_at,
+            ),
+        ),
+        else_=func.coalesce(
+            cast(kie_started, DateTime(timezone=True)),
+            cast(neironych_started, DateTime(timezone=True)),
+            Generation.created_at,
+        ),
     )
     return select(Generation.id).where(
         Generation.gen_type == GenerationType.video,
@@ -174,6 +200,16 @@ async def _final_neironych_provider_status(gen: Generation) -> tuple[str, str | 
     """One bounded GET only: completed, failed, pending, unknown or newly bound."""
     task = str(gen.task_id or "").removeprefix("web:")
     if task.startswith("kie-submit:"):
+        marker = repo.parse_input_params(gen.input_params).get(
+            repo.KIE_VIDEO_SUBMISSION_KEY
+        )
+        if (
+            isinstance(marker, dict)
+            and marker.get("state") == "definite_rejected_neironych_pending"
+        ):
+            # KIE proved no paid task exists; a fallback that could not start
+            # before the customer SLA expires needs no supplier review.
+            return "failed", None
         # Kie has not supplied a task ID, so no canonical GET is available.
         # A signed webhook can still bind the original paid order later.
         return "unknown", None
@@ -764,6 +800,117 @@ async def _track_active_video_notice_intent(gen_id: int) -> None:
         await client.aclose()
 
 
+def _stored_wan30_request(gen: Generation):
+    from api.wan30_contract import Wan30Request, validate_wan30_request
+
+    stored = repo.parse_input_params(gen.input_params).get("wan30_request")
+    if not isinstance(stored, dict):
+        raise ValueError("Wan fallback recovery input is missing")
+    allowed = {field.name for field in fields(Wan30Request)}
+    values = {key: value for key, value in stored.items() if key in allowed}
+    for key in (
+        "reference_image_urls",
+        "reference_video_urls",
+        "reference_audio_urls",
+        "reference_file_urls",
+        "reference_link_urls",
+        "reference_video_durations",
+        "reference_audio_durations",
+    ):
+        values[key] = tuple(values.get(key) or ())
+    request = Wan30Request(**values)
+    if request.model != gen.model:
+        raise ValueError("Wan fallback recovery model mismatch")
+    validate_wan30_request(request)
+    return request
+
+
+async def _resume_rejected_wan_kie_fallback(session, gen: Generation) -> bool:
+    from api import wan30_provider
+    from api.neironych_seedance import (
+        NeironychPreSubmitFailure,
+        NeironychSeedanceError,
+        NeironychSubmissionUnknown,
+    )
+    from core.seedance_reconciliation import (
+        handle_submission_unknown,
+        make_submission_context,
+        persist_submission_result,
+    )
+
+    params = repo.parse_input_params(gen.input_params)
+    marker = params.get(repo.KIE_VIDEO_SUBMISSION_KEY)
+    callback = params.get(repo.KIE_VIDEO_CALLBACK_KEY)
+    if (
+        not isinstance(marker, dict)
+        or marker.get("state") != "definite_rejected_neironych_pending"
+        or not isinstance(callback, dict)
+        or callback.get("generation_id") != gen.id
+    ):
+        return False
+    surface = str(callback.get("surface") or "miniapp")
+    request = _stored_wan30_request(gen)
+    gen_id = gen.id
+    await session.commit()
+    context = make_submission_context(
+        session, gen_id, gen.model, surface=surface,
+    )
+    if context is None:
+        return False
+    context.kie_started = True
+    context.kie_definitely_rejected = True
+    try:
+        submitted = await wan30_provider.resume_wan30_neironych_fallback(
+            request,
+            idempotency_key=f"apix-video-{gen_id}",
+            submission_context=context,
+        )
+    except NeironychSubmissionUnknown:
+        await handle_submission_unknown(session, gen_id, context)
+        return True
+    except NeironychPreSubmitFailure:
+        await session.rollback()
+        return False
+    except NeironychSeedanceError as exc:
+        expected_task = (
+            ("web:" if surface == "web" else "")
+            + "neironych-submit:"
+            + context.client_request_id
+        )
+        changed, _ = await repo.fail_generation_and_refund(
+            session,
+            gen_id,
+            str(exc),
+            expected_task_id=expected_task,
+            refund_note="wan:kie_primary:neironych_fallback_rejected",
+            video_notice_kind="failed" if surface != "web" else None,
+        )
+        if changed and surface != "web":
+            try:
+                await _track_active_video_notice_intent(gen_id)
+            except Exception as notice_exc:
+                logger.warning(
+                    "Wan fallback rejection notice retry delayed gen=%s error=%s",
+                    gen_id,
+                    type(notice_exc).__name__,
+                )
+        return changed
+    try:
+        saved = await persist_submission_result(
+            session, gen_id, context, submitted.task_id, surface=surface,
+        )
+    except Exception:
+        await handle_submission_unknown(session, gen_id, context)
+        return True
+    if saved:
+        logger.warning(
+            "Wan KIE rejection resumed on Neironych gen=%s provider_task=%s",
+            gen_id,
+            submitted.task_id[:96],
+        )
+    return saved
+
+
 async def _process_active_video(gen_id: int) -> bool:
     from api.miniapp_routes import _reconcile_generation_status
 
@@ -772,6 +919,25 @@ async def _process_active_video(gen_id: int) -> bool:
         if gen is None or gen.status not in (GenerationStatus.pending, GenerationStatus.processing):
             return False
         task_id = str(gen.task_id or "")
+        params = repo.parse_input_params(gen.input_params)
+        kie_marker = params.get(repo.KIE_VIDEO_SUBMISSION_KEY)
+        if (
+            task_id.removeprefix("web:").startswith("kie-submit:")
+            and isinstance(kie_marker, dict)
+            and kie_marker.get("state") == "definite_rejected_neironych_pending"
+        ):
+            try:
+                return await _resume_rejected_wan_kie_fallback(session, gen)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                await session.rollback()
+                logger.warning(
+                    "Wan KIE rejection fallback delayed gen=%s error=%s",
+                    gen_id,
+                    type(exc).__name__,
+                )
+                return False
         is_wan_kie = (
             gen.model in {"wan/3-0-video", "wan/3-0-video-prime"}
             and bool(task_id)

@@ -155,9 +155,23 @@ def make_submission_context(session, gen_id: int, product_model: str, *, surface
             raise NeironychPreSubmitFailure(request_id, f"apix-video-{gen_id}")
         context.kie_started = True
 
+    async def after_kie_definite_rejection() -> None:
+        from api.neironych_seedance import NeironychPreSubmitFailure
+
+        try:
+            persisted = await repo.mark_kie_video_definite_rejection(session, gen_id)
+        except Exception as exc:
+            raise NeironychPreSubmitFailure(
+                request_id, f"apix-video-{gen_id}",
+            ) from exc
+        if not persisted:
+            raise NeironychPreSubmitFailure(request_id, f"apix-video-{gen_id}")
+        context.kie_definitely_rejected = True
+
     context = SubmissionContext(
         client_request_id=request_id, before_submit=before_submit,
         before_kie_submit=before_kie_submit,
+        after_kie_definite_rejection=after_kie_definite_rejection,
     )
     return context
 

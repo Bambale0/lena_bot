@@ -2310,6 +2310,22 @@ Steps: [x] root-cause and production preflight; [x] RED/green operator control;
   and rejects an impossible late KIE callback. Related admission/routing/feed/
   callback tests pass 164/164; Ruff, compileall and diff check pass. Updated-head
   CI and review are required again before merge.
+- PR #315 merged as `530fdd17`; its updated-head review then identified a P2
+  crash window before the Neironych catalog check. Follow-up work persists the
+  confirmed no-task KIE response as `definite_rejected_neironych_pending`
+  immediately, transfers only from that durable state, and lets the bounded
+  recovery worker resume the first Neironych POST with the original validated
+  Wan request and idempotency key without replaying KIE. A synthetic restart
+  regression covers the durable marker, resumed fallback, result binding and
+  exactly-one KIE POST. Production route policy remains `kie_only` until this
+  follow-up passes exact-head gates, review, merge and deployment verification.
+- Follow-up PR #318 review identified three recovery correctness gaps. The
+  amendment immediately refunds a resumed Neironych admission rejection under
+  the exact task-id lock, preserves the original KIE `rejected_at` and records
+  `fallback_started_at` separately, and makes the SQL expiry lane use the
+  active Neironych submission clock so recovered rows cannot starve the batch.
+  Focused admission/timeout/recovery coverage passes 132/132; updated-head CI
+  and review remain required before production policy activation.
 
 ## 2026-10-28 — lilac branded bottom-navigation icons
 

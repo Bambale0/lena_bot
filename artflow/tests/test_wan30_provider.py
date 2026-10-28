@@ -159,6 +159,39 @@ async def test_kie_journal_commit_failure_stops_before_paid_post(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_kie_only_rejection_does_not_open_neironych_fallback(monkeypatch):
+    from api.kieai_client import KieDefiniteRejection
+    from core.wan30_routing_policy import WanRoute
+
+    monkeypatch.setattr(
+        wan30_provider,
+        "get_wan30_route",
+        AsyncMock(return_value=WanRoute(
+            "wan/3-0-video", "kie_only", "wan-3", 2, "database", 42,
+        )),
+    )
+    monkeypatch.setattr(
+        wan30_provider.kieai_client,
+        "create_task",
+        AsyncMock(side_effect=KieDefiniteRejection("synthetic rejection")),
+    )
+    persist_rejection = AsyncMock()
+    context = SubmissionContext(
+        client_request_id="d4496f2e-37d8-4b87-bba2-330374892b49",
+        before_submit=AsyncMock(),
+        before_kie_submit=AsyncMock(),
+        after_kie_definite_rejection=persist_rejection,
+    )
+    with pytest.raises(KieDefiniteRejection):
+        await wan30_provider.submit_wan30_provider(
+            Wan30Request(model="wan/3-0-video", prompt="One paper boat"),
+            idempotency_key="wan-kie-only-reject",
+            submission_context=context,
+        )
+    persist_rejection.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("model, expected", [
     ("wan/3-0-video", "wan-3"),
     ("wan/3-0-video-prime", "wan-3-prime"),
