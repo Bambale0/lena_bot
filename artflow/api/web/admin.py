@@ -56,7 +56,7 @@ router = APIRouter(tags=["web-admin"])
 
 
 class WanRoutingUpdate(BaseModel):
-    policy: Literal["neironych_kie", "neironych_only", "kie_only"]
+    policy: Literal["neironych_kie", "kie_neironych", "neironych_only", "kie_only"]
     neironych_model_id: str = Field(..., min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_./-]+$")
     expected_revision: int = Field(..., ge=0, strict=True)
 

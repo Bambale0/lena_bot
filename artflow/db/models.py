@@ -861,7 +861,7 @@ class WanRoutingSetting(Base):
     __tablename__ = "wan_routing_settings"
     __table_args__ = (
         CheckConstraint("model_key IN ('wan/3-0-video','wan/3-0-video-prime')", name="ck_wan_route_model"),
-        CheckConstraint("policy IN ('neironych_kie','neironych_only','kie_only')", name="ck_wan_route_policy"),
+        CheckConstraint("policy IN ('neironych_kie','kie_neironych','neironych_only','kie_only')", name="ck_wan_route_policy"),
         CheckConstraint("revision >= 0", name="ck_wan_route_revision"),
     )
     model_key: Mapped[str] = mapped_column(String(64), primary_key=True)

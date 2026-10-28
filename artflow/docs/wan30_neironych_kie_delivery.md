@@ -1,8 +1,10 @@
 # Wan 3.0 / Wan 3.0 Prime - APIX release
 
-## Provider routing (checked 23 October 2026)
+## Provider routing (checked 28 October 2026)
 
-Neironych is primary, KIE is standby. The authenticated partner catalog now
+The audited runtime policy selects either Neironych or KIE as primary. The
+production target requested on 28 October is KIE primary with Neironych
+standby (`kie_neironych`) for both variants. The authenticated partner catalog
 advertises `wan-3` and `wan-3-prime`; these verified IDs are the configurable
 defaults for `WAN30_NEIRONYCH_MODEL_ID` and `WAN30_PRIME_NEIRONYCH_MODEL_ID`.
 An explicitly empty override disables that primary mapping. The production
@@ -33,10 +35,11 @@ explicit output ratio stays on KIE, preserving the customer's request. WAN
 not support edit. No unsupported option is silently discarded.
 Normal Wan retains 2–30s and silent output support.
 
-Definite admission rejections may use KIE. 5xx, timeout, unknown acceptance
-and an unavailable catalog may NOT create a second paid task. Already
-accepted tasks are reconciled on their original provider. KIE createTask
-is single-shot.
+For Neironych-primary routing, definite admission rejections may use KIE. For
+KIE-primary routing, only `KieDefiniteRejection` may use Neironych. A 5xx,
+timeout, unknown acceptance, malformed response, missing task ID or unavailable
+catalog may NOT create a second paid task. Already accepted tasks are
+reconciled on their original provider. KIE createTask is single-shot.
 
 Official KIE documentation:
 https://docs.kie.ai/market/wan/3-0-video
@@ -132,8 +135,9 @@ new tasks; environment values are bootstrap defaults only if a row is absent.
 The shared administrator page `/wan-routing-admin.html` is linked from the
 site admin cabinet, Mini App settings and Telegram admin panel. Authenticated
 GET/PUT `/api/web/admin/provider-routing/wan30/{standard|prime}` enforce admin
-rights server-side. Operators can select Neironych with KIE standby, Neironych
-only or KIE only, and update the corresponding Wan3 native mapping. Saving a
+rights server-side. Operators can select Neironych with KIE standby, KIE with
+Neironych standby, Neironych only or KIE only, and update the corresponding
+Wan3 native mapping. Saving a
 Neironych route checks the authenticated catalog; family/variant validation
 prevents switching the logical product to Wan2, another family or the wrong
 Prime variant. Every save compares the expected revision under a row lock

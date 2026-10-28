@@ -1,4 +1,4 @@
-"""Wan 3.0 / Prime transport orchestrator with KIE standby.
+"""Wan 3.0 / Prime transport orchestrator with audited provider ordering.
 
 No APIX user/billing entrypoint until the full quote/reserve/settle + UI
 integration is independently audited. Neironych POST requires durable admission.
@@ -28,7 +28,7 @@ async def submit_wan30_provider(
     callback_url: str | None = None,
     submission_context: SubmissionContext | None = None,
 ) -> Wan30Submitted:
-    """Submit at most once to Neironych or KIE, preserving provider task ID."""
+    """Submit to one accepted provider task, preserving its provider task ID."""
     route = await get_wan30_route(request.model)
     primary_id = (
         route.neironych_model_id
@@ -79,6 +79,7 @@ async def submit_wan30_provider(
 
         return await submit_wan30(
             request,
+            policy=route.policy,
             neironych_model_id=primary_id,
             fetch_neironych_models=neironych.list_models,
             send_neironych=send_neironych,
