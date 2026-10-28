@@ -73,6 +73,36 @@ def upgrade() -> None:
     if op.get_bind().dialect.name == "postgresql":
         op.execute(
             """
+            CREATE OR REPLACE FUNCTION enforce_referral_repair_row_insert()
+            RETURNS trigger AS $$
+            BEGIN
+                IF current_setting('apix.referral_repair_batch', true) IS DISTINCT FROM NEW.batch_key
+                   OR NOT EXISTS (
+                        SELECT 1
+                        FROM referral_lineage_repair_batches b
+                        WHERE b.batch_key = NEW.batch_key AND b.status = 'applying'
+                   ) THEN
+                    RAISE EXCEPTION 'referral repair evidence requires an applying batch';
+                END IF;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+            """
+        )
+        for table_name in (
+            "referral_lineage_repair_rows",
+            "referral_finance_repair_rows",
+            "referral_credit_repair_rows",
+        ):
+            op.execute(
+                f"""
+                CREATE TRIGGER trg_{table_name}_insert_guard
+                BEFORE INSERT ON {table_name}
+                FOR EACH ROW EXECUTE FUNCTION enforce_referral_repair_row_insert()
+                """
+            )
+        op.execute(
+            """
             CREATE TRIGGER trg_referral_credit_repair_rows_append_only
             BEFORE UPDATE OR DELETE ON referral_credit_repair_rows
             FOR EACH ROW EXECUTE FUNCTION prevent_referral_repair_row_mutation()
@@ -148,10 +178,19 @@ def downgrade() -> None:
             "Cannot downgrade after a referral credit repair: retain immutable audit evidence"
         )
     if bind.dialect.name == "postgresql":
+        for table_name in (
+            "referral_lineage_repair_rows",
+            "referral_finance_repair_rows",
+            "referral_credit_repair_rows",
+        ):
+            op.execute(
+                f"DROP TRIGGER IF EXISTS trg_{table_name}_insert_guard ON {table_name}"
+            )
         op.execute(
             "DROP TRIGGER IF EXISTS trg_referral_credit_repair_rows_append_only "
             "ON referral_credit_repair_rows"
         )
+        op.execute("DROP FUNCTION IF EXISTS enforce_referral_repair_row_insert()")
     op.drop_index(
         "ix_referral_credit_repair_rows_user", table_name="referral_credit_repair_rows"
     )

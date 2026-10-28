@@ -58,6 +58,7 @@ def test_referral_lineage_migration_is_current_head() -> None:
         "db/migrations/versions/055_referral_credit_repair_audit.py"
     ).read_text(encoding="utf-8")
     assert "trg_referral_credit_repair_rows_append_only" in credit_source
+    assert "enforce_referral_repair_row_insert" in credit_source
     assert "sum(r.unrecovered_credits)" in credit_source
 
     assert ReferralLineageRepairBatch.__table__.c.batch_key.type.length == 64
@@ -334,6 +335,16 @@ def _exercise_postgres_triggers(connection) -> None:
             "balance_debit_credits=3, unrecovered_credits=2, "
             "summary_json='{}', applied_at=now() WHERE batch_key='trigger-test'"
         )
+    )
+    connection.execute(
+        sa.text("INSERT INTO credit_ledger (id,user_id) VALUES (32,2),(33,2)")
+    )
+    _expect_db_error(
+        connection,
+        "INSERT INTO referral_credit_repair_rows "
+        "(batch_key,original_ledger_id,user_id,entry_type,amount_credits,"
+        "balance_debit_credits,unrecovered_credits,reversal_ledger_id) "
+        "VALUES ('trigger-test',32,2,'referral_signup_bonus',1,1,0,33)",
     )
     _expect_db_error(
         connection,
