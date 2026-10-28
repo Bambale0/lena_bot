@@ -60,12 +60,18 @@ async def test_context_persists_kie_journal_and_marks_provider_specific_state(mo
     from core import seedance_reconciliation as admission
     db = AsyncMock()
     start = AsyncMock(return_value=True)
+    reject = AsyncMock(return_value=True)
     monkeypatch.setattr(repo, "begin_kie_video_submission", start)
+    monkeypatch.setattr(repo, "mark_kie_video_definite_rejection", reject)
     ctx = admission.make_submission_context(db, 703, "wan/3-0-video", surface="telegram_bot")
     assert ctx.before_kie_submit is not None
     await ctx.before_kie_submit()
     assert ctx.kie_started is True
     start.assert_awaited_once_with(db, 703, ctx.client_request_id)
+    assert ctx.after_kie_definite_rejection is not None
+    await ctx.after_kie_definite_rejection()
+    assert ctx.kie_definitely_rejected is True
+    reject.assert_awaited_once_with(db, 703)
     with pytest.raises(Exception):
         await ctx.before_kie_submit()
     assert start.await_count == 1

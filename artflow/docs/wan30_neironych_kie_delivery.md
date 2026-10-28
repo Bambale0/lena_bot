@@ -44,6 +44,10 @@ After a definite KIE rejection, APIX atomically transfers the durable
 `kie-submit` marker to a Neironych submission marker before the fallback POST;
 the KIE marker remains immutable rejection evidence and cannot later bind a
 task over the Neironych fallback.
+The confirmed rejection itself is committed before catalog lookup. If the
+request worker stops in that gap, the bounded recovery worker reconstructs the
+validated stored Wan request and resumes only the Neironych fallback with the
+original generation idempotency key; KIE is never replayed.
 
 Official KIE documentation:
 https://docs.kie.ai/market/wan/3-0-video

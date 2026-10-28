@@ -1451,7 +1451,7 @@ async def begin_neironych_fallback_after_kie_rejection(
         or callback.get("generation_id") != gen_id
         or callback.get("surface") != surface
         or not isinstance(kie, dict)
-        or kie.get("state") != "submitting"
+        or kie.get("state") != "definite_rejected_neironych_pending"
         or kie.get("origin") != "kie_primary"
         or kie.get("correlation_id") != gen_id
     ):
@@ -1480,6 +1480,49 @@ async def begin_neironych_fallback_after_kie_rejection(
         + client_request_id
     )
     gen.status = GenerationStatus.processing
+    gen.input_params = json.dumps(params, ensure_ascii=False)
+    await session.commit()
+    await _publish_generation_update(gen)
+    return True
+
+
+async def mark_kie_video_definite_rejection(
+    session: AsyncSession, gen_id: int,
+) -> bool:
+    """Durably prove KIE accepted no task before any fallback preparation."""
+    gen = await _locked_seedance_generation(session, gen_id)
+    params = parse_input_params(gen.input_params) if gen is not None else {}
+    callback = params.get(KIE_VIDEO_CALLBACK_KEY)
+    kie = params.get(KIE_VIDEO_SUBMISSION_KEY)
+    expected_task = (
+        ("web:" if isinstance(callback, dict) and callback.get("surface") == "web" else "")
+        + f"kie-submit:{gen_id}"
+    )
+    if (
+        gen is None
+        or gen.status not in (GenerationStatus.pending, GenerationStatus.processing)
+        or gen.gen_type != GenerationType.video
+        or gen.model not in {"wan/3-0-video", "wan/3-0-video-prime"}
+        or gen.task_id != expected_task
+        or not isinstance(callback, dict)
+        or callback.get("generation_id") != gen_id
+        or not isinstance(kie, dict)
+        or kie.get("origin") != "kie_primary"
+        or kie.get("correlation_id") != gen_id
+    ):
+        await session.commit()
+        return False
+    if kie.get("state") == "definite_rejected_neironych_pending":
+        await session.commit()
+        return True
+    if kie.get("state") != "submitting":
+        await session.commit()
+        return False
+    kie.update({
+        "state": "definite_rejected_neironych_pending",
+        "rejected_at": datetime.now(timezone.utc).isoformat(),
+    })
+    params[KIE_VIDEO_SUBMISSION_KEY] = kie
     gen.input_params = json.dumps(params, ensure_ascii=False)
     await session.commit()
     await _publish_generation_update(gen)
@@ -1556,10 +1599,10 @@ async def bind_kie_video_callback(
         await session.commit()
         return gen
     kie_entry = params.get(KIE_VIDEO_SUBMISSION_KEY)
-    if (
-        isinstance(kie_entry, dict)
-        and kie_entry.get("state") == "definite_rejected_fallback_neironych"
-    ):
+    if isinstance(kie_entry, dict) and kie_entry.get("state") in {
+        "definite_rejected_neironych_pending",
+        "definite_rejected_fallback_neironych",
+    }:
         await session.rollback()
         return None
     current = str(gen.task_id or "")
