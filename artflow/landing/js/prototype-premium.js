@@ -22,6 +22,7 @@ const state = {
   activeExample: 0,
   modelType: "all",
   generationKind: "image",
+  videoScenarioMode: "text",
   queue: [],
   history: [],
   prompts: [],
@@ -2000,11 +2001,37 @@ function currentModel() {
   return currentModelGroup()?.preferred || modelsForCurrentKind()[0] || null;
 }
 
+function grokVideoPair(model = currentModel()) {
+  const variants = model?.variants?.length ? model.variants : [model].filter(Boolean);
+  const baseKey = (item) => String(item?.key || "").replace(/__.+$/, "");
+  const text = variants.filter((item) => baseKey(item) === "grok-imagine/text-to-video")
+    .sort((left, right) => String(left.key).includes("__") - String(right.key).includes("__"))[0];
+  const image = variants.filter((item) => baseKey(item) === "grok-imagine/image-to-video")
+    .sort((left, right) => String(left.key).includes("__") - String(right.key).includes("__"))[0];
+  return text && image ? { text, image } : null;
+}
+
+function selectedGrokVideoMode(form = document.querySelector(".account-composer"), model = currentModel()) {
+  if (state.generationKind !== "video" || !grokVideoPair(model)) return "";
+  const value = String(form?.querySelector("[name='video_mode']")?.value || state.videoScenarioMode || "text");
+  return value === "image" ? "image" : "text";
+}
+
+function currentRequestModel(form = document.querySelector(".account-composer")) {
+  const model = currentModel();
+  const pair = grokVideoPair(model);
+  if (!pair || state.generationKind !== "video") return model;
+  return pair[selectedGrokVideoMode(form, model)] || model;
+}
+
 function applyRouteParams() {
   const params = new URLSearchParams(location.search);
   const kind = params.get("type");
   if (["image", "video", "music"].includes(kind)) state.generationKind = kind;
   state.routeModelKey = params.get("model") || "";
+  state.videoScenarioMode = state.generationKind === "video" && /grok-imagine\/image-to-video/.test(state.routeModelKey)
+    ? "image"
+    : "text";
   state.routePrompt = params.get("prompt") || "";
   state.routeReferenceUrl = params.get("ref") || "";
   state.routeReferenceUrls = uniqueSafeUrls([
@@ -2397,6 +2424,7 @@ function setGenerationFlow(flow, { updateRoute = false } = {}) {
 
 function setGenerationKind(kind, { updateRoute = false } = {}) {
   state.generationKind = ["image", "video", "music"].includes(kind) ? kind : "image";
+  state.videoScenarioMode = "text";
   if (state.generationKind === "image" && !state.routeFlow) state.routeFlow = "text";
   state.routeModelKey = "";
   state.routeFeedRemixId = "";
@@ -2596,6 +2624,8 @@ function requestModelForCurrentSetup(model, { referenceUrl = "", videoUrl = "" }
   const variants = model?.variants?.length ? model.variants : [model].filter(Boolean);
   if (!variants.length) return model;
   if (state.generationKind === "video") {
+    const pair = grokVideoPair(model);
+    if (pair) return pair[selectedGrokVideoMode(document.querySelector(".account-composer"), model)] || model;
     if (videoUrl) return variants.find((item) => variantMatches(item, [/video-to-video/, /motion-control/])) || model;
     if (referenceUrl) return variants.find((item) => variantMatches(item, [/image-to-video/, /\/image/, /-image/])) || model;
     return variants.find((item) => variantMatches(item, [/text-to-video/, /\/text/, /-text/])) || model;
@@ -2648,8 +2678,8 @@ function estimateGenerationCost(model = currentModel(), form = document.querySel
 function updateGenerationEstimate() {
   const note = $("[data-generation-note]");
   if (!note) return;
-  const model = currentModel();
   const form = note.closest(".account-composer") || document.querySelector(".account-composer");
+  const model = currentRequestModel(form);
   const estimate = estimateGenerationCost(model, form);
   const name = cleanModelName(model?.name || model?.key || "Выбранный режим");
   note.innerHTML = `
@@ -2663,6 +2693,17 @@ function generationKindLabel(kind = state.generationKind) {
   if (kind === "video") return "Видео";
   if (kind === "music") return "Музыка";
   return "Картинка";
+}
+
+function generationScenarioLabel(form, model = currentModel()) {
+  if (state.generationKind === "image") {
+    return ({ text: "С нуля", reference: "По референсу", edit: "Улучшить фото" }[state.routeFlow || "text"] || "С нуля");
+  }
+  if (state.generationKind !== "video") return "По описанию";
+  const grokMode = selectedGrokVideoMode(form, model);
+  if (grokMode) return grokMode === "image" ? "По фото" : "По тексту";
+  if (selectedComposerValue("video_url", form)) return "По видео";
+  return referenceFiles(form).length || referenceLinkValues(form).length ? "По фото" : "По тексту";
 }
 
 function selectedOptionText(form, name) {
@@ -2882,11 +2923,11 @@ function openGenerationReview(form) {
   }
   state.pendingGenerationForm = form;
   const modal = ensureGenerationReviewModal();
-  const model = currentModel();
+  const model = currentRequestModel(form);
   const estimate = estimateGenerationCost(model, form);
   const rows = [
     ["Формат", generationKindLabel()],
-    ["Сценарий", state.generationKind === "image" ? ({ text: "С нуля", reference: "По референсу", edit: "Улучшить фото" }[state.routeFlow || "text"] || "С нуля") : "По описанию"],
+    ["Сценарий", generationScenarioLabel(form, model)],
     ["Модель", cleanModelName(model?.name || model?.key || "не выбрана")],
     ["Качество", selectedOptionText(form, "quality") || "Стандарт"],
     ["Формат кадра", selectedOptionText(form, "aspect_ratio") || "Авто"],
@@ -2945,7 +2986,8 @@ function syncGenerationControls() {
   syncMirrorSelects("[data-quality-options]", quality, "<option value='basic'>Стандарт</option>");
   syncMirrorSelects("[data-count-options]", count, "<option>1</option>");
   syncMirrorSelects("[data-duration-options]", duration, "<option>5 сек</option>");
-  syncControlVisibility(model);
+  syncGrokVideoMode(model);
+  syncControlVisibility(currentRequestModel());
   syncStudioSubpages();
   $$(".account-composer").forEach((form) => updatePhotoPromptStatus(form));
   updateGenerationEstimate();
@@ -2954,6 +2996,34 @@ function syncGenerationControls() {
   renderActiveImageSession();
   syncFeedRepeatControls();
   refreshCustomSelects();
+}
+
+function syncGrokVideoMode(model = currentModel()) {
+  const chooser = document.querySelector("[data-video-mode-switch]");
+  if (!chooser) return;
+  const pair = grokVideoPair(model);
+  const visible = state.generationKind === "video" && Boolean(pair) && !isFeedRemixMode();
+  chooser.hidden = !visible;
+  const input = chooser.querySelector("[name='video_mode']");
+  if (!visible) {
+    if (input) input.disabled = true;
+    return;
+  }
+  const mode = state.videoScenarioMode === "image" ? "image" : "text";
+  state.videoScenarioMode = mode;
+  if (input) {
+    input.disabled = false;
+    input.value = mode;
+  }
+  chooser.querySelectorAll("[data-video-mode-choice]").forEach((button) => {
+    const active = button.dataset.videoModeChoice === mode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+  const copy = chooser.querySelector("[data-video-mode-copy]");
+  if (copy) copy.textContent = mode === "image"
+    ? "Добавьте фото — оно станет исходным кадром и задаст героя или сцену."
+    : "Опишите сцену — исходное фото не требуется.";
 }
 
 function syncMirrorSelects(selector, sourceSelect, fallbackHtml) {
@@ -4736,6 +4806,10 @@ async function submitGeneration(form, { quoteOnly = false } = {}) {
     const extraReferenceUrls = allReferenceUrls.slice(1);
     const videoUrl = String(data.get("video_url") || "").trim();
     const requestModel = requestModelForCurrentSetup(model, { referenceUrl, videoUrl });
+    const grokVideoMode = selectedGrokVideoMode(form, model);
+    if (grokVideoMode === "image" && !referenceUrl) {
+      throw new Error("Для режима «По фото» добавьте исходное фото или ссылку на него.");
+    }
 
     let body;
     let path;
@@ -4748,7 +4822,7 @@ async function submitGeneration(form, { quoteOnly = false } = {}) {
       body = {
         model: repeat?.source.model || requestModel?.key,
         ...(feedRemixMode ? {} : { prompt }),
-        mode: videoUrl ? "video" : "image",
+        mode: videoUrl ? "video" : (grokVideoMode || "image"),
         duration: Number(repeat?.source.original_duration || data.get("duration") || model?.durations?.[0] || 5),
         ...(repeat?.override != null ? { duration_override: repeat.override } : {}),
         aspect_ratio: repeat?.source.original_aspect_ratio || String(data.get("aspect_ratio") || "") || null,
@@ -5849,6 +5923,16 @@ function bindUi() {
   $$("[data-generation-flow]").forEach((button) => {
     button.addEventListener("click", () => {
       setGenerationFlow(button.dataset.generationFlow || "text", { updateRoute: true });
+    });
+  });
+  $$("[data-video-mode-choice]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.videoScenarioMode = button.dataset.videoModeChoice === "image" ? "image" : "text";
+      syncGenerationControls();
+      if (state.videoScenarioMode === "image") {
+        const references = document.querySelector("[data-reference-section]");
+        if (references && !references.hidden) references.open = true;
+      }
     });
   });
   $("[data-account-model-select]")?.addEventListener("change", syncGenerationControls);

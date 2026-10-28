@@ -2485,8 +2485,10 @@ Steps: [x] root-cause and production preflight; [x] RED/green operator control;
   implementation; [x] focused and full local gates; [x] independent review;
   [ ] protected PR, exact-head CI, merge/autodeploy and public asset/health proof.
 - Verification evidence: 148 frontend unit tests, TypeScript and the Vite
-  production build pass. The final maintained browser gates pass 288/288 UX2,
-  300/300 user journeys and 392/392 four-device E2E cases (980 total). The
+  production build pass. The final maintained browser gates cover 289 UX2,
+  300 user journeys and 392 four-device E2E cases (981 total). In the last full
+  UX2 run 287 cases passed together; two unrelated startup timeouts then passed
+  2/2 in an isolated single-worker rerun. The
   complete focused backend model/catalog matrix passes across image/video
   adapters, Telegram navigation, API routing, reference limits, Seedance,
   Grok, Veo, MiniMax and GPT Image; all 16 identity-compatibility tests pass.
@@ -2496,5 +2498,10 @@ Steps: [x] root-cause and production preflight; [x] RED/green operator control;
   rendered screenshot was inspected with three readable tiles, closed advanced
   settings, black/lilac styling and no horizontal overflow. Review found and
   closed the Seedance re-entry/upload defects plus a saved-draft model mutation;
-  the final independent review has no Critical or Important finding. No paid
+  GitHub review then found that the standalone Studio still lacked the explicit
+  Grok text/photo choice. The site now mirrors the real sibling model, price,
+  required photo, confirmation label and payload in both modes; a browser
+  regression covers quote and launch for each variant, including cache-busted
+  runtime assets. The final independent review has no Critical or Important
+  finding. No paid
   provider request or mutable production control was used for verification.

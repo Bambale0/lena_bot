@@ -117,6 +117,69 @@ test("standalone Seedance 2.5 keeps guided materials and working advanced contro
   expect(launches[0].audio_ids).toContain("__apix_seedance25:generate_audio=false");
 });
 
+test("standalone Grok exposes text and photo modes with the real variant and confirmation", async ({ page }) => {
+  const textModel = "grok-imagine/text-to-video";
+  const photoModel = "grok-imagine/image-to-video";
+  const quotes: Record<string, unknown>[] = [];
+  const launches: Record<string, unknown>[] = [];
+  await page.route("**/studio.html?*", r => r.fulfill({ path: path.join(landing, "studio.html"), contentType: "text/html" }));
+  await page.route("**/js/*.js?*", r => r.fulfill({ path: path.join(landing, "js", new URL(r.request().url()).pathname.split("/").pop()!), contentType: "text/javascript" }));
+  await page.route("**/css/prototype-premium.css?*", r => r.fulfill({ path: path.join(landing, "css/prototype-premium.css"), contentType: "text/css" }));
+  await page.route("**/api/web/**", r => {
+    const url = new URL(r.request().url());
+    const json = (data: unknown) => r.fulfill({ json: { ok: true, data } });
+    if (url.pathname.endsWith("/me")) return json({ id: 7, credits: 100, full_name: "Reader" });
+    if (url.pathname.endsWith("/uploads/reference")) return json({ url: "https://example.test/grok-reader.jpg" });
+    if (url.pathname.endsWith("/models/video")) return json([
+      { key: textModel, name: "Grok Imagine Video", type: "video", modes: ["text"], durations: [10], resolutions: ["720p"], aspect_ratios: ["9:16"], credits: 0.6, active: true },
+      { key: photoModel, name: "Grok Imagine Video", type: "video", modes: ["image"], durations: [10], resolutions: ["720p"], aspect_ratios: ["9:16"], max_refs: 7, credits: 0.7, active: true },
+    ]);
+    if (url.pathname.endsWith("/generate/video/quote")) {
+      const body = r.request().postDataJSON();
+      quotes.push(body);
+      return json({ cost_credits: body.model === photoModel ? 7 : 6, can_run: true, reference_seconds: 0, output_seconds: 10 });
+    }
+    if (url.pathname.endsWith("/generate/video")) {
+      launches.push(r.request().postDataJSON());
+      return json({ id: 93, status: "pending" });
+    }
+    if (url.pathname.includes("/prompts")) return json({ items: [] });
+    if (url.pathname.includes("/transactions")) return json({ transactions: [], pending: [] });
+    if (url.pathname.includes("/auth/config")) return json({});
+    return json([]);
+  });
+  page.on("dialog", d => d.accept());
+  await page.goto(`/studio.html?type=video&model=${encodeURIComponent(textModel)}`);
+
+  const chooser = page.locator("[data-video-mode-switch]");
+  await expect(chooser).toBeVisible();
+  await expect(chooser.getByRole("button", { name: "По тексту" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("[data-generation-note]")).toContainText("0,6");
+  await page.locator("[data-generate-button]").click();
+  let review = page.locator("[data-generation-review-modal]");
+  await expect(review.getByText("По тексту", { exact: true })).toBeVisible();
+  await review.locator("[data-confirm-generation]").click();
+  await expect.poll(() => launches.length).toBe(1);
+  expect(quotes[0]).toMatchObject({ model: textModel, mode: "text", image_url: null });
+  expect(launches[0]).toMatchObject({ model: textModel, mode: "text", image_url: null, quoted_credits: 6 });
+
+  await page.goto(`/studio.html?type=video&model=${encodeURIComponent(textModel)}`);
+  await chooser.getByRole("button", { name: "По фото" }).click();
+  await expect(chooser.getByRole("button", { name: "По фото" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("[data-generation-note]")).toContainText("0,7");
+
+  const references = page.locator("[data-reference-section]");
+  if (await references.getAttribute("open") === null) await references.locator(":scope > summary").click();
+  await references.locator("input[name=reference_file]").setInputFiles({ name: "reader.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) });
+  await page.locator("[data-generate-button]").click();
+  review = page.locator("[data-generation-review-modal]");
+  await expect(review.getByText("По фото", { exact: true })).toBeVisible();
+  await review.locator("[data-confirm-generation]").click();
+  await expect.poll(() => launches.length).toBe(2);
+  expect(quotes[1]).toMatchObject({ model: photoModel, mode: "image", image_url: "https://example.test/grok-reader.jpg" });
+  expect(launches[1]).toMatchObject({ model: photoModel, mode: "image", image_url: "https://example.test/grok-reader.jpg", quoted_credits: 7 });
+});
+
 test("standalone site blocks ambiguous repeat across reload until history acknowledgement", async ({ page }) => {
   const { launches } = await fixture(page, 503);
   await launch(page);

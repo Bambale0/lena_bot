@@ -59,12 +59,14 @@ def test_public_site_billing_keeps_tribute_usd_provider_parity():
 
 
 def test_public_site_uses_current_cached_runtime_release():
-    expected = "prototype-premium.js?v=20261025_repeat_duration"
+    expected = "prototype-premium.js?v=20261028_guided_composer_r7"
+    expected_parity = "generation-parity.js?v=20261028_guided_composer_r7"
     pages = sorted((ROOT / "landing").glob("*.html"))
     referenced = [path for path in pages if "prototype-premium.js?v=" in path.read_text()]
     assert referenced
     for path in referenced:
         assert expected in path.read_text(), path.name
+    assert expected_parity in (ROOT / "landing/studio.html").read_text()
 
 
 def test_payment_plan_cards_show_rub_and_tribute_usd_together_across_web_surfaces():

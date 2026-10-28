@@ -8562,3 +8562,68 @@ button,
 textarea {
   line-height: 1.55;
 }
+
+.video-mode-switch {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px 16px;
+  align-items: center;
+  padding: 16px;
+  border: 1px solid rgba(188, 143, 255, 0.3);
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(126, 72, 190, 0.18), rgba(8, 6, 13, 0.94));
+}
+
+.video-mode-switch[hidden] {
+  display: none;
+}
+
+.video-mode-switch > div:first-of-type {
+  display: grid;
+  gap: 3px;
+}
+
+.video-mode-switch > div:first-of-type span,
+.video-mode-switch p {
+  color: var(--muted);
+}
+
+.video-mode-switch p {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.video-mode-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(108px, 1fr));
+  gap: 8px;
+}
+
+.video-mode-actions button {
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid rgba(188, 143, 255, 0.3);
+  border-radius: 14px;
+  color: var(--text);
+  background: rgba(16, 11, 25, 0.88);
+  cursor: pointer;
+}
+
+.video-mode-actions button.active,
+.video-mode-actions button[aria-pressed="true"] {
+  border-color: rgba(205, 174, 255, 0.78);
+  color: #fff;
+  background: linear-gradient(135deg, rgba(137, 79, 216, 0.72), rgba(80, 46, 128, 0.82));
+  box-shadow: 0 0 24px rgba(168, 108, 255, 0.2);
+}
+
+@media (max-width: 620px) {
+  .video-mode-switch {
+    grid-template-columns: 1fr;
+  }
+
+  .video-mode-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
