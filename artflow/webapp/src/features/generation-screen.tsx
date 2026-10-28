@@ -11,7 +11,7 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import type { GenerationDraft, ModelInfo, UserProfile } from "@/lib/types";
 import { cn, formatCredits, modelSupports, splitUrls } from "@/lib/utils";
-import { inspectDraftMedia, switchDraftModel } from "@/lib/draft-media";
+import { effectiveVideoAspectRatio, inspectDraftMedia, switchDraftModel } from "@/lib/draft-media";
 import { referenceMaterials, replaceReferenceMaterials, selectGenerationInputs } from "@/lib/reference-selection";
 import { ReferenceSelection } from "@/components/reference-selection";
 import type { PhotoUploadControls } from "@/lib/photo-upload-queue";
@@ -250,7 +250,8 @@ function GenerationScreen({
     ? ["text", "image"]
     : selectedModel?.modes?.length ? selectedModel.modes : [kind === "motion" ? "motion" : "text"];
   const ratioModes = selectedModel?.aspect_ratio_modes?.length ? selectedModel.aspect_ratio_modes : modes;
-  const ratios = ratioModes.includes(draft.mode) && selectedModel?.aspect_ratios?.length ? selectedModel.aspect_ratios : [];
+  const ratioReferencesReady = kind === "image" || effectiveVideoAspectRatio(draft, selectedModel) !== null;
+  const ratios = ratioReferencesReady && ratioModes.includes(draft.mode) && selectedModel?.aspect_ratios?.length ? selectedModel.aspect_ratios : [];
   const qualities = selectedModel?.quality_options?.length ? selectedModel.quality_options : [];
   const outputCounts = selectedModel?.counts?.length ? selectedModel.counts : [1];
   const durations = listOr(selectedModel?.duration_options, selectedModel?.durations, kind === "motion" ? [] : [5, 10]);

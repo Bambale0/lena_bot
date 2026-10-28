@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Sheet } from "@/components/ui/sheet";
 import { hasDraftInput, readUserDrafts, saveUserDrafts, tabStorage } from "@/lib/draft-storage";
 import { previewEnabled, previewKey } from "@/lib/ux2";
-import { inspectDraftMedia, switchDraftModel } from "@/lib/draft-media";
+import { effectiveVideoAspectRatio, inspectDraftMedia, switchDraftModel } from "@/lib/draft-media";
 import { parseReferenceAvailability, referenceAvailabilityMessage, REFERENCE_CHECK_TIMEOUT_MS } from "@/lib/reference-availability";
 import { usePhotoUploads } from "@/lib/use-photo-uploads";
 import { photoUploading } from "@/lib/photo-upload";
@@ -73,7 +73,7 @@ import type {
 import { firstMedia, isPendingTask, safeExternalUrl } from "@/lib/utils";
 import { saveDownload } from "@/lib/download";
 
-window.__APIX_MINIAPP_BUILD_ID__ = "20261028-guided-video-composer-r6";
+window.__APIX_MINIAPP_BUILD_ID__ = "20261028-guided-video-composer-r7";
 
 type FeedSource = "recent" | "top_day" | "top";
 type VideoQuote = Awaited<ReturnType<MiniAppApi["quoteVideo"]>>;
@@ -809,7 +809,9 @@ function App() {
       const prompt = draft.prompt.trim() || (draft.model.startsWith("higgsfield/genjutsu/") ? "" : "Использовать выбранный сценарий");
       const videoBody = {
         model: draft.model, prompt, prompt_id: draft.promptId, mode: draft.mode,
-        duration: draft.duration, aspect_ratio: draft.aspectRatio, resolution: draft.resolution,
+        duration: draft.duration,
+        aspect_ratio: effectiveVideoAspectRatio(draft, data.videoModels.find(model => model.key === draft.model)),
+        resolution: draft.resolution,
         image_url: draft.referenceUrls[0] || null, reference_urls: draft.referenceUrls,
         video_url: draft.videoUrl || null, video_start: draft.videoStart, video_end: draft.videoEnd,
         audio_ids: draft.audioIds, character_ids: draft.characterIds, seed: draft.seed,

@@ -2455,6 +2455,57 @@ Steps: [x] root-cause and production preflight; [x] RED/green operator control;
 
 ## 2026-10-28 — guided Grok and Seedance reference composer
 
+- Release continuation baseline: PR #322 head
+  `045aec835dd208ec98aa0b885679c76cf91b7781`, main
+  `34e97f3bea5bd3d3f3c2e341d32e337236aab89e`. All six exact-head
+  checks passed, but three unresolved GitHub review findings were independently
+  reproduced in source: Seedance confirmation counted duplicate links that the
+  request wrapper removes; Grok I2V offered aspect ratio below the catalog's
+  two-reference threshold; an old Telegram identity callback could start a new
+  hidden flow. Release remains blocked until those behaviors pass regressions.
+- Continuation seams: standalone confirmation versus captured quote/launch
+  requests with duplicates and caps; Mini App and standalone Grok references
+  changing 1 -> 2 -> 1 plus text sibling; actual Telegram callback dispatch
+  with unchanged FSM after rejection and retained legacy identity processing.
+  No migration, provider contract, price, credential, runtime setting, paid
+  generation or production data change is required. Existing protected
+  PR -> native auto-merge -> exact-main CI/autodeploy remains the release path.
+- Continuation steps: [x] RED/GREEN regressions for all three findings;
+  [x] focused checks and independent Standards/Spec review; [ ] refreshed
+  protected CI on the new head; [ ] merge, exact-SHA autodeploy and public
+  health/frontend-asset verification. Review evidence will be recorded below.
+- Continuation verification so far: the actual Telegram router/FSM regression
+  failed before the guard (a fresh session entered `image_upload`), then the
+  full maintained bot-navigation bundle passed 374 tests. The Mini App browser
+  regression failed on the incorrectly visible ratio, then passed 2/2 cases
+  for 1 -> 2 -> 1 active photos and the text sibling; 12 existing repeat cases
+  passed across all four device profiles. Structural provider inventory,
+  product readiness and the dry smoke manifest validate all 100 public
+  contracts. These checks use synthetic provider responses and no paid jobs.
+- Standalone review also reproduced content-addressed uploads: distinct file
+  names with identical bytes yield the same server URL. The confirmation must
+  therefore use actual prepared upload URLs, with selection/auth invalidation
+  and reuse for quote/launch, rather than counting browser File objects. This
+  preparation uses the existing non-charging upload endpoints and preserves
+  the separate generic/panel storage channels and provider payload contract.
+- Continuation final local evidence: TypeScript, production build, 148 frontend
+  unit tests, the full Ruff check and diff check pass. The maintained UX2 suite
+  now contains 301 scenarios: 299 passed together; two completed their assertions
+  but failed trace teardown because parallel runs shared an output directory.
+  Both passed on an isolated 2/2 rerun without source or assertion changes.
+  The final standalone suite passes 17/17 with isolated artifacts, including
+  upload failure/retry, changed selection/authentication, stale confirmation and
+  the bounded 120-second preparation timeout. The focused parity and retained
+  identity-compatibility bundle passes 24/24. Bot-navigation remains 374/374.
+- Independent final Standards and Spec reviews found no remaining blockers.
+  Both checked shared material selection, actual upload URL reuse, auth/form
+  invalidation, Grok active-reference gating, the Telegram callback guard and
+  retained saved-job compatibility. Runtime cache tokens are prototype r10,
+  Seedance r9 and Mini App build `20261028-guided-video-composer-r7`.
+  Protected CI on the published final head and actual merge-SHA deployment are
+  still required; the final release evidence, workflow links and public asset
+  verification will be recorded in PR #322 after those gates finish.
+
 - Baseline `9c06bcc3039543edbeab938a72c3c6a7702208cf`; branch
   `fix/grok-seedance-guided-composer`. A real mobile report showed that the
   `Оживить фото` launcher resumed a saved text-only Grok draft, while Seedance

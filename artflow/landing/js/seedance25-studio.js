@@ -1,4 +1,20 @@
-(() => {
+// Review and submission share the same ordering, deduplication and limits.
+function seedance25MaterialSelection(existing, panel, files) {
+  const merge = (kind, selector, limit) => {
+    const links = String(panel?.querySelector(selector)?.value || "")
+      .split(/\r?\n|,/).map((item) => item.trim()).filter(Boolean).slice(0, limit);
+    return [...new Set([
+      ...(existing[kind] || []), ...links, ...(files[kind] || []).slice(0, limit),
+    ].filter(Boolean))].slice(0, limit);
+  };
+  return {
+    images: merge("images", "[data-s25-image-urls]", 30),
+    videos: merge("videos", "[data-s25-video-urls]", 10),
+    audios: merge("audios", "[data-s25-audio-urls]", 10),
+  };
+}
+
+const seedance25Review = (() => {
   "use strict";
 
   const MODEL = "bytedance/seedance-2-5";
@@ -7,9 +23,75 @@
   const TOKEN_PREFIX = "__apix_seedance25:";
   const originalFetch = window.fetch.bind(window);
 
-  let imageFiles = [];
-  let videoFiles = [];
-  let audioFiles = [];
+  let preparation = null;
+
+  function panelFiles(panel) {
+    const files = (selector, limit) => Array.from(panel?.querySelector(selector)?.files || []).slice(0, limit);
+    return {
+      images: files("[data-s25-image-files]", 30),
+      videos: files("[data-s25-video-files]", 10),
+      audios: files("[data-s25-audio-files]", 10),
+    };
+  }
+
+  function selectionSnapshot(form) {
+    const panel = form?.querySelector("[data-seedance25-studio]");
+    return [
+      state.authEpoch, state.user?.id, state.token, state.generationKind,
+      state.routeModelKey, state.routeFeedRemixId, state.routeSourceReferenceUrl,
+      panel, panel?.hidden,
+      ...Array.from(form.querySelectorAll("input, select, textarea")).flatMap((field) => [
+        field, field.disabled, field.value, field.checked, ...Array.from(field.files || []),
+      ]),
+    ];
+  }
+
+  function matchesSelection(candidate) {
+    if (!candidate) return false;
+    const current = selectionSnapshot(candidate.form);
+    return current.length === candidate.snapshot.length
+      && current.every((value, index) => value === candidate.snapshot[index]);
+  }
+
+  function referenceUrl(file, channel, init) {
+    if (!matchesSelection(preparation)) return null;
+    if (init && (authHeaders(init)["X-Web-Auth-Token"] || "") !== preparation.token) return null;
+    return preparation[channel].get(file) || null;
+  }
+
+  async function prepareReview(form, { signal } = {}) {
+    preparation = null;
+    const candidate = {
+      form, snapshot: selectionSnapshot(form), token: state.token || "",
+      generic: new Map(), panel: new Map(),
+    };
+    const assertCurrent = () => {
+      if (signal?.aborted) throw new DOMException("Upload timed out", "AbortError");
+      if (!matchesSelection(candidate)) throw new Error("Материалы или параметры изменились. Проверьте их ещё раз.");
+    };
+    for (const file of referenceFiles(form)) {
+      assertCurrent();
+      candidate.generic.set(file, await uploadReference(file, { signal }));
+    }
+    const files = panelFiles(form.querySelector("[data-seedance25-studio]"));
+    const init = { headers: candidate.token ? { "X-Web-Auth-Token": candidate.token } : {}, signal };
+    for (const file of [...files.images, ...files.videos, ...files.audios]) {
+      assertCurrent();
+      candidate.panel.set(file, await upload(file, init));
+    }
+    assertCurrent();
+    preparation = candidate;
+  }
+
+  function preparedMaterials(form) {
+    if (preparation?.form !== form || !matchesSelection(preparation)) return null;
+    const panel = form.querySelector("[data-seedance25-studio]");
+    const files = panelFiles(panel);
+    return seedance25MaterialSelection({
+      images: [...referenceFiles(form).map((file) => preparation.generic.get(file)), ...referenceLinkValues(form)],
+      videos: [selectedOptionValue(form, "video_url")],
+    }, panel, Object.fromEntries(Object.entries(files).map(([kind, items]) => [kind, items.map((file) => preparation.panel.get(file))])));
+  }
 
   function modelSelect() {
     return document.querySelector("[data-account-model-select]");
@@ -29,14 +111,6 @@
 
   function token(key, value) {
     return `${TOKEN_PREFIX}${key}=${String(value)}`;
-  }
-
-  function lines(value, limit) {
-    return String(value || "")
-      .split(/\r?\n|,/)
-      .map((item) => item.trim())
-      .filter(Boolean)
-      .slice(0, limit);
   }
 
   function genericSeedModeLabel() {
@@ -106,15 +180,6 @@
     if (intro) intro.insertAdjacentElement("afterend", panel);
     else referenceSection.insertAdjacentElement("beforebegin", panel);
 
-    panel.querySelector("[data-s25-image-files]")?.addEventListener("change", (event) => {
-      imageFiles = Array.from(event.currentTarget.files || []).slice(0, 30);
-    });
-    panel.querySelector("[data-s25-video-files]")?.addEventListener("change", (event) => {
-      videoFiles = Array.from(event.currentTarget.files || []).slice(0, 10);
-    });
-    panel.querySelector("[data-s25-audio-files]")?.addEventListener("change", (event) => {
-      audioFiles = Array.from(event.currentTarget.files || []).slice(0, 10);
-    });
   }
 
   function generationUrl(input) {
@@ -132,6 +197,8 @@
   }
 
   async function upload(file, init) {
+    const prepared = referenceUrl(file, "panel", init);
+    if (prepared) return prepared;
     const form = new FormData();
     form.append("file", file);
     const response = await originalFetch(UPLOAD_PATH, {
@@ -139,6 +206,7 @@
       body: form,
       credentials: "same-origin",
       headers: authHeaders(init),
+      signal: init?.signal,
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || payload.detail || `Upload HTTP ${response.status}`);
@@ -146,10 +214,6 @@
     const url = String(data.url || "").trim();
     if (!url) throw new Error("Seedance 2.5 upload did not return URL");
     return url;
-  }
-
-  function unique(values) {
-    return values.filter(Boolean).filter((item, index, all) => all.indexOf(item) === index);
   }
 
   window.fetch = async (input, init = {}) => {
@@ -170,31 +234,23 @@
     }
 
     const panel = document.querySelector("[data-seedance25-studio]");
+    const files = panelFiles(panel);
     const uploadedImages = [];
-    for (const file of imageFiles) uploadedImages.push(await upload(file, init));
+    for (const file of files.images) uploadedImages.push(await upload(file, init));
     const uploadedVideos = [];
-    for (const file of videoFiles) uploadedVideos.push(await upload(file, init));
+    for (const file of files.videos) uploadedVideos.push(await upload(file, init));
     const uploadedAudios = [];
-    for (const file of audioFiles) uploadedAudios.push(await upload(file, init));
+    for (const file of files.audios) uploadedAudios.push(await upload(file, init));
 
-    const imageUrls = lines(panel?.querySelector("[data-s25-image-urls]")?.value, 30);
-    const videoUrls = lines(panel?.querySelector("[data-s25-video-urls]")?.value, 10);
-    const audioUrls = lines(panel?.querySelector("[data-s25-audio-urls]")?.value, 10);
-
-    const existingImages = unique([
-      String(body.image_url || "").trim(),
-      ...(Array.isArray(body.reference_urls) ? body.reference_urls.map(String) : []),
-    ]);
-    const allImages = unique([...existingImages, ...imageUrls, ...uploadedImages]).slice(0, 30);
+    const materials = seedance25MaterialSelection({
+      images: [String(body.image_url || "").trim(), ...(Array.isArray(body.reference_urls) ? body.reference_urls.map(String) : [])],
+      videos: [String(body.video_url || "").trim()],
+      audios: Array.isArray(body.audio_ids) ? body.audio_ids.map(String) : [],
+    }, panel, { images: uploadedImages, videos: uploadedVideos, audios: uploadedAudios });
+    const { images: allImages, videos: allVideos, audios: allAudios } = materials;
     body.image_url = allImages[0] || null;
     body.reference_urls = allImages.slice(1);
-
-    const primaryVideo = String(body.video_url || "").trim();
-    const allVideos = unique([primaryVideo, ...videoUrls, ...uploadedVideos]).slice(0, 10);
     body.video_url = allVideos[0] || null;
-
-    const existingAudio = Array.isArray(body.audio_ids) ? body.audio_ids.map(String) : [];
-    const allAudios = unique([...existingAudio, ...audioUrls, ...uploadedAudios]).slice(0, 10);
 
     const controls = [
       token("output_format", panel?.querySelector("[data-s25-output]")?.value === "mov" ? "mov" : "mp4"),
@@ -222,6 +278,7 @@
   new MutationObserver(ensurePanel).observe(document.documentElement, { childList: true, subtree: true });
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", ensurePanel);
   else ensurePanel();
+  return { prepare: prepareReview, materials: preparedMaterials, referenceUrl };
 })();
 
 // Suno source-audio product surface. It lives in this already-loaded Studio

@@ -73,6 +73,32 @@ def back(call):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("feed_repeat", [False, True])
+async def test_old_seedance_identity_button_cannot_start_new_flow(state, monkeypatch, feed_repeat):
+    await state.set_state(VideoGenFSM.mode_select)
+    draft = {
+        "model_key": video_gen.SEEDANCE25_MODEL_KEY,
+        "mode": "image",
+        "prompt": "Keep this draft",
+        "image_url": "https://example.test/draft.jpg",
+        "feed_force_reference": feed_repeat,
+    }
+    await state.set_data(draft)
+    get_cost = AsyncMock()
+    monkeypatch.setattr(video_gen.repo, "get_model_cost", get_cost)
+
+    call = await dispatch(f"vid_mode:identity:{video_gen.SEEDANCE25_MODEL_KEY}", state)
+
+    assert await state.get_state() == VideoGenFSM.mode_select.state
+    assert await state.get_data() == draft
+    get_cost.assert_not_awaited()
+    call.message.edit_text.assert_not_awaited()
+    call.answer.assert_awaited_once()
+    assert call.answer.await_args.kwargs["show_alert"] is True
+    assert "недоступен" in call.answer.await_args.args[0]
+
+
+@pytest.mark.asyncio
 async def test_scenario_selection_discards_previous_task(state, costs):
     await state.set_data(
         {

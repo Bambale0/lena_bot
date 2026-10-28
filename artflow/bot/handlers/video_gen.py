@@ -1645,6 +1645,12 @@ async def cb_video_mode(
 ) -> None:
     parts = call.data.split(":")  # type: ignore[union-attr]
     mode, model_key = parts[1], parts[2]
+    if model_key == SEEDANCE25_MODEL_KEY and mode == "identity":
+        await call.answer(
+            "Этот режим больше недоступен. Выбери обычный режим Seedance.",
+            show_alert=True,
+        )
+        return
     data = await state.get_data()
     if data.get("feed_force_reference"):
         caps = VIDEO_CAPS.get(model_key, {})
@@ -1656,30 +1662,6 @@ async def cb_video_mode(
             return
     model_cost = await repo.get_model_cost(session, model_key)
     display_name = model_cost.display_name if model_cost else model_key
-    if model_key == SEEDANCE25_MODEL_KEY and mode == "identity":
-        await state.update_data(
-            mode="image",
-            seedance_identity_transfer=True,
-            seedance_identity_step="photos",
-            image_file_id=None,
-            ref_file_ids=[],
-            image_url=None,
-            reference_video_url=None,
-            audio_ids=[],
-            aspect_ratio="adaptive",
-        )
-        await state.set_state(VideoGenFSM.image_upload)
-        await safe_edit_message(
-            call.message,
-            f"🎭 <b>{display_name} · Замена персонажа</b>\n\n"
-            "Загрузи <b>1–3 фото одного человека</b>.\n"
-            "Лучше всего: анфас → 3/4 → дополнительный ракурс.\n\n"
-            "Первое фото будет главным якорем внешности, остальные помогут удержать лицо при поворотах.",
-            reply_markup=video_back_kb(),
-        )
-        await safe_answer_callback(call)
-        return
-
     await state.update_data(mode=mode, seedance_identity_transfer=False, seedance_identity_step=None)
     await _handle_mode(call, state, session, model_key, display_name, mode)
     await safe_answer_callback(call)

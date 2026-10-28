@@ -2598,6 +2598,21 @@ function syncDisclosureContentVisibility() {
   });
 }
 
+function composerAspectRatioAllowed(model, form, refCount = referenceFiles(form).length + referenceLinkValues(form).length) {
+  if (state.generationKind === "music") return false;
+  if (state.generationKind !== "video" || !model?.aspectRatioMinRefs) return true;
+  const mode = selectedGrokVideoMode(form)
+    || (selectedOptionValue(form, "video_url") ? "video" : refCount ? "image" : model?.modes?.[0] || "text");
+  return mode !== "image" || refCount >= model.aspectRatioMinRefs;
+}
+
+function syncReferenceAspectRatio(form) {
+  setComposerControl("aspect_ratio", composerAspectRatioAllowed(currentRequestModel(form), form));
+  syncComposerRows();
+  syncFeedRepeatControls();
+  refreshCustomSelects();
+}
+
 function syncControlVisibility(model) {
   const kind = state.generationKind;
   const source = `${model?.key || ""} ${model?.name || ""}`.toLowerCase();
@@ -2605,7 +2620,6 @@ function syncControlVisibility(model) {
   const hasCounts = Boolean(model?.counts?.length && model.counts.length > 1);
   const isGrok = source.includes("grok");
 
-  setComposerControl("aspect_ratio", kind !== "music");
   setComposerControl("quality", kind !== "music");
   setComposerControl("count", hasCounts);
   setComposerControl("duration", kind === "video");
@@ -2614,6 +2628,7 @@ function syncControlVisibility(model) {
   setComposerControl("reference_urls", kind !== "music");
   setComposerControl("reference_file", kind !== "music");
   setComposerControl("video_url", kind === "video");
+  setComposerControl("aspect_ratio", composerAspectRatioAllowed(model, document.querySelector(".account-composer")));
   setComposerControl("seed", isGrok);
   setComposerControl("grok_mode", isGrok);
   setComposerControl("instrumental", kind === "music");
@@ -2847,13 +2862,9 @@ function updatePromptInjectionStatus(form = document.querySelector(".account-com
 function seedanceGuidedMaterialSummary(form = document.querySelector(".account-composer")) {
   const panel = form?.querySelector("[data-seedance25-studio]");
   if (!panel || panel.hidden) return null;
-  const fileCount = (selector) => panel.querySelector(selector)?.files?.length || 0;
-  const urlCount = (selector) => splitReferenceLinks(panel.querySelector(selector)?.value || "").length;
-  const genericPhotos = referenceFiles(form).length + referenceLinkValues(form).length;
-  const genericVideos = selectedOptionValue(form, "video_url") ? 1 : 0;
-  const photos = Math.min(30, genericPhotos + fileCount("[data-s25-image-files]") + urlCount("[data-s25-image-urls]"));
-  const videos = Math.min(10, genericVideos + fileCount("[data-s25-video-files]") + urlCount("[data-s25-video-urls]"));
-  const audios = Math.min(10, fileCount("[data-s25-audio-files]") + urlCount("[data-s25-audio-urls]"));
+  const materials = seedance25Review.materials(form);
+  if (!materials) return null;
+  const photos = materials.images.length, videos = materials.videos.length, audios = materials.audios.length;
   const parts = [
     photos ? `Фото: ${photos}` : "",
     videos ? `Видео: ${videos}` : "",
@@ -2946,7 +2957,11 @@ function ensureGenerationReviewModal() {
   return modal;
 }
 
-function openGenerationReview(form) {
+let generationReviewPreparing = false;
+let generationReviewPreparedMaterials = false;
+
+async function openGenerationReview(form) {
+  if (generationReviewPreparing || state.generationSubmitting) return;
   if (!state.user) {
     openLogin();
     toast("Сначала войдите.", "info");
@@ -2968,7 +2983,29 @@ function openGenerationReview(form) {
     toast("Для режима «По фото» сначала добавьте исходное фото.", "danger");
     return;
   }
+  const seedancePanel = form.querySelector("[data-seedance25-studio]");
+  if (seedancePanel && !seedancePanel.hidden) {
+    const button = form.querySelector("[data-generate-button]");
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 120_000);
+    generationReviewPreparing = true;
+    if (button) { button.disabled = true; button.setAttribute("aria-busy", "true"); }
+    closeGenerationReview();
+    try {
+      await seedance25Review.prepare(form, { signal: controller.signal });
+    } catch (error) {
+      toast(controller.signal.aborted ? "Слишком долгая загрузка материалов. Повторите попытку."
+        : error.message || "Не удалось загрузить материалы. Повторите попытку.", "danger");
+      return;
+    } finally {
+      clearTimeout(timer);
+      generationReviewPreparing = false;
+      if (button) { button.disabled = state.generationSubmitting; button.removeAttribute("aria-busy"); }
+      syncFeedRepeatControls();
+    }
+  }
   state.pendingGenerationForm = form;
+  generationReviewPreparedMaterials = Boolean(seedancePanel && !seedancePanel.hidden);
   const modal = ensureGenerationReviewModal();
   const model = currentRequestModel(form);
   const estimate = estimateGenerationCost(model, form);
@@ -2977,7 +3014,7 @@ function openGenerationReview(form) {
     ["Сценарий", generationScenarioLabel(form)],
     ["Модель", cleanModelName(model?.name || model?.key || "не выбрана")],
     ["Качество", selectedOptionText(form, "quality") || "Стандарт"],
-    ["Формат кадра", selectedOptionText(form, "aspect_ratio") || "Авто"],
+    ["Формат кадра", composerAspectRatioAllowed(model, form) ? selectedOptionText(form, "aspect_ratio") || "Авто" : "Авто"],
     ["Количество", selectedOptionValue(form, "count") || "1"],
     ...(state.generationKind === "video" ? [["Длительность", selectedOptionText(form, "duration") || "Авто"]] : []),
     ["Пример", referenceSummary(form)],
@@ -2997,7 +3034,10 @@ function openGenerationReview(form) {
 function closeGenerationReview({ keepPending = false } = {}) {
   const modal = $("[data-generation-review-modal]");
   if (modal) modal.hidden = true;
-  if (!keepPending) state.pendingGenerationForm = null;
+  if (!keepPending) {
+    state.pendingGenerationForm = null;
+    generationReviewPreparedMaterials = false;
+  }
 }
 
 function syncGenerationControls() {
@@ -4804,10 +4844,12 @@ function closeRealtime() {
   socket.close();
 }
 
-async function uploadReference(file) {
+async function uploadReference(file, { signal } = {}) {
+  const prepared = typeof seedance25Review !== "undefined" ? seedance25Review.referenceUrl(file, "generic") : null;
+  if (prepared) return prepared;
   const form = new FormData();
   form.append("file", file);
-  const result = await request("/uploads/reference", { method: "POST", body: form });
+  const result = await request("/uploads/reference", { method: "POST", body: form, signal });
   return result.url;
 }
 
@@ -4899,7 +4941,8 @@ async function submitGeneration(form, { quoteOnly = false } = {}) {
         mode: videoUrl ? "video" : (grokVideoMode || "image"),
         duration: Number(repeat?.source.original_duration || data.get("duration") || model?.durations?.[0] || 5),
         ...(repeat?.override != null ? { duration_override: repeat.override } : {}),
-        aspect_ratio: repeat?.source.original_aspect_ratio || String(data.get("aspect_ratio") || "") || null,
+        aspect_ratio: repeat?.source.original_aspect_ratio
+          || (composerAspectRatioAllowed(requestModel, form, allReferenceUrls.length) ? String(data.get("aspect_ratio") || "") || null : null),
         resolution: repeat?.source.original_resolution || String(data.get("resolution") || "") || null,
         image_url: referenceUrl || null,
         source_image_url: repeatVideo ? null : (feedRemixMode ? (feedSourceRef || null) : null),
@@ -6031,6 +6074,7 @@ function bindUi() {
       if (!(target instanceof HTMLElement)) return;
       if (target.matches("[data-account-model-select]")) return;
       if (target.matches("[name='reference_file']")) updatePhotoPromptStatus(form);
+      if (target.matches("[name='reference_file'], [name='reference_url'], [name='reference_urls'], [name='video_url']")) syncReferenceAspectRatio(form);
       if (target.matches("[name='prompt_preset']")) updatePromptInjectionStatus(form);
       if (target.matches("[name='duration']") && state.feedRepeat?.scope === feedRepeatScope()) {
         const value = Number(target.value);
@@ -6049,6 +6093,7 @@ function bindUi() {
     form.addEventListener("input", (event) => {
       const target = event.target;
       if (!(target instanceof HTMLElement)) return;
+      if (target.matches("[name='reference_url'], [name='reference_urls'], [name='video_url']")) syncReferenceAspectRatio(form);
       if (target.matches("[name='prompt'], [name='reference_url'], [name='reference_urls'], [name='video_url']")) return;
       updateGenerationEstimate();
     });
@@ -6172,8 +6217,12 @@ function bindUi() {
     const confirmGenerationButton = target.closest("[data-confirm-generation]");
     if (confirmGenerationButton) {
       const form = state.pendingGenerationForm;
-      closeGenerationReview({ keepPending: true });
-      state.pendingGenerationForm = null;
+      const preparedMaterialsValid = !generationReviewPreparedMaterials || (form && seedance25Review.materials(form));
+      closeGenerationReview();
+      if (!preparedMaterialsValid) {
+        toast("Материалы или параметры изменились. Проверьте их ещё раз.", "danger");
+        return;
+      }
       if (form) submitGeneration(form);
       return;
     }
