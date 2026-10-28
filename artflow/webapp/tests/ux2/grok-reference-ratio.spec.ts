@@ -61,7 +61,7 @@ test("Grok photo format follows active photos 1 to 2 to 1 through quote and laun
   await expect(ratio(page)).toHaveCount(0);
   await submit(page).click();
   await expect(confirmation(page)).toBeVisible();
-  expect(quotes.at(-1)).toMatchObject({ model: photoModel, mode: "image", aspect_ratio: null, reference_urls: [refs[0]] });
+  expect(quotes.at(-1)).toMatchObject({ model: photoModel, mode: "image", aspect_ratio: null, image_url: refs[0], reference_urls: [] });
   expect(launches).toHaveLength(0);
   await confirmation(page).getByRole("button", { name: "Закрыть", exact: true }).click();
 
@@ -70,7 +70,7 @@ test("Grok photo format follows active photos 1 to 2 to 1 through quote and laun
   await ratio(page).click();
   await submit(page).click();
   await expect(confirmation(page)).toBeVisible();
-  expect(quotes.at(-1)).toMatchObject({ model: photoModel, mode: "image", aspect_ratio: "9:16", reference_urls: refs });
+  expect(quotes.at(-1)).toMatchObject({ model: photoModel, mode: "image", aspect_ratio: "9:16", image_url: refs[0], reference_urls: [refs[1]] });
   expect(launches).toHaveLength(0);
   await confirmation(page).getByRole("button", { name: "Закрыть", exact: true }).click();
 
@@ -79,7 +79,7 @@ test("Grok photo format follows active photos 1 to 2 to 1 through quote and laun
   await expect(ratio(page)).toHaveCount(0);
   await submit(page).click();
   await expect(confirmation(page)).toBeVisible();
-  expect(quotes.at(-1)).toMatchObject({ model: photoModel, mode: "image", aspect_ratio: null, reference_urls: [refs[0]] });
+  expect(quotes.at(-1)).toMatchObject({ model: photoModel, mode: "image", aspect_ratio: null, image_url: refs[0], reference_urls: [] });
   await confirmation(page).getByRole("button", { name: "Запустить за 7 💋", exact: true }).click();
   await expect.poll(() => launches.length).toBe(1);
   expect(launches[0]).toEqual({ ...quotes.at(-1), quoted_credits: 7 });
@@ -98,3 +98,43 @@ test("Grok text sibling retains the chosen format without photo references", asy
   await expect.poll(() => launches.length).toBe(1);
   expect(launches[0]).toEqual({ ...quotes.at(-1), quoted_credits: 7 });
 });
+
+for (const { name, existingUrl, distinct } of [
+  { name: "a URL and its uploaded file", existingUrl: true, distinct: false },
+  { name: "two uploads of the same content", existingUrl: false, distinct: false },
+  { name: "two uploads of distinct content", existingUrl: false, distinct: true },
+]) {
+  test(`Grok counts ${distinct ? "two effective photos" : "one effective photo"} for ${name}`, async ({ page }) => {
+    const { quotes, launches } = await prepare(page);
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9WlZ5xkAAAAASUVORK5CYII=", "base64");
+    let uploads = 0;
+    await page.route("**/api/web/upload-media", route => {
+      uploads++;
+      return route.fulfill({ json: { data: { url: refs[distinct ? uploads - 1 : 0], kind: "image", content_type: "image/png", size: png.length } } });
+    });
+    if (existingUrl) {
+      const links = page.getByPlaceholder("Опционально: HTTPS-ссылки, по одной в строке");
+      await links.locator("..").getByText("Вставить ссылку вручную", { exact: true }).click();
+      await links.fill(refs[0]);
+    }
+    const files = (existingUrl ? ["duplicate.png"] : ["first-copy.png", "second-copy.png"])
+      .map((name, index) => ({ name, mimeType: "image/png", buffer: distinct && index ? Buffer.concat([png, Buffer.from("\n")]) : png }));
+    await page.locator('input[type="file"][accept="image/*"]').setInputFiles(files);
+    await expect.poll(() => uploads).toBe(files.length);
+    await expect(page.locator(".ux2-reference-row")).toHaveCount(2);
+    await expect(submit(page)).toBeEnabled();
+    if (distinct) {
+      await expect(ratio(page)).toBeVisible();
+      await ratio(page).click();
+    } else await expect(ratio(page)).toHaveCount(0);
+
+    await submit(page).click();
+    await expect(confirmation(page)).toBeVisible();
+    expect(quotes.at(-1)).toMatchObject({ model: photoModel, mode: "image", aspect_ratio: distinct ? "9:16" : null,
+      image_url: refs[0], reference_urls: distinct ? [refs[1]] : [] });
+    expect(launches).toHaveLength(0);
+    await confirmation(page).getByRole("button", { name: "Запустить за 7 💋", exact: true }).click();
+    await expect.poll(() => launches.length).toBe(1);
+    expect(launches[0]).toEqual({ ...quotes.at(-1), quoted_credits: 7 });
+  });
+}

@@ -473,6 +473,114 @@ test("standalone Grok ratio follows distinct references without resetting other 
   for (const body of requests.slice(4)) expect(body).toMatchObject({ model: textModel, aspect_ratio: "16:9", image_url: null, reference_urls: [] });
 });
 
+async function grokPreparationFixture(page: Page, uploadedUrls = ["https://example.test/same-content.jpg"]) {
+  await fixture(page);
+  const textModel = "grok-imagine/text-to-video", photoModel = "grok-imagine/image-to-video";
+  const uploads: string[] = [], requests: Record<string, any>[] = [];
+  await page.route("**/api/web/models/video", r => r.fulfill({ json: { ok: true, data: [
+    { key: model, name: "Seedance 2.5", type: "video", durations: [10], aspect_ratios: ["9:16", "16:9"], credits: 2, active: true },
+    { key: textModel, name: "Grok Imagine Video", type: "video", modes: ["text"], durations: [10], aspect_ratios: ["9:16", "16:9"], credits: 0.6, active: true },
+    { key: photoModel, name: "Grok Imagine Video", type: "video", modes: ["image"], durations: [10], aspect_ratios: ["9:16", "16:9"], aspect_ratio_min_refs: 2, max_refs: 7, credits: 0.7, active: true },
+  ] } }));
+  await page.route("**/api/web/uploads/reference", r => {
+    const url = uploadedUrls[uploads.length % uploadedUrls.length];
+    uploads.push(url);
+    return r.fulfill({ json: { ok: true, data: { url } } });
+  });
+  await page.route("**/api/web/generate/video{,/quote}", r => {
+    requests.push(r.request().postDataJSON());
+    return r.fulfill({ json: { ok: true, data: r.request().url().endsWith("/quote")
+      ? { cost_credits: 7, can_run: true } : { id: 99, status: "pending" } } });
+  });
+  return { textModel, photoModel, uploads, requests };
+}
+
+for (const duplicate of ["files", "file and URL"] as const) {
+  test(`standalone Grok prepares duplicate ${duplicate} before confirming the actual ratio`, async ({ page }) => {
+    const { photoModel, uploads, requests } = await grokPreparationFixture(page);
+    const sameUrl = "https://example.test/same-content.jpg";
+    await page.goto(`/studio.html?type=video&model=${encodeURIComponent(photoModel)}${duplicate === "file and URL" ? `&ref=${encodeURIComponent(sameUrl)}` : ""}`);
+    const references = page.locator("[data-reference-section]");
+    if (await references.getAttribute("open") === null) await references.locator(":scope > summary").click();
+    await references.locator("[name=reference_file]").setInputFiles((duplicate === "files" ? ["original.jpg", "copy.jpg"] : ["original.jpg"])
+      .map(name => ({ name, mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) })));
+    const ratio = page.locator(".account-composer [name=aspect_ratio]");
+    await ratio.selectOption("16:9");
+    const review = page.locator("[data-generation-review-modal]");
+    const reviewRatio = review.locator("[data-review-list] article").filter({ hasText: "Формат кадра" }).locator("b");
+    await page.locator("[data-generate-button]").click();
+    await expect(reviewRatio).toHaveText("Авто");
+    await expect(review.getByText("Фото: 1", { exact: true })).toBeVisible();
+    await expect(ratio).toBeDisabled();
+    await expect(ratio.locator("..")).toBeHidden();
+    expect(uploads).toHaveLength(duplicate === "files" ? 2 : 1);
+    expect(requests).toHaveLength(0);
+
+    await review.getByRole("button", { name: "Проверить ещё раз" }).click();
+    await references.locator("[name=reference_urls]").fill("https://example.test/distinct.jpg");
+    await page.locator("[data-generate-button]").click();
+    await expect(reviewRatio).toHaveText("16:9");
+    await expect(review.getByText("Фото: 2", { exact: true })).toBeVisible();
+    await expect(ratio).toBeEnabled();
+    await review.getByRole("button", { name: "Проверить ещё раз" }).click();
+    await references.locator("[name=reference_urls]").fill("");
+    await page.locator("[data-generate-button]").click();
+    await expect(reviewRatio).toHaveText("Авто");
+    await expect(ratio).toBeDisabled();
+    const preparedUploads = uploads.length;
+    await review.locator("[data-confirm-generation]").click();
+    await expect.poll(() => requests.length).toBe(2);
+    expect(uploads).toHaveLength(preparedUploads);
+    for (const body of requests) expect(body).toMatchObject({ model: photoModel, aspect_ratio: null, image_url: sameUrl, reference_urls: [] });
+  });
+}
+
+test("standalone Grok retains the selected ratio for distinct prepared uploads", async ({ page }) => {
+  const urls = ["https://example.test/first.jpg", "https://example.test/second.jpg"];
+  const { photoModel, uploads, requests } = await grokPreparationFixture(page, urls);
+  await page.goto(`/studio.html?type=video&model=${encodeURIComponent(photoModel)}`);
+  const references = page.locator("[data-reference-section]");
+  if (await references.getAttribute("open") === null) await references.locator(":scope > summary").click();
+  await references.locator("[name=reference_file]").setInputFiles(["first.jpg", "second.jpg"]
+    .map((name, i) => ({ name, mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, i, 0xff, 0xd9]) })));
+  await page.locator(".account-composer [name=aspect_ratio]").selectOption("16:9");
+  await page.locator("[data-generate-button]").click();
+  const review = page.locator("[data-generation-review-modal]");
+  await expect(review.getByText("Фото: 2", { exact: true })).toBeVisible();
+  await expect(review.locator("[data-review-list] article").filter({ hasText: "Формат кадра" }).locator("b")).toHaveText("16:9");
+  expect(uploads).toHaveLength(2);
+  await review.locator("[data-confirm-generation]").click();
+  await expect.poll(() => requests.length).toBe(2);
+  expect(uploads).toHaveLength(2);
+  for (const body of requests) expect(body).toMatchObject({ model: photoModel, aspect_ratio: "16:9", image_url: urls[0], reference_urls: [urls[1]] });
+});
+
+test("standalone Grok preparation ignores retained materials in the hidden Seedance panel", async ({ page }) => {
+  const { textModel, photoModel, uploads, requests } = await grokPreparationFixture(page);
+  let panelUploads = 0;
+  await page.route("**/api/web/seedance25/upload-reference", r => { panelUploads += 1; return r.fulfill({ json: { ok: true, data: { url: "https://example.test/hidden.jpg" } } }); });
+  await page.goto(`/studio.html?type=video&model=${encodeURIComponent(model)}`);
+  await page.locator("[data-seedance25-studio]").getByText("Дополнительные настройки", { exact: true }).click();
+  await page.locator("[data-s25-image-urls]").fill("https://example.test/hidden-url.jpg");
+  await page.locator("[data-s25-image-files]").setInputFiles({ name: "hidden.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) });
+  await page.locator("[data-account-model-select]").selectOption(textModel);
+  await page.locator("[data-video-mode-switch]").getByRole("button", { name: "По фото" }).click();
+  await expect(page.locator("[data-seedance25-studio]")).toBeHidden();
+  const references = page.locator("[data-reference-section]");
+  if (await references.getAttribute("open") === null) await references.locator(":scope > summary").click();
+  await references.locator("[name=reference_file]").setInputFiles({ name: "reader.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) });
+  await page.locator("[data-generate-button]").click();
+  const review = page.locator("[data-generation-review-modal]");
+  await expect(review.getByText("Фото: 1", { exact: true })).toBeVisible();
+  expect(panelUploads).toBe(0);
+  expect(uploads).toHaveLength(1);
+  await review.locator("[data-confirm-generation]").click();
+  await expect.poll(() => requests.length).toBe(2);
+  expect(panelUploads).toBe(0);
+  expect(uploads).toHaveLength(1);
+  for (const body of requests) expect(body).toMatchObject({ model: photoModel, aspect_ratio: null, image_url: "https://example.test/same-content.jpg", reference_urls: [] });
+});
+
 test("standalone site blocks ambiguous repeat across reload until history acknowledgement", async ({ page }) => {
   const { launches } = await fixture(page, 503);
   await launch(page);

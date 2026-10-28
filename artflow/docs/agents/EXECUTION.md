@@ -2488,7 +2488,7 @@ Steps: [x] root-cause and production preflight; [x] RED/green operator control;
   and reuse for quote/launch, rather than counting browser File objects. This
   preparation uses the existing non-charging upload endpoints and preserves
   the separate generic/panel storage channels and provider payload contract.
-- Continuation final local evidence: TypeScript, production build, 148 frontend
+- First published continuation evidence: TypeScript, production build, 148 frontend
   unit tests, the full Ruff check and diff check pass. The maintained UX2 suite
   now contains 301 scenarios: 299 passed together; two completed their assertions
   but failed trace teardown because parallel runs shared an output directory.
@@ -2497,7 +2497,7 @@ Steps: [x] root-cause and production preflight; [x] RED/green operator control;
   upload failure/retry, changed selection/authentication, stale confirmation and
   the bounded 120-second preparation timeout. The focused parity and retained
   identity-compatibility bundle passes 24/24. Bot-navigation remains 374/374.
-- Independent final Standards and Spec reviews found no remaining blockers.
+- Independent Standards and Spec reviews of that first freeze found no blockers.
   Both checked shared material selection, actual upload URL reuse, auth/form
   invalidation, Grok active-reference gating, the Telegram callback guard and
   retained saved-job compatibility. Runtime cache tokens are prototype r10,
@@ -2505,6 +2505,32 @@ Steps: [x] root-cause and production preflight; [x] RED/green operator control;
   Protected CI on the published final head and actual merge-SHA deployment are
   still required; the final release evidence, workflow links and public asset
   verification will be recorded in PR #322 after those gates finish.
+- Additional release check on published `5f5f3bfd67886dd0578632d118b57552a49fe6e2`
+  reproduced the content-addressed duplicate case for ordinary Grok as well.
+  Standalone confirmation used raw file counts while submission deduplicated
+  upload URLs. Mini App retained separate material rows with the same upload
+  URL and repeated the primary URL in `reference_urls`; its ratio threshold
+  therefore counted duplicates. The actual backend normalizer confirmed that
+  Grok expects one primary plus additional references and does not deduplicate
+  this input itself. Provider/backend/storage contracts need no changes.
+- Deduplication follow-up: [x] failing browser regressions for duplicate files
+  and file-plus-existing-URL; [x] shared standalone preparation and unique
+  active-ready Grok Mini App payload, preserving canonical rows and exact
+  repeats; [x] focused checks and refreshed Standards/Spec review; [ ] protected
+  CI on the new head, merge-SHA autodeploy and public delivery proof.
+- Final deduplication evidence: all 149 frontend unit tests pass, including a
+  real ordinary-draft-to-saved-recipe transition preserving format and rows.
+  TypeScript/build pass. Grok browser regressions pass 5/5 through actual upload
+  queue events, with exact quote/launch body equality; the standalone suite
+  passes 21/21, including hidden Seedance material exclusion after model change.
+  Parity/identity compatibility passes 24/24; full Ruff and diff check pass.
+  Both independent Standards and Spec reviewers passed the final frozen delta,
+  including the saved-prompt format guard. The imported backend normalizer was
+  called without provider/DB requests: one primary plus no additional URL keeps
+  ratio null; two distinct references retain the selected ratio.
+  Final resource tokens: prototype r11, Seedance r10, Mini App build
+  `20261028-guided-video-composer-r8`. Exact-head protected CI and deployment
+  evidence remain pending and will be recorded in PR #322.
 
 - Baseline `9c06bcc3039543edbeab938a72c3c6a7702208cf`; branch
   `fix/grok-seedance-guided-composer`. A real mobile report showed that the

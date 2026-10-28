@@ -19,8 +19,9 @@ function keepOrFirst<T>(current: T, allowed?: T[]): T {
 
 /** Keep the saved choice, but omit it from requests until enough photos are active. */
 export function effectiveVideoAspectRatio(draft: GenerationDraft, model: ModelInfo | undefined): string | null {
+  if (draft.promptId !== null) return draft.aspectRatio;
   const minReferences = model?.aspect_ratio_min_refs || 0;
-  return draft.mode === "image" && selectGenerationInputs(draft).referenceUrls.length < minReferences
+  return draft.mode === "image" && new Set(selectGenerationInputs(draft).referenceUrls).size < minReferences
     ? null
     : draft.aspectRatio;
 }

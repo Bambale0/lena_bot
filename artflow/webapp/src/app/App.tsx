@@ -73,7 +73,7 @@ import type {
 import { firstMedia, isPendingTask, safeExternalUrl } from "@/lib/utils";
 import { saveDownload } from "@/lib/download";
 
-window.__APIX_MINIAPP_BUILD_ID__ = "20261028-guided-video-composer-r7";
+window.__APIX_MINIAPP_BUILD_ID__ = "20261028-guided-video-composer-r8";
 
 type FeedSource = "recent" | "top_day" | "top";
 type VideoQuote = Awaited<ReturnType<MiniAppApi["quoteVideo"]>>;
@@ -807,12 +807,15 @@ function App() {
       checkingReferences = false;
       checkingSelection = false;
       const prompt = draft.prompt.trim() || (draft.model.startsWith("higgsfield/genjutsu/") ? "" : "Использовать выбранный сценарий");
+      const grokPhotoReferences = kind === "video" && draft.promptId === null && draft.model === "grok-imagine/image-to-video"
+        ? [...new Set(draft.referenceUrls)] : null;
       const videoBody = {
         model: draft.model, prompt, prompt_id: draft.promptId, mode: draft.mode,
         duration: draft.duration,
         aspect_ratio: effectiveVideoAspectRatio(draft, data.videoModels.find(model => model.key === draft.model)),
         resolution: draft.resolution,
-        image_url: draft.referenceUrls[0] || null, reference_urls: draft.referenceUrls,
+        image_url: (grokPhotoReferences || draft.referenceUrls)[0] || null,
+        reference_urls: grokPhotoReferences ? grokPhotoReferences.slice(1) : draft.referenceUrls,
         video_url: draft.videoUrl || null, video_start: draft.videoStart, video_end: draft.videoEnd,
         audio_ids: draft.audioIds, character_ids: draft.characterIds, seed: draft.seed,
         grok_mode: draft.grokMode || "normal",

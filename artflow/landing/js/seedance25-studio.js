@@ -14,7 +14,7 @@ function seedance25MaterialSelection(existing, panel, files) {
   };
 }
 
-const seedance25Review = (() => {
+const composerMaterialReview = (() => {
   "use strict";
 
   const MODEL = "bytedance/seedance-2-5";
@@ -41,7 +41,9 @@ const seedance25Review = (() => {
       state.routeModelKey, state.routeFeedRemixId, state.routeSourceReferenceUrl,
       panel, panel?.hidden,
       ...Array.from(form.querySelectorAll("input, select, textarea")).flatMap((field) => [
-        field, field.disabled, field.value, field.checked, ...Array.from(field.files || []),
+        // Ratio availability is derived from the uploaded URLs, not user input.
+        field, field.name === "aspect_ratio" ? null : field.disabled,
+        field.value, field.checked, ...Array.from(field.files || []),
       ]),
     ];
   }
@@ -73,7 +75,7 @@ const seedance25Review = (() => {
       assertCurrent();
       candidate.generic.set(file, await uploadReference(file, { signal }));
     }
-    const files = panelFiles(form.querySelector("[data-seedance25-studio]"));
+    const files = panelFiles(form.querySelector("[data-seedance25-studio]:not([hidden])"));
     const init = { headers: candidate.token ? { "X-Web-Auth-Token": candidate.token } : {}, signal };
     for (const file of [...files.images, ...files.videos, ...files.audios]) {
       assertCurrent();
@@ -83,12 +85,20 @@ const seedance25Review = (() => {
     preparation = candidate;
   }
 
-  function preparedMaterials(form) {
+  function preparedReferences(form) {
     if (preparation?.form !== form || !matchesSelection(preparation)) return null;
-    const panel = form.querySelector("[data-seedance25-studio]");
+    return uniqueSafeUrls([
+      ...referenceFiles(form).map((file) => preparation.generic.get(file)), ...referenceLinkValues(form),
+    ]);
+  }
+
+  function preparedMaterials(form) {
+    const references = preparedReferences(form);
+    if (!references) return null;
+    const panel = form.querySelector("[data-seedance25-studio]:not([hidden])");
     const files = panelFiles(panel);
     return seedance25MaterialSelection({
-      images: [...referenceFiles(form).map((file) => preparation.generic.get(file)), ...referenceLinkValues(form)],
+      images: references,
       videos: [selectedOptionValue(form, "video_url")],
     }, panel, Object.fromEntries(Object.entries(files).map(([kind, items]) => [kind, items.map((file) => preparation.panel.get(file))])));
   }
@@ -278,7 +288,7 @@ const seedance25Review = (() => {
   new MutationObserver(ensurePanel).observe(document.documentElement, { childList: true, subtree: true });
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", ensurePanel);
   else ensurePanel();
-  return { prepare: prepareReview, materials: preparedMaterials, referenceUrl };
+  return { prepare: prepareReview, references: preparedReferences, materials: preparedMaterials, referenceUrl };
 })();
 
 // Suno source-audio product surface. It lives in this already-loaded Studio

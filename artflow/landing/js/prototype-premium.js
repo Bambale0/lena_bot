@@ -2598,7 +2598,11 @@ function syncDisclosureContentVisibility() {
   });
 }
 
-function composerAspectRatioAllowed(model, form, refCount = referenceFiles(form).length + referenceLinkValues(form).length) {
+function preparedReferenceUrls(form) {
+  return typeof composerMaterialReview === "undefined" ? null : composerMaterialReview.references(form);
+}
+
+function composerAspectRatioAllowed(model, form, refCount = preparedReferenceUrls(form)?.length ?? referenceFiles(form).length + referenceLinkValues(form).length) {
   if (state.generationKind === "music") return false;
   if (state.generationKind !== "video" || !model?.aspectRatioMinRefs) return true;
   const mode = selectedGrokVideoMode(form)
@@ -2862,7 +2866,7 @@ function updatePromptInjectionStatus(form = document.querySelector(".account-com
 function seedanceGuidedMaterialSummary(form = document.querySelector(".account-composer")) {
   const panel = form?.querySelector("[data-seedance25-studio]");
   if (!panel || panel.hidden) return null;
-  const materials = seedance25Review.materials(form);
+  const materials = composerMaterialReview.materials(form);
   if (!materials) return null;
   const photos = materials.images.length, videos = materials.videos.length, audios = materials.audios.length;
   const parts = [
@@ -2876,6 +2880,8 @@ function seedanceGuidedMaterialSummary(form = document.querySelector(".account-c
 function referenceSummary(form) {
   const seedanceMaterials = seedanceGuidedMaterialSummary(form);
   if (seedanceMaterials) return seedanceMaterials.label;
+  const prepared = preparedReferenceUrls(form);
+  if (prepared) return prepared.length ? `Фото: ${prepared.length}` : "без примера";
   const files = referenceFiles(form);
   if (files.length === 1) return `фото: ${files[0].name}`;
   if (files.length > 1) return `${files.length} фото`;
@@ -2984,7 +2990,10 @@ async function openGenerationReview(form) {
     return;
   }
   const seedancePanel = form.querySelector("[data-seedance25-studio]");
-  if (seedancePanel && !seedancePanel.hidden) {
+  const prepareGrokReferences = !feedRemixMode && selectedGrokVideoMode(form) === "image"
+    && currentRequestModel(form)?.aspectRatioMinRefs > 0;
+  const prepareMaterials = Boolean((seedancePanel && !seedancePanel.hidden) || prepareGrokReferences);
+  if (prepareMaterials) {
     const button = form.querySelector("[data-generate-button]");
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 120_000);
@@ -2992,7 +3001,8 @@ async function openGenerationReview(form) {
     if (button) { button.disabled = true; button.setAttribute("aria-busy", "true"); }
     closeGenerationReview();
     try {
-      await seedance25Review.prepare(form, { signal: controller.signal });
+      await composerMaterialReview.prepare(form, { signal: controller.signal });
+      if (prepareGrokReferences) syncReferenceAspectRatio(form);
     } catch (error) {
       toast(controller.signal.aborted ? "Слишком долгая загрузка материалов. Повторите попытку."
         : error.message || "Не удалось загрузить материалы. Повторите попытку.", "danger");
@@ -3005,7 +3015,7 @@ async function openGenerationReview(form) {
     }
   }
   state.pendingGenerationForm = form;
-  generationReviewPreparedMaterials = Boolean(seedancePanel && !seedancePanel.hidden);
+  generationReviewPreparedMaterials = prepareMaterials;
   const modal = ensureGenerationReviewModal();
   const model = currentRequestModel(form);
   const estimate = estimateGenerationCost(model, form);
@@ -4845,7 +4855,7 @@ function closeRealtime() {
 }
 
 async function uploadReference(file, { signal } = {}) {
-  const prepared = typeof seedance25Review !== "undefined" ? seedance25Review.referenceUrl(file, "generic") : null;
+  const prepared = typeof composerMaterialReview !== "undefined" ? composerMaterialReview.referenceUrl(file, "generic") : null;
   if (prepared) return prepared;
   const form = new FormData();
   form.append("file", file);
@@ -6217,7 +6227,7 @@ function bindUi() {
     const confirmGenerationButton = target.closest("[data-confirm-generation]");
     if (confirmGenerationButton) {
       const form = state.pendingGenerationForm;
-      const preparedMaterialsValid = !generationReviewPreparedMaterials || (form && seedance25Review.materials(form));
+      const preparedMaterialsValid = !generationReviewPreparedMaterials || (form && preparedReferenceUrls(form));
       closeGenerationReview();
       if (!preparedMaterialsValid) {
         toast("Материалы или параметры изменились. Проверьте их ещё раз.", "danger");
