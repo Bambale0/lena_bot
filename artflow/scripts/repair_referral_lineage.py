@@ -22,6 +22,7 @@ from core.config import settings
 from db.models import CreditLedgerEntry, ReferralCommissionLedger, User
 
 MONEY = Decimal("0.01")
+CREDITS = Decimal("0.000001")
 repair_engine = create_async_engine(settings.DATABASE_URL, pool_pre_ping=True)
 RepairSessionLocal = async_sessionmaker(repair_engine, expire_on_commit=False)
 
@@ -49,6 +50,16 @@ class FinanceCorrection:
     rate: float
     payment_amount_rub: float
     amount_rub: float
+
+
+@dataclass(frozen=True)
+class CreditCorrectionAllocation:
+    original_ledger_id: int
+    user_id: int
+    amount_credits: float
+    balance_debit_credits: float
+    unrecovered_credits: float
+    balance_after_credits: float
 
 
 def _refs(user) -> tuple[int | None, int | None, int | None]:
@@ -177,22 +188,94 @@ def find_invalid_credit_bonuses(
     credit_entries: Iterable[object],
 ) -> list[object]:
     by_id = {int(user.id): user for user in users}
-    invalid_sources: dict[int, set[str]] = {}
+    signup_source_owners: dict[str, set[int]] = defaultdict(set)
+    for user in users:
+        user_id = int(user.id)
+        signup_source_owners[str(user_id)].add(user_id)
+        tg_id = int(getattr(user, "tg_id", 0) or 0)
+        if tg_id > 0:
+            signup_source_owners[str(tg_id)].add(user_id)
+    invalid_sources: dict[int, set[tuple[str, str, str]]] = {}
+    invalid_signup_owners: dict[tuple[int, str], set[int]] = defaultdict(set)
     for edge in invalid_edges:
         child = by_id[edge.user_id]
-        source_ids = {str(edge.user_id)}
         tg_id = int(getattr(child, "tg_id", 0) or 0)
+        # Signup awards use the DB id while a contact account still has a
+        # negative pseudo Telegram id, or the positive Telegram id otherwise.
+        # Current profile/contact fields are mutable, so retain both immutable
+        # identifier candidates and fail closed if their namespaces collide.
+        signup_source_ids = {str(edge.user_id)}
         if tg_id > 0:
-            source_ids.add(str(tg_id))
-        invalid_sources.setdefault(edge.invalid_referrer_id, set()).update(source_ids)
+            signup_source_ids.add(str(tg_id))
+        invalid_sources.setdefault(edge.invalid_referrer_id, set()).update(
+            {
+                ("referral_first_topup_bonus", "referral_user", str(edge.user_id)),
+            }
+        )
+        invalid_sources[edge.invalid_referrer_id].update(
+            ("referral_signup_bonus", "user", source_id)
+            for source_id in signup_source_ids
+        )
+        for source_id in signup_source_ids:
+            invalid_signup_owners[(edge.invalid_referrer_id, source_id)].add(edge.user_id)
 
-    return [
-        entry
-        for entry in credit_entries
-        if entry.entry_type in {"referral_first_topup_bonus", "referral_signup_bonus"}
-        and float(entry.delta or 0) > 0
-        and str(entry.source_id or "") in invalid_sources.get(int(entry.user_id), set())
-    ]
+    matches: list[object] = []
+    for entry in credit_entries:
+        signature = (
+            str(entry.entry_type or ""),
+            str(entry.source_type or ""),
+            str(entry.source_id or ""),
+        )
+        if float(entry.delta or 0) <= 0 or signature not in invalid_sources.get(
+            int(entry.user_id), set()
+        ):
+            continue
+        if signature[0] == "referral_signup_bonus":
+            expected_owners = invalid_signup_owners[(int(entry.user_id), signature[2])]
+            actual_owners = signup_source_owners.get(signature[2], set())
+            if not actual_owners or not actual_owners.issubset(expected_owners):
+                raise RuntimeError(
+                    "Ambiguous referral signup bonus source; manual correction required: "
+                    f"ledger_entry_id={int(entry.id)} source_id={signature[2]!r} "
+                    f"owners={sorted(actual_owners)} expected_invalid={sorted(expected_owners)}"
+                )
+        matches.append(entry)
+    return matches
+
+
+def allocate_credit_corrections(
+    credit_corrections: Sequence[object], balances: dict[int, Decimal | float]
+) -> list[CreditCorrectionAllocation]:
+    remaining = {
+        int(user_id): Decimal(str(balance or 0)).quantize(CREDITS)
+        for user_id, balance in balances.items()
+    }
+    allocations: list[CreditCorrectionAllocation] = []
+    for correction in sorted(credit_corrections, key=lambda item: int(item.id)):
+        user_id = int(correction.user_id)
+        if user_id not in remaining:
+            raise RuntimeError(f"Missing locked credit balance for user {user_id}")
+        amount = Decimal(str(correction.delta)).quantize(CREDITS)
+        if amount <= 0:
+            raise RuntimeError(
+                f"Invalid non-positive credit correction ledger_id={int(correction.id)}"
+            )
+        balance = remaining[user_id]
+        debit = min(max(balance, Decimal("0")), amount)
+        missing = amount - debit
+        new_balance = (balance - debit).quantize(CREDITS)
+        remaining[user_id] = new_balance
+        allocations.append(
+            CreditCorrectionAllocation(
+                original_ledger_id=int(correction.id),
+                user_id=user_id,
+                amount_credits=float(amount),
+                balance_debit_credits=float(debit),
+                unrecovered_credits=float(missing),
+                balance_after_credits=float(new_balance),
+            )
+        )
+    return allocations
 
 
 async def _load_plan(session):
@@ -216,12 +299,6 @@ async def _load_plan(session):
     invalid_credit_bonuses = find_invalid_credit_bonuses(
         invalid_edges, users, credit_entries
     )
-    if invalid_credit_bonuses:
-        entry_ids = sorted(int(entry.id) for entry in invalid_credit_bonuses)
-        raise RuntimeError(
-            "Automatic repair stopped: invalid referral credit bonuses require "
-            f"a separately approved spent-credit correction; ledger_entry_ids={entry_ids}"
-        )
     payer_ids = sorted({change.user_id for change in lineage_changes})
     ledger_entries: list[ReferralCommissionLedger] = []
     if payer_ids:
@@ -234,14 +311,25 @@ async def _load_plan(session):
                 )
             ).all()
         )
-    return invalid_edges, lineage_changes, build_finance_plan(lineage_changes, ledger_entries)
+    return (
+        invalid_edges,
+        lineage_changes,
+        build_finance_plan(lineage_changes, ledger_entries),
+        invalid_credit_bonuses,
+    )
 
 
-def _summary(invalid_edges, lineage_changes, corrections) -> dict:
+def _summary(invalid_edges, lineage_changes, corrections, credit_corrections) -> dict:
     invalid_commission = sum(Decimal(str(item.amount_rub)) for item in corrections)
     commission_by_recipient: dict[int, Decimal] = defaultdict(lambda: Decimal("0"))
     for item in corrections:
         commission_by_recipient[item.recipient_user_id] += Decimal(str(item.amount_rub))
+    invalid_credits = sum(
+        (Decimal(str(item.delta)) for item in credit_corrections), Decimal("0")
+    )
+    credits_by_recipient: dict[int, Decimal] = defaultdict(lambda: Decimal("0"))
+    for item in credit_corrections:
+        credits_by_recipient[int(item.user_id)] += Decimal(str(item.delta))
     return {
         "invalid_edge_count": len(invalid_edges),
         "changed_user_count": len(lineage_changes),
@@ -254,6 +342,13 @@ def _summary(invalid_edges, lineage_changes, corrections) -> dict:
             str(recipient_id): float(amount.quantize(MONEY))
             for recipient_id, amount in sorted(commission_by_recipient.items())
         },
+        "credit_correction_count": len(credit_corrections),
+        "invalid_credit_credits": float(invalid_credits.quantize(CREDITS)),
+        "invalid_credits_by_recipient": {
+            str(recipient_id): float(amount.quantize(CREDITS))
+            for recipient_id, amount in sorted(credits_by_recipient.items())
+        },
+        "invalid_credit_ledger_ids": sorted(int(item.id) for item in credit_corrections),
         "invalid_edges": [asdict(edge) for edge in invalid_edges],
     }
 
@@ -298,13 +393,17 @@ async def apply_repair(batch_key: str, operator: str, reason: str) -> dict:
                 "referral_commission_ledger IN EXCLUSIVE MODE"
             )
         )
-        invalid_edges, lineage_changes, corrections = await _load_plan(session)
-        base_summary = _summary(invalid_edges, lineage_changes, corrections)
+        invalid_edges, lineage_changes, corrections, credit_corrections = await _load_plan(session)
+        base_summary = _summary(
+            invalid_edges, lineage_changes, corrections, credit_corrections
+        )
         await session.execute(
             text(
                 "INSERT INTO referral_lineage_repair_batches "
-                "(batch_key, operator, reason, status, invalid_edge_count, changed_user_count, invalid_commission_rub) "
-                "VALUES (:batch_key, :operator, :reason, 'applying', :edge_count, :user_count, :commission)"
+                "(batch_key, operator, reason, status, invalid_edge_count, changed_user_count, "
+                "invalid_commission_rub, invalid_credit_credits) "
+                "VALUES (:batch_key, :operator, :reason, 'applying', :edge_count, :user_count, "
+                ":commission, :credits)"
             ),
             {
                 "batch_key": batch_key,
@@ -313,6 +412,7 @@ async def apply_repair(batch_key: str, operator: str, reason: str) -> dict:
                 "edge_count": len(invalid_edges),
                 "user_count": len(lineage_changes),
                 "commission": base_summary["invalid_commission_rub"],
+                "credits": base_summary["invalid_credit_credits"],
             },
         )
         await session.execute(
@@ -418,23 +518,102 @@ async def apply_repair(batch_key: str, operator: str, reason: str) -> dict:
                 },
             )
 
+        credit_recipient_ids = sorted({int(item.user_id) for item in credit_corrections})
+        credit_balances: dict[int, Decimal] = {}
+        if credit_recipient_ids:
+            locked_credit_recipients = list(
+                (
+                    await session.scalars(
+                        select(User)
+                        .where(User.id.in_(credit_recipient_ids))
+                        .order_by(User.id)
+                        .with_for_update()
+                    )
+                ).all()
+            )
+            credit_balances = {
+                int(user.id): Decimal(str(user.credits or 0)).quantize(CREDITS)
+                for user in locked_credit_recipients
+            }
+
+        credit_allocations = allocate_credit_corrections(
+            credit_corrections, credit_balances
+        )
+        credit_by_ledger_id = {
+            int(item.id): item for item in credit_corrections
+        }
+        credit_balance_debit = Decimal("0")
+        credit_unrecovered = Decimal("0")
+        for allocation in credit_allocations:
+            correction = credit_by_ledger_id[allocation.original_ledger_id]
+            user_id = allocation.user_id
+            amount = Decimal(str(allocation.amount_credits)).quantize(CREDITS)
+            debit = Decimal(str(allocation.balance_debit_credits)).quantize(CREDITS)
+            missing = Decimal(str(allocation.unrecovered_credits)).quantize(CREDITS)
+            new_balance = Decimal(str(allocation.balance_after_credits)).quantize(CREDITS)
+            credit_balance_debit += debit
+            credit_unrecovered += missing
+            await session.execute(
+                update(User).where(User.id == user_id).values(credits=float(new_balance))
+            )
+            reversal = CreditLedgerEntry(
+                user_id=user_id,
+                delta=-float(debit),
+                balance_after=float(new_balance),
+                entry_type="referral_bonus_reversal",
+                source_type="referral_lineage_repair",
+                source_id=f"{batch_key}:{int(correction.id)}",
+                note=(
+                    f"Invalid {correction.entry_type} reversed; "
+                    f"original_ledger_id={int(correction.id)}; invalid={float(amount):g}; "
+                    f"unrecovered={float(missing):g}"
+                ),
+            )
+            session.add(reversal)
+            await session.flush()
+            await session.execute(
+                text(
+                    "INSERT INTO referral_credit_repair_rows "
+                    "(batch_key,original_ledger_id,user_id,entry_type,amount_credits,"
+                    "balance_debit_credits,unrecovered_credits,reversal_ledger_id) "
+                    "VALUES (:batch_key,:original_id,:user_id,:entry_type,:amount,"
+                    ":debit,:missing,:reversal_id)"
+                ),
+                {
+                    "batch_key": batch_key,
+                    "original_id": int(correction.id),
+                    "user_id": user_id,
+                    "entry_type": str(correction.entry_type),
+                    "amount": float(amount),
+                    "debit": float(debit),
+                    "missing": float(missing),
+                    "reversal_id": reversal.id,
+                },
+            )
+
         final_summary = {
             **base_summary,
             "batch_key": batch_key,
             "operator": operator,
             "balance_debit_rub": float(balance_debit.quantize(MONEY)),
             "unrecovered_rub": float(unrecovered.quantize(MONEY)),
+            "balance_debit_credits": float(credit_balance_debit.quantize(CREDITS)),
+            "unrecovered_credits": float(credit_unrecovered.quantize(CREDITS)),
         }
         await session.execute(
             text(
                 "UPDATE referral_lineage_repair_batches SET status='applied', "
-                "balance_debit_rub=:debit, unrecovered_rub=:missing, summary_json=:summary, "
+                "balance_debit_rub=:debit, unrecovered_rub=:missing, "
+                "balance_debit_credits=:credit_debit, unrecovered_credits=:credit_missing, "
+                "summary_json=:summary, "
                 "applied_at=now() WHERE batch_key=:batch_key"
             ),
             {
                 "batch_key": batch_key,
                 "debit": final_summary["balance_debit_rub"],
                 "missing": final_summary["unrecovered_rub"],
+                "credit_debit": final_summary["balance_debit_credits"],
+                "credit_missing": final_summary["unrecovered_credits"],
                 "summary": json.dumps(final_summary, ensure_ascii=False, sort_keys=True),
             },
         )

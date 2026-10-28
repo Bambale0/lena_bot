@@ -17,11 +17,13 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from db.models import (
+    ReferralCreditRepairRow,
     ReferralFinanceRepairRow,
     ReferralLineageRepairBatch,
     ReferralLineageRepairRow,
 )
 from scripts.repair_referral_lineage import (
+    allocate_credit_corrections,
     build_finance_plan,
     build_lineage_plan,
     find_invalid_credit_bonuses,
@@ -43,10 +45,8 @@ def test_referral_lineage_migration_is_current_head() -> None:
     config.set_main_option("script_location", "db/migrations")
     scripts = ScriptDirectory.from_config(config)
 
-    assert scripts.get_heads() == ["054_referral_lineage"]
-    assert scripts.get_revision("054_referral_lineage").down_revision == (
-        "053_wan_kie_primary_fallback"
-    )
+    assert scripts.get_heads() == ["055_referral_credit"]
+    assert scripts.get_revision("055_referral_credit").down_revision == "054_referral_lineage"
 
     source = Path("db/migrations/versions/054_referral_lineage_immutability.py").read_text(
         encoding="utf-8"
@@ -54,10 +54,29 @@ def test_referral_lineage_migration_is_current_head() -> None:
     assert "trg_users_referral_lineage_immutable" in source
     assert "referral repair evidence is append-only" in source
     assert "referral repair batch evidence is immutable" in source
+    credit_source = Path(
+        "db/migrations/versions/055_referral_credit_repair_audit.py"
+    ).read_text(encoding="utf-8")
+    assert "trg_referral_credit_repair_rows_append_only" in credit_source
+    assert "enforce_referral_repair_row_insert" in credit_source
+    assert "FROM referral_lineage_repair_batches b\n                WHERE b.batch_key = NEW.batch_key\n                FOR UPDATE" in credit_source
+    assert "lock_referral_credit_ledger_evidence" in credit_source
+    assert "trg_referral_credit_repair_rows_ledger_lock" in credit_source
+    assert "sum(r.unrecovered_credits)" in credit_source
 
     assert ReferralLineageRepairBatch.__table__.c.batch_key.type.length == 64
     assert ReferralLineageRepairRow.__table__.c.user_id.nullable is False
     assert ReferralFinanceRepairRow.__table__.c.reversal_ledger_id.nullable is False
+    assert ReferralCreditRepairRow.__table__.c.reversal_ledger_id.nullable is False
+    assert {
+        constraint.name for constraint in ReferralCreditRepairRow.__table__.constraints
+    } >= {
+        "uq_referral_credit_repair_original_ledger",
+        "uq_referral_credit_repair_reversal_ledger",
+        "ck_referral_credit_repair_positive_amount",
+        "ck_referral_credit_repair_nonnegative_allocation",
+        "ck_referral_credit_repair_allocation_total",
+    }
 
     repair_source = Path("scripts/repair_referral_lineage.py").read_text(encoding="utf-8")
     assert "LOCK TABLE transactions, users, credit_ledger" in repair_source
@@ -156,10 +175,10 @@ def test_finance_plan_fails_closed_for_non_null_recipient_transfer() -> None:
         build_finance_plan(lineage_changes, [])
 
 
-def test_invalid_late_bind_credit_bonus_is_detected_fail_closed() -> None:
+def test_invalid_late_bind_credit_bonus_is_selected_for_audited_reversal() -> None:
     users = [
-        SimpleNamespace(id=1, tg_id=111),
-        SimpleNamespace(id=4, tg_id=444),
+        SimpleNamespace(id=1, tg_id=111, email=None, phone=None),
+        SimpleNamespace(id=4, tg_id=444, email=None, phone=None),
     ]
     invalid_edges = [SimpleNamespace(user_id=1, invalid_referrer_id=4)]
     entries = [
@@ -168,6 +187,7 @@ def test_invalid_late_bind_credit_bonus_is_detected_fail_closed() -> None:
             user_id=4,
             delta=3.0,
             entry_type="referral_first_topup_bonus",
+            source_type="referral_user",
             source_id="1",
         ),
         SimpleNamespace(
@@ -175,6 +195,7 @@ def test_invalid_late_bind_credit_bonus_is_detected_fail_closed() -> None:
             user_id=4,
             delta=3.0,
             entry_type="referral_signup_bonus",
+            source_type="user",
             source_id="111",
         ),
         SimpleNamespace(
@@ -182,13 +203,108 @@ def test_invalid_late_bind_credit_bonus_is_detected_fail_closed() -> None:
             user_id=4,
             delta=3.0,
             entry_type="referral_first_topup_bonus",
+            source_type="referral_user",
             source_id="999",
+        ),
+        # First-top-up never uses the Telegram namespace.
+        # Signup can use the DB id before a contact account binds Telegram.
+        SimpleNamespace(
+            id=10,
+            user_id=4,
+            delta=3.0,
+            entry_type="referral_first_topup_bonus",
+            source_type="referral_user",
+            source_id="111",
+        ),
+        SimpleNamespace(
+            id=11,
+            user_id=4,
+            delta=3.0,
+            entry_type="referral_signup_bonus",
+            source_type="user",
+            source_id="1",
+        ),
+        SimpleNamespace(
+            id=12,
+            user_id=4,
+            delta=3.0,
+            entry_type="referral_signup_bonus",
+            source_type="referral_user",
+            source_id="111",
         ),
     ]
 
     assert [
         entry.id for entry in find_invalid_credit_bonuses(invalid_edges, users, entries)
-    ] == [7, 8]
+    ] == [7, 8, 11]
+
+
+def test_contact_signup_bonus_keeps_database_source_after_telegram_binding() -> None:
+    users = [
+        SimpleNamespace(id=1, tg_id=111, email="child@example.test", phone=None),
+        SimpleNamespace(id=4, tg_id=444, email=None, phone=None),
+    ]
+    invalid_edges = [SimpleNamespace(user_id=1, invalid_referrer_id=4)]
+    entries = [
+        SimpleNamespace(
+            id=20,
+            user_id=4,
+            delta=5.0,
+            entry_type="referral_signup_bonus",
+            source_type="user",
+            source_id="1",
+        )
+    ]
+
+    assert [
+        entry.id for entry in find_invalid_credit_bonuses(invalid_edges, users, entries)
+    ] == [20]
+
+
+def test_signup_bonus_source_collision_fails_closed() -> None:
+    users = [
+        SimpleNamespace(id=1, tg_id=111),
+        SimpleNamespace(id=4, tg_id=444),
+        SimpleNamespace(id=111, tg_id=999),
+    ]
+    invalid_edges = [SimpleNamespace(user_id=1, invalid_referrer_id=4)]
+    entries = [
+        SimpleNamespace(
+            id=21,
+            user_id=4,
+            delta=5.0,
+            entry_type="referral_signup_bonus",
+            source_type="user",
+            source_id="111",
+        )
+    ]
+
+    with pytest.raises(RuntimeError, match="Ambiguous referral signup bonus source"):
+        find_invalid_credit_bonuses(invalid_edges, users, entries)
+
+
+def test_credit_reversal_debits_available_balance_and_records_spent_remainder() -> None:
+    entries = [
+        SimpleNamespace(id=7, user_id=4, delta=5.0),
+        SimpleNamespace(id=8, user_id=4, delta=5.0),
+        SimpleNamespace(id=9, user_id=5, delta=3.0),
+    ]
+
+    allocations = allocate_credit_corrections(entries, {4: 3.0, 5: 10.0})
+
+    assert [
+        (
+            item.original_ledger_id,
+            item.balance_debit_credits,
+            item.unrecovered_credits,
+            item.balance_after_credits,
+        )
+        for item in allocations
+    ] == [
+        (7, 3.0, 2.0, 0.0),
+        (8, 0.0, 5.0, 0.0),
+        (9, 3.0, 0.0, 7.0),
+    ]
 
 
 def _expect_db_error(connection, statement: str) -> None:
@@ -204,23 +320,38 @@ def _exercise_postgres_triggers(connection) -> None:
     connection.execute(
         sa.text(
             "CREATE TABLE users ("
-            "id integer PRIMARY KEY, created_at timestamptz NOT NULL DEFAULT now(), "
+            "id integer PRIMARY KEY, tg_id bigint NOT NULL, "
+            "created_at timestamptz NOT NULL DEFAULT now(), "
             "referrer_id integer, referrer_l2_id integer, referrer_l3_id integer, "
-            "referral_balance double precision NOT NULL DEFAULT 0)"
+            "referral_balance double precision NOT NULL DEFAULT 0, "
+            "credits double precision NOT NULL DEFAULT 0)"
         )
     )
     connection.execute(
         sa.text("CREATE TABLE transactions (id integer PRIMARY KEY, user_id integer NOT NULL)")
     )
     connection.execute(sa.text("CREATE TABLE referral_commission_ledger (id integer PRIMARY KEY)"))
+    connection.execute(
+        sa.text(
+            "CREATE TABLE credit_ledger ("
+            "id integer PRIMARY KEY, user_id integer NOT NULL REFERENCES users(id), "
+            "delta double precision NOT NULL, balance_after double precision NOT NULL, "
+            "entry_type varchar(64) NOT NULL, source_type varchar(64), source_id varchar(128))"
+        )
+    )
     migration = importlib.import_module("db.migrations.versions.054_referral_lineage_immutability")
     with Operations.context(MigrationContext.configure(connection)):
         migration.upgrade()
+    credit_migration = importlib.import_module(
+        "db.migrations.versions.055_referral_credit_repair_audit"
+    )
+    with Operations.context(MigrationContext.configure(connection)):
+        credit_migration.upgrade()
 
     connection.execute(
         sa.text(
-            "INSERT INTO users (id,created_at,referrer_id) VALUES "
-            "(2, now(), NULL), (1, now() - interval '1 day', 2)"
+            "INSERT INTO users (id,tg_id,created_at,referrer_id) VALUES "
+            "(2,222,now(),NULL), (1,111,now() - interval '1 day',2)"
         )
     )
     _expect_db_error(connection, "UPDATE users SET referrer_id=NULL WHERE id=1")
@@ -228,8 +359,8 @@ def _exercise_postgres_triggers(connection) -> None:
     connection.execute(
         sa.text(
             "INSERT INTO referral_lineage_repair_batches "
-            "(batch_key,operator,reason,status) "
-            "VALUES ('trigger-test','pytest','test','applying')"
+            "(batch_key,operator,reason,status,invalid_credit_credits) "
+            "VALUES ('trigger-test','pytest','test','applying',5)"
         )
     )
     connection.execute(
@@ -273,9 +404,173 @@ def _exercise_postgres_triggers(connection) -> None:
     )
     connection.execute(
         sa.text(
-            "UPDATE referral_lineage_repair_batches SET status='applied', "
-            "summary_json='{}', applied_at=now() WHERE batch_key='trigger-test'"
+            "INSERT INTO credit_ledger "
+            "(id,user_id,delta,balance_after,entry_type,source_type,source_id) VALUES "
+            "(30,2,5,8,'referral_signup_bonus','user','1'),"
+            "(31,2,-3,5,'referral_bonus_reversal','referral_lineage_repair',"
+            "'trigger-test:30')"
         )
+    )
+    connection.execute(sa.text("UPDATE users SET credits=5 WHERE id=2"))
+    connection.execute(
+        sa.text(
+            "INSERT INTO referral_credit_repair_rows "
+            "(batch_key,original_ledger_id,user_id,entry_type,amount_credits,"
+            "balance_debit_credits,unrecovered_credits,reversal_ledger_id) "
+            "VALUES ('trigger-test',30,2,'referral_signup_bonus',5,3,2,31)"
+        )
+    )
+    _expect_db_error(connection, "UPDATE credit_ledger SET delta=0 WHERE id=31")
+    _expect_db_error(
+        connection,
+        "UPDATE referral_credit_repair_rows SET amount_credits=4 WHERE id=1",
+    )
+    _expect_db_error(connection, "DELETE FROM referral_credit_repair_rows WHERE id=1")
+    connection.execute(
+        sa.text(
+            "INSERT INTO credit_ledger "
+            "(id,user_id,delta,balance_after,entry_type,source_type,source_id) VALUES "
+            "(32,2,1,5,'referral_signup_bonus','user','999'),"
+            "(33,2,-1,4,'referral_bonus_reversal','referral_lineage_repair',"
+            "'trigger-test:32')"
+        )
+    )
+    _expect_db_error(
+        connection,
+        "INSERT INTO referral_credit_repair_rows "
+        "(batch_key,original_ledger_id,user_id,entry_type,amount_credits,"
+        "balance_debit_credits,unrecovered_credits,reversal_ledger_id) "
+        "VALUES ('trigger-test',32,2,'referral_signup_bonus',1,-1,2,33)",
+    )
+    _expect_db_error(
+        connection,
+        "INSERT INTO referral_credit_repair_rows "
+        "(batch_key,original_ledger_id,user_id,entry_type,amount_credits,"
+        "balance_debit_credits,unrecovered_credits,reversal_ledger_id) "
+        "VALUES ('trigger-test',32,2,'referral_signup_bonus',1,1,0,31)",
+    )
+    connection.execute(sa.text("INSERT INTO users (id,tg_id) VALUES (111,999)"))
+    connection.execute(
+        sa.text(
+            "INSERT INTO credit_ledger "
+            "(id,user_id,delta,balance_after,entry_type,source_type,source_id) VALUES "
+            "(37,2,1,6,'referral_signup_bonus','user','111')"
+        )
+    )
+    _expect_db_error(
+        connection,
+        "UPDATE referral_lineage_repair_batches SET status='applied', "
+        "balance_debit_credits=3, unrecovered_credits=2, "
+        "summary_json=jsonb_build_object('invalid_credit_credits',5,"
+        "'balance_debit_credits',3,'unrecovered_credits',2), "
+        "applied_at=now() WHERE batch_key='trigger-test'",
+    )
+    connection.execute(sa.text("DELETE FROM credit_ledger WHERE id=37"))
+    connection.execute(
+        sa.text(
+            "INSERT INTO users (id,tg_id,credits) VALUES (3,333,-1), (4,444,0)"
+        )
+    )
+    connection.execute(
+        sa.text(
+            "INSERT INTO referral_lineage_repair_batches "
+            "(batch_key,operator,reason,status,invalid_credit_credits) "
+            "VALUES ('negative-credit-test','pytest','negative credit test','applying',5)"
+        )
+    )
+    connection.execute(
+        sa.text("SELECT set_config('apix.referral_repair_batch','negative-credit-test',true)")
+    )
+    connection.execute(
+        sa.text(
+            "INSERT INTO referral_lineage_repair_rows "
+            "(batch_key,user_id,old_referrer_id,new_referrer_id,reason) "
+            "VALUES ('negative-credit-test',4,3,NULL,'impossible_direct_referrer')"
+        )
+    )
+    connection.execute(
+        sa.text(
+            "INSERT INTO credit_ledger "
+            "(id,user_id,delta,balance_after,entry_type,source_type,source_id) VALUES "
+            "(50,3,5,2,'referral_signup_bonus','user','4'),"
+            "(51,3,-3,-1,'referral_bonus_reversal','referral_lineage_repair',"
+            "'negative-credit-test:50')"
+        )
+    )
+    connection.execute(
+        sa.text(
+            "INSERT INTO referral_credit_repair_rows "
+            "(batch_key,original_ledger_id,user_id,entry_type,amount_credits,"
+            "balance_debit_credits,unrecovered_credits,reversal_ledger_id) "
+            "VALUES ('negative-credit-test',50,3,'referral_signup_bonus',5,3,2,51)"
+        )
+    )
+    _expect_db_error(
+        connection,
+        "UPDATE referral_lineage_repair_batches SET status='applied', "
+        "balance_debit_credits=3, unrecovered_credits=2, "
+        "summary_json=jsonb_build_object('invalid_credit_credits',5,"
+        "'balance_debit_credits',3,'unrecovered_credits',2), "
+        "applied_at=now() WHERE batch_key='negative-credit-test'",
+    )
+    connection.execute(sa.text("SELECT set_config('apix.referral_repair_batch','trigger-test',true)"))
+    _expect_db_error(
+        connection,
+        "UPDATE referral_lineage_repair_batches SET status='applied', "
+        "balance_debit_credits=3, unrecovered_credits=2, "
+        "summary_json='{}', applied_at=now() WHERE batch_key='trigger-test'",
+    )
+    connection.execute(
+        sa.text(
+            "UPDATE referral_lineage_repair_batches SET status='applied', "
+            "balance_debit_credits=3, unrecovered_credits=2, "
+            "summary_json=jsonb_build_object('invalid_credit_credits',5,"
+            "'balance_debit_credits',3,'unrecovered_credits',2), "
+            "applied_at=now() "
+            "WHERE batch_key='trigger-test'"
+        )
+    )
+    connection.execute(
+        sa.text(
+            "INSERT INTO credit_ledger "
+            "(id,user_id,delta,balance_after,entry_type,source_type,source_id) VALUES "
+            "(34,2,1,4,'referral_signup_bonus','user','1'),"
+            "(35,2,-1,3,'referral_bonus_reversal','referral_lineage_repair',"
+            "'trigger-test:34')"
+        )
+    )
+    _expect_db_error(
+        connection,
+        "INSERT INTO referral_credit_repair_rows "
+        "(batch_key,original_ledger_id,user_id,entry_type,amount_credits,"
+        "balance_debit_credits,unrecovered_credits,reversal_ledger_id) "
+        "VALUES ('trigger-test',34,2,'referral_signup_bonus',1,1,0,35)",
+    )
+    _expect_db_error(connection, "UPDATE credit_ledger SET delta=0 WHERE id=31")
+    connection.execute(
+        sa.text(
+            "INSERT INTO referral_lineage_repair_batches "
+            "(batch_key,operator,reason,status,invalid_credit_credits) "
+            "VALUES ('trigger-test-2','pytest','duplicate test','applying',5)"
+        )
+    )
+    connection.execute(
+        sa.text("SELECT set_config('apix.referral_repair_batch','trigger-test-2',true)")
+    )
+    connection.execute(
+        sa.text(
+            "INSERT INTO credit_ledger "
+            "(id,user_id,delta,balance_after,entry_type,source_type,source_id) VALUES "
+            "(36,2,-3,5,'referral_bonus_reversal','referral_lineage_repair',"
+            "'trigger-test-2:30')"
+        )
+    )
+    _expect_db_error(
+        connection,
+        "INSERT INTO referral_credit_repair_rows "
+        "(batch_key,original_ledger_id,user_id,entry_type,amount_credits,"
+        "balance_debit_credits,unrecovered_credits,reversal_ledger_id) "
+        "VALUES ('trigger-test-2',30,2,'referral_signup_bonus',5,3,2,36)",
     )
     _expect_db_error(
         connection,

@@ -16,6 +16,8 @@ from db.models import (
     CreditLedgerEntry,
     Generation,
     GenerationStatus,
+    ReferralCreditRepairRow,
+    ReferralLineageRepairBatch,
     Transaction,
     TransactionStatus,
     User,
@@ -36,6 +38,27 @@ _REPORT_USER_SKIP_TOKENS = {
     "report",
     "summary",
 }
+
+
+def _valid_signup_bonus_credits_stmt(user_id: int):
+    repaired_bonus = (
+        select(ReferralCreditRepairRow.id)
+        .join(
+            ReferralLineageRepairBatch,
+            ReferralLineageRepairBatch.batch_key == ReferralCreditRepairRow.batch_key,
+        )
+        .where(
+            ReferralCreditRepairRow.original_ledger_id == CreditLedgerEntry.id,
+            ReferralLineageRepairBatch.status == "applied",
+        )
+        .correlate(CreditLedgerEntry)
+        .exists()
+    )
+    return select(func.coalesce(func.sum(CreditLedgerEntry.delta), 0)).where(
+        CreditLedgerEntry.user_id == user_id,
+        CreditLedgerEntry.entry_type == "referral_signup_bonus",
+        ~repaired_bonus,
+    )
 
 
 @dataclass(frozen=True)
@@ -301,10 +324,7 @@ async def _build_user_brief_report(session: AsyncSession, user: User) -> str:
     signup_bonus_credits = float(
         (
             await session.execute(
-                select(func.coalesce(func.sum(CreditLedgerEntry.delta), 0)).where(
-                    CreditLedgerEntry.user_id == user.id,
-                    CreditLedgerEntry.entry_type == "referral_signup_bonus",
-                )
+                _valid_signup_bonus_credits_stmt(user.id)
             )
         ).scalar_one()
         or 0

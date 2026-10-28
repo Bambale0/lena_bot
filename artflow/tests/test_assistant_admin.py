@@ -14,6 +14,16 @@ def _allow_admin_access(monkeypatch) -> None:
     monkeypatch.setattr(assistant_moderator, "is_admin_tg_id", lambda _tg_id: True)
 
 
+def test_signup_bonus_report_excludes_applied_referral_repairs() -> None:
+    statement = assistant_moderator._valid_signup_bonus_credits_stmt(123)
+    sql = str(statement.compile(compile_kwargs={"literal_binds": True}))
+
+    assert "referral_credit_repair_rows" in sql
+    assert "referral_lineage_repair_batches" in sql
+    assert "NOT (EXISTS" in sql
+    assert "applied" in sql
+
+
 @pytest.mark.asyncio
 async def test_try_handle_admin_request_stats() -> None:
     with patch.object(
