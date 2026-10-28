@@ -1,5 +1,6 @@
 import { ArrowRight, Bot, Film, ImageIcon, Library, LifeBuoy, Music2, Orbit, Shapes, Sparkles, WandSparkles } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { CreationArt } from "@/components/creation-art";
 import { openTrendRunner } from "@/features/trend-runner";
 import { hasDraftInput } from "@/lib/draft-storage";
 import { readStudioBalance } from "@/lib/studio-balance";
@@ -170,12 +171,22 @@ export function LilacHome({ data, drafts, onNavigate, onResume, onTask }: HomePr
 }
 
 export function LilacCreate({ onNavigate }: { onNavigate: (tab: AppTab) => void }) {
-  const actions = [...tasks, { tab: "motion", title: "Перенести движение", text: "Фото персонажа и видео движения", Icon: Orbit }, { tab: "services", title: "Инструменты", text: "Промпт по фото и видео, Pinterest", Icon: WandSparkles }];
-  return <div className="lilac-page"><header className="lilac-title"><p>Создание</p><h1>Какой результат нужен?</h1><span>Готовый сценарий или полный контроль параметров.</span></header>
-    <button className="lilac-row" onClick={() => onNavigate("trends")}><Sparkles /><span><strong>Повторить готовый пример</strong><small>Выберите образец и добавьте свои материалы</small></span><ArrowRight /></button>
-    <p className="lilac-note">Или создайте работу по своей идее:</p>
-    <div className="lilac-task-grid">{actions.map(({ tab, title, text, Icon }) => <button key={tab} className="lilac-create-card" onClick={() => onNavigate(tab as AppTab)}><Icon size={28} /><strong>{title}</strong><span>{text}</span><ArrowRight size={18} /></button>)}</div>
-    <button className="lilac-row" onClick={() => onNavigate("models")}><Shapes /><span><strong>Выбрать нейросеть</strong><small>Возможности, параметры и текущая стоимость</small></span><ArrowRight /></button>
+  const featured = tasks.filter(task => task.tab === "photo" || task.tab === "video");
+  const tools = [...tasks.filter(task => task.tab !== "photo" && task.tab !== "video"), { tab: "motion", title: "Перенести движение", text: "Фото персонажа и видео движения", Icon: Orbit }, { tab: "services", title: "Инструменты", text: "Промпт по фото и видео, Pinterest", Icon: WandSparkles }];
+  return <div className="lilac-page creation-menu">
+    <header className="creation-menu-header"><h1>Какой результат нужен?</h1><p>Выберите задачу. Идею и материалы добавите в редакторе.</p></header>
+    <div className="creation-featured">{featured.map(({ tab, title, text }) => <button type="button" key={tab} className="creation-choice apix-focus-ring" onClick={() => onNavigate(tab)}>
+      <span className="creation-choice-visual"><CreationArt kind={tab} /></span>
+      <span className="creation-choice-copy"><strong>{title}</strong><span>{text}</span></span>
+    </button>)}</div>
+    <div className="creation-tools">{tools.map(({ tab, title, text, Icon }) => <button type="button" key={tab} className="creation-tool apix-focus-ring" onClick={() => onNavigate(tab as AppTab)}>
+      <span className="creation-tool-icon"><Icon aria-hidden="true" /></span>
+      <span className="creation-tool-copy"><strong>{title}</strong><span>{text}</span></span>
+    </button>)}</div>
+    <div className="creation-shortcuts">
+      <button type="button" className="creation-shortcut apix-focus-ring" onClick={() => onNavigate("trends")}><Sparkles aria-hidden="true" /><span><strong>Повторить готовый пример</strong><small>Выберите образец и добавьте свои материалы</small></span></button>
+      <button type="button" className="creation-shortcut apix-focus-ring" onClick={() => onNavigate("models")}><Shapes aria-hidden="true" /><span><strong>Выбрать нейросеть</strong><small>Возможности, параметры и текущая стоимость</small></span></button>
+    </div>
   </div>;
 }
 

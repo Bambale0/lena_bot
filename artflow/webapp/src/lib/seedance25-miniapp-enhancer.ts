@@ -120,13 +120,13 @@ function renderPanel(): HTMLElement {
     </div>
     <div class="seedance25-materials grid min-w-0 grid-cols-3 gap-2">
       <button type="button" data-seedance25-material="photo" class="seedance25-material">
-        <span aria-hidden="true">◇</span><strong>Фото</strong><small>до ${MAX_IMAGES}</small>
+        <span aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8" cy="9" r="1.5"/><path d="m3 17 6-5 4 4 3-3 5 5"/></svg></span><strong>Фото</strong><small>до ${MAX_IMAGES}</small>
       </button>
       <button type="button" data-seedance25-material="video" class="seedance25-material">
-        <span aria-hidden="true">▷</span><strong>Видео</strong><small data-seedance25-count="video">до ${MAX_VIDEOS}</small>
+        <span aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4M10 9l4 3-4 3Z"/></svg></span><strong>Видео</strong><small data-seedance25-count="video">до ${MAX_VIDEOS}</small>
       </button>
       <button type="button" data-seedance25-material="audio" class="seedance25-material">
-        <span aria-hidden="true">≋</span><strong>Аудио</strong><small data-seedance25-count="audio">до ${MAX_AUDIOS}</small>
+        <span aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 10v4M8 6v12M12 3v18M16 7v10M20 10v4"/></svg></span><strong>Аудио</strong><small data-seedance25-count="audio">до ${MAX_AUDIOS}</small>
       </button>
     </div>
     <input data-seedance25="videoFiles" type="file" accept="video/mp4,video/quicktime,.mp4,.mov" multiple class="sr-only" />

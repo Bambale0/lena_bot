@@ -73,7 +73,7 @@ import type {
 import { firstMedia, isPendingTask, safeExternalUrl } from "@/lib/utils";
 import { saveDownload } from "@/lib/download";
 
-window.__APIX_MINIAPP_BUILD_ID__ = "20261028-guided-video-composer-r8";
+window.__APIX_MINIAPP_BUILD_ID__ = "20261029-visual-creation-studio-r1";
 
 type FeedSource = "recent" | "top_day" | "top";
 type VideoQuote = Awaited<ReturnType<MiniAppApi["quoteVideo"]>>;
@@ -339,6 +339,13 @@ function App() {
   useEffect(() => {
     if (ux2 && data?.user.miniapp_ux2_available !== true) { setUx2(false); setLilac(false); setActiveTab("feed"); }
   }, [data?.user.miniapp_ux2_available, ux2]);
+
+  useEffect(() => {
+    if (mode !== "live") return;
+    // Menu, draft and model-picker navigation can bypass the shell's click handler.
+    // Notify lazy provider panels after the destination and its model are mounted.
+    window.dispatchEvent(new CustomEvent("apix:tab-change", { detail: { tab: activeTab } }));
+  }, [mode, activeTab, videoDraft.model, motionDraft.model]);
 
   const changePreview = (enabled: boolean) => {
     if (!data || data.user.miniapp_ux2_available !== true) return;

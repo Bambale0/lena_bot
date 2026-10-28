@@ -29,7 +29,7 @@ function parameterGroup(root: HTMLElement, label: string): HTMLElement | null {
 }
 
 function genericReferenceCard(root: HTMLElement): HTMLElement | null {
-  return Array.from(root.querySelectorAll<HTMLElement>(".apix-uploader-card")).find(
+  return root.querySelector<HTMLElement>("[data-generation-reference-uploader]") || Array.from(root.querySelectorAll<HTMLElement>(".apix-uploader-card")).find(
     (card) => card.textContent?.includes("Референсы") && !card.dataset.h3ReferenceFiles,
   ) || null;
 }
@@ -39,7 +39,8 @@ function cleanup(root: HTMLElement): void {
   if (modeGroup) modeGroup.style.display = "";
   const resolutionGroup = parameterGroup(root, "Качество") || parameterGroup(root, "Разрешение");
   const label = resolutionGroup?.querySelector("p");
-  if (label) label.textContent = "Разрешение";
+  if (label && label.textContent !== "Разрешение") label.textContent = "Разрешение";
+  resolutionGroup?.setAttribute("aria-label", "Разрешение");
   const referenceCard = genericReferenceCard(root);
   if (referenceCard) referenceCard.style.display = "";
   const panel = root.querySelector<HTMLElement>("[data-h3-reference-files]");
@@ -52,10 +53,12 @@ function configureAutomaticSurface(root: HTMLElement): void {
 
   const resolutionGroup = parameterGroup(root, "Разрешение") || parameterGroup(root, "Качество");
   const label = resolutionGroup?.querySelector("p");
-  if (label) label.textContent = "Качество";
+  if (label && label.textContent !== "Качество") label.textContent = "Качество";
+  resolutionGroup?.setAttribute("aria-label", "Качество");
 
   const referenceCard = genericReferenceCard(root);
-  if (referenceCard) referenceCard.style.display = "none";
+  // Saved, excluded and unfinished photos still need their inclusion/removal controls.
+  if (referenceCard) referenceCard.style.display = referenceCard.dataset.hasReferenceMaterials === "false" ? "none" : "";
 }
 
 function mediaDuration(file: File, kind: "video" | "audio"): Promise<number> {
@@ -161,7 +164,8 @@ function uploadPanel(root: HTMLElement): void {
   `;
 
   const referenceCard = genericReferenceCard(root);
-  (referenceCard?.parentElement || root).appendChild(panel);
+  const materialsHost = root.querySelector<HTMLElement>("[data-generation-materials-host]");
+  (materialsHost || referenceCard?.parentElement || root).appendChild(panel);
 
   panel.querySelector<HTMLInputElement>("[data-h3-image-files]")?.addEventListener("change", (event) => {
     const input = event.currentTarget as HTMLInputElement;

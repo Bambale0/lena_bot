@@ -166,14 +166,17 @@ const composerMaterialReview = (() => {
       </div>
       <div class="composer-row">
         <label data-s25-material="photo">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8" cy="9" r="1.5"/><path d="m3 17 6-5 4 4 3-3 5 5"/></svg>
           <span>Фото · до 30</span>
           <input data-s25-image-files type="file" accept="image/*,.jpg,.jpeg,.png,.webp,.gif,.bmp" multiple />
         </label>
         <label data-s25-material="video">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4M10 9l4 3-4 3Z"/></svg>
           <span>Видео · до 10</span>
           <input data-s25-video-files type="file" accept="video/mp4,video/quicktime,video/x-matroska,.mp4,.mov,.mkv" multiple />
         </label>
         <label data-s25-material="audio">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 10v4M8 6v12M12 3v18M16 7v10M20 10v4"/></svg>
           <span>Аудио · до 10</span>
           <input data-s25-audio-files type="file" accept="audio/*,.mp3,.wav,.aac,.m4a,.ogg" multiple />
         </label>
