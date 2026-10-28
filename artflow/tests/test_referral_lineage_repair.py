@@ -451,8 +451,9 @@ def _exercise_postgres_triggers(connection) -> None:
         connection,
         "UPDATE referral_lineage_repair_batches SET status='applied', "
         "balance_debit_credits=3, unrecovered_credits=2, "
-        "summary_json='{\"invalid_credit_credits\":5,\"balance_debit_credits\":3,"
-        "\"unrecovered_credits\":2}', applied_at=now() WHERE batch_key='trigger-test'",
+        "summary_json=jsonb_build_object('invalid_credit_credits',5,"
+        "'balance_debit_credits',3,'unrecovered_credits',2), "
+        "applied_at=now() WHERE batch_key='trigger-test'",
     )
     connection.execute(sa.text("UPDATE credit_ledger SET source_id='1' WHERE id=30"))
     connection.execute(
@@ -466,8 +467,9 @@ def _exercise_postgres_triggers(connection) -> None:
         connection,
         "UPDATE referral_lineage_repair_batches SET status='applied', "
         "balance_debit_credits=3, unrecovered_credits=2, "
-        "summary_json='{\"invalid_credit_credits\":5,\"balance_debit_credits\":3,"
-        "\"unrecovered_credits\":2}', applied_at=now() WHERE batch_key='trigger-test'",
+        "summary_json=jsonb_build_object('invalid_credit_credits',5,"
+        "'balance_debit_credits',3,'unrecovered_credits',2), "
+        "applied_at=now() WHERE batch_key='trigger-test'",
     )
     connection.execute(sa.text("DELETE FROM credit_ledger WHERE id=37"))
     connection.execute(sa.text("UPDATE credit_ledger SET balance_after=1000 WHERE id=31"))
@@ -475,8 +477,9 @@ def _exercise_postgres_triggers(connection) -> None:
         connection,
         "UPDATE referral_lineage_repair_batches SET status='applied', "
         "balance_debit_credits=3, unrecovered_credits=2, "
-        "summary_json='{\"invalid_credit_credits\":5,\"balance_debit_credits\":3,"
-        "\"unrecovered_credits\":2}', applied_at=now() WHERE batch_key='trigger-test'",
+        "summary_json=jsonb_build_object('invalid_credit_credits',5,"
+        "'balance_debit_credits',3,'unrecovered_credits',2), "
+        "applied_at=now() WHERE batch_key='trigger-test'",
     )
     connection.execute(sa.text("UPDATE credit_ledger SET balance_after=5 WHERE id=31"))
     _expect_db_error(
@@ -489,8 +492,9 @@ def _exercise_postgres_triggers(connection) -> None:
         sa.text(
             "UPDATE referral_lineage_repair_batches SET status='applied', "
             "balance_debit_credits=3, unrecovered_credits=2, "
-            "summary_json='{\"invalid_credit_credits\":5,\"balance_debit_credits\":3,"
-            "\"unrecovered_credits\":2}', applied_at=now() "
+            "summary_json=jsonb_build_object('invalid_credit_credits',5,"
+            "'balance_debit_credits',3,'unrecovered_credits',2), "
+            "applied_at=now() "
             "WHERE batch_key='trigger-test'"
         )
     )
