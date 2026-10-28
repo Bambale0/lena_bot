@@ -127,6 +127,21 @@ test("luxury home keeps the APIX palette while matching the reference compositio
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
+test("bottom navigation uses four aligned outline glyphs and the branded APIX create medallion", async ({ page }) => {
+  await prepare(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/?ux=3");
+  const nav = page.getByRole("navigation", { name: "Основная навигация" });
+  await expect(nav.locator(".lilac-nav-glyph")).toHaveCount(4);
+  await expect(nav.locator(".lilac-nav-glyph svg")).toHaveCount(4);
+  const medallion = nav.locator(".lilac-create-action");
+  await expect(medallion.locator(".lilac-create-mark")).toHaveCount(1);
+  const box = await medallion.boundingBox();
+  expect(Math.abs(box!.width - box!.height)).toBeLessThanOrEqual(1);
+  expect(await medallion.evaluate(node => getComputedStyle(node).borderRadius)).toBe("50%");
+  expect(await nav.getByRole("tab", { name: "Создать", exact: true }).getAttribute("aria-label")).toBe("Создать");
+});
+
 test("every luxury home launcher opens its real APIX workflow", async ({ page }) => {
   await prepare(page);
   await page.goto("/?ux=3");
