@@ -222,8 +222,15 @@ def normalize_seedance_request(model: str, input_data: dict[str, Any]) -> dict[s
         payload.pop(field, None)
 
     task_type = str(payload.get("omni_reference_task_type") or "").strip().lower()
-    if "draft" in payload or "draft_task" in payload:
+    if "draft" in payload and not isinstance(payload["draft"], bool):
+        raise SeedanceContractError("draft должен быть boolean.")
+    if payload.get("draft") is True:
         raise SeedanceCapabilityUnavailable(_DRAFT_UNAVAILABLE)
+    draft_task = payload.get("draft_task")
+    if draft_task not in (None, "", {}):
+        raise SeedanceCapabilityUnavailable(_DRAFT_UNAVAILABLE)
+    if "draft_task" in payload:
+        payload.pop("draft_task")
     if task_type == "extend":
         raise SeedanceCapabilityUnavailable(_EXTEND_UNAVAILABLE)
 

@@ -173,6 +173,25 @@ def test_unpriced_seedance25_operations_have_explicit_capability_gate(
         normalize_seedance_request("seedance-2.5", payload)
 
 
+def test_disabled_draft_flag_is_an_ordinary_generation() -> None:
+    assert normalize_seedance_request(
+        "seedance-2.5",
+        {
+            "prompt": "ordinary render",
+            "duration": 5,
+            "resolution": "720p",
+            "aspect_ratio": "16:9",
+            "draft": False,
+        },
+    ) == {
+        "prompt": "ordinary render",
+        "duration": 5,
+        "resolution": "720p",
+        "aspect_ratio": "16:9",
+        "draft": False,
+    }
+
+
 @pytest.mark.parametrize("mode", ["extend", "draft", "draft_task"])
 def test_unpriced_seedance25_builder_modes_have_explicit_capability_gate(mode: str) -> None:
     with pytest.raises(seedance_contract.SeedanceCapabilityUnavailable):

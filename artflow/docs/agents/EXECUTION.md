@@ -2434,3 +2434,13 @@ Steps: [x] root-cause and production preflight; [x] RED/green operator control;
   inactive medallion's complete `box-shadow` stack. The obsolete declaration
   was removed and the browser contract now requires the inactive Create control
   to retain its inset black/lilac rings as well as its outer glow.
+
+## 2026-10-28 — Seedance capability-gate review closure
+
+- PR #316 review found that the presence-only draft gate rejected an explicit
+  provider-compatible `draft: false` default. The gate now blocks only enabled
+  draft or populated `draft_task`; invalid non-boolean draft values still fail
+  locally, and empty draft-task placeholders are removed before submission.
+- Focused capability and no-second-paid-POST regressions pass 85 tests; Ruff and
+  diff checks pass. Exact-head protected CI, conversation resolution, auto-merge
+  and production revision/health proof remain required.
