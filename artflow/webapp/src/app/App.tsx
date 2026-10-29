@@ -341,6 +341,10 @@ function App() {
   }, [data?.user.miniapp_ux2_available, ux2]);
 
   useEffect(() => {
+    if (activeTab === "owner" && data?.user.is_admin !== true) setActiveTab("profile");
+  }, [activeTab, data?.user.is_admin]);
+
+  useEffect(() => {
     if (mode !== "live") return;
     // Menu, draft and model-picker navigation can bypass the shell's click handler.
     // Notify lazy provider panels after the destination and its model are mounted.
@@ -567,7 +571,10 @@ function App() {
       let admitted = false;
       if (lilacRequested(bootstrap.user, window.location.search)) {
         try { const admission = await client.request<{ allowed: boolean; ui_version: number }>("/studio/preview", { cache: "no-store" }); admitted = admission.allowed === true && admission.ui_version === 3; }
-        catch { toast.error("Новая студия пока недоступна для этого аккаунта"); }
+        catch (error) {
+          if (error instanceof ApiError && [401, 403].includes(error.status)) throw error;
+          toast.error("Новая студия пока недоступна для этого аккаунта");
+        }
       }
       const preview = admitted || previewEnabled(bootstrap.user, window.location.search, savedPreview);
       setLilac(admitted);
@@ -579,7 +586,7 @@ function App() {
     } catch (error) {
       const message = error instanceof Error ? error.message : "Не удалось загрузить Mini App";
       setErrorMessage(message);
-      setMode(error instanceof ApiError && error.status === 401 ? "locked" : "error");
+      setMode(error instanceof ApiError && [401, 403].includes(error.status) ? "locked" : "error");
     } finally {
       setRetrying(false);
     }
@@ -600,7 +607,14 @@ function App() {
       setVideoDraft(current => current.promptId === null && !hasDraftInput(current) && stored.video ? stored.video : current);
       setMotionDraft(current => current.promptId === null && !hasDraftInput(current) && stored.motion ? stored.motion : current);
       setUx2(true); setLilac(true); setActiveTab("home");
-    } catch (error) { toast.error(error instanceof Error ? error.message : "Не удалось открыть студию"); }
+    } catch (error) {
+      if (latestActor.current !== owner) return;
+      if (error instanceof ApiError && [401, 403].includes(error.status)) {
+        revokePaymentAccess(owner);
+        return;
+      }
+      toast.error(error instanceof Error ? error.message : "Не удалось открыть студию");
+    }
     finally { setPreviewBusy(false); }
   };
 
@@ -1356,7 +1370,7 @@ function App() {
       }} />;
       if (activeTab === "help") return <LilacHelp api={api} onNavigate={setActiveTab} />;
       if (activeTab === "billing") return <LilacBilling api={api} user={data.user} onTopup={() => setBalanceOpen(true)} />;
-      if (activeTab === "owner" && data.user.miniapp_ux2_available === true) return <LilacOwner key={data.user.id} api={api} ownerId={data.user.id} systemPanel={<LilacAdminSystemPanel api={api} ownerId={data.user.id} />} />;
+      if (activeTab === "owner" && data.user.is_admin === true) return <LilacOwner key={data.user.id} api={api} ownerId={data.user.id} systemPanel={<LilacAdminSystemPanel api={api} ownerId={data.user.id} />} />;
       if (activeTab === "account") return <LilacAccountEditor key={data.user.id} api={api} ownerId={data.user.id} onSaved={() => void refreshCore()} />;
     }
     if (ux2 && activeTab === "create") {
@@ -1411,7 +1425,7 @@ function App() {
           {lilac && <Button variant="outline" onClick={() => setActiveTab("help")}><CircleHelp aria-hidden="true" />Помощь</Button>}
           {lilac && <Button variant="outline" onClick={() => setActiveTab("account")}><UserRoundCog aria-hidden="true" />Редактировать профиль</Button>}
           <Button variant="outline" onClick={() => setActiveTab("settings")}><Settings aria-hidden="true" />{data.user.language === "en" ? "Settings" : "Настройки"}</Button>
-          {lilac && data.user.miniapp_ux2_available === true && <Button variant="outline" onClick={() => setActiveTab("owner")}><ShieldCheck aria-hidden="true" />Управление APIX</Button>}
+          {lilac && data.user.is_admin === true && <Button variant="outline" onClick={() => setActiveTab("owner")}><ShieldCheck aria-hidden="true" />Управление APIX</Button>}
         </> : undefined}
         user={data.user}
         tasks={data.recentTasks}

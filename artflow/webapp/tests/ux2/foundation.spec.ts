@@ -20,8 +20,9 @@ async function prepare(page: Page, allowed = true, light = false, extra: { owner
     if (path.endsWith("/auth/config")) return route.fulfill({ json: { bot_username: "test_bot" } });
     if (path === "/api/v1/me") return route.fulfill({ json: {
       id: extra.ownerId || 7, tg_id: 123, full_name: "Тестовый пользователь", credits: 120, language: "ru",
-      miniapp_ux2_available: allowed,
+      miniapp_ux2_available: allowed, is_admin: false,
     }});
+    if (path === "/api/v1/studio/preview") return route.fulfill({ json: { allowed: true, ui_version: 3 } });
     if (path === "/api/v1/models/image") return route.fulfill({ json: [{ key: "fixture-image", display_name: "Тестовая модель", modes: ["text", "image"], credits: 2, max_refs: 2, aspect_ratios: ["1:1", "9:16"], counts: [1], quality_options: [{ value: "basic", label: "Обычное" }] }] });
     if (path === "/api/v1/models/video") return route.fulfill({ json: [
       { key: "fixture-video", display_name: "Тестовое видео", modes: ["text", "image"], credits: 4, max_refs: 1, aspect_ratios: ["16:9", "9:16"], durations: [5], resolutions: ["720p"] },
@@ -42,7 +43,7 @@ async function prepare(page: Page, allowed = true, light = false, extra: { owner
 const labels = ["Лента", "Тренды", "Создать", "Работы", "Профиль"];
 
 for (const width of [320, 360, 390, 430, 768]) {
-  test(`admin preview has five visible destinations at ${width}px`, async ({ page }) => {
+  test(`explicit UX2 interface has five visible destinations at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 320 ? 568 : 844 });
     await prepare(page);
     await page.goto("/?ux=2");
@@ -59,15 +60,22 @@ for (const width of [320, 360, 390, 430, 768]) {
   });
 }
 
-test("query cannot enable preview for an ordinary user", async ({ page }) => {
+test("query cannot enable preview without the server capability", async ({ page }) => {
   await prepare(page, false);
   await page.goto("/?ux=2");
   await expect(page.getByRole("tablist").getByRole("tab")).toHaveCount(8);
 });
 
-test("existing UI remains default", async ({ page }) => {
+test("public Studio is the default without a special URL", async ({ page }) => {
   await prepare(page);
   await page.goto("/");
+  await expect(page.locator('[data-ui-version="3"]')).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Что создадим сегодня?", exact: true })).toBeVisible();
+});
+
+test("explicit ux=1 preserves the legacy interface", async ({ page }) => {
+  await prepare(page);
+  await page.goto("/?ux=1");
   await expect(page.getByRole("tablist").getByRole("tab")).toHaveCount(8);
 });
 
@@ -163,9 +171,9 @@ test("signing into another account cannot restore the previous draft", async ({ 
   await expect(page.getByRole("textbox", { name: /^Промпт/ })).toHaveValue("");
 });
 
-test("preview can be enabled from settings without a special URL", async ({ page }) => {
+test("explicit legacy settings can enable UX2 and preserve it on reload", async ({ page }) => {
   await prepare(page);
-  await page.goto("/");
+  await page.goto("/?ux=1");
   await page.getByRole("tab", { name: "Настройки", exact: true }).click();
   await page.getByRole("button", { name: "Открыть предпросмотр" }).click();
   await expect(page.getByRole("tablist").getByRole("tab")).toHaveCount(5);
