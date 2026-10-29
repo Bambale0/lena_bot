@@ -113,9 +113,8 @@ function cardPreview(item: FeedItem): { url: string; poster: string; video: bool
   const original = uniqueMediaUrls(item)[0] || "";
   // A legacy preview can point at a different output; match the viewer's first result.
   if (!itemLooksVideo(item)) return { url: original, poster: "", video: false };
-  const poster = previews.find((url) => !mediaLooksVideo(url)) || "";
-  const video = original;
-  return { url: video || poster, poster, video: Boolean(video && (video !== poster || mediaLooksVideo(video))) };
+  const poster = previews.find((url) => url !== original && !mediaLooksVideo(url)) || "";
+  return { url: original, poster, video: true };
 }
 
 function trendCategoryKey(trend: TrendItem): string {
@@ -627,7 +626,9 @@ function TrendCategorySurface({
                 <p className="feed-trend-category">{trend.category_emoji ? <span aria-hidden="true">{trend.category_emoji}</span> : null}{trend.category_title || (isVideo ? "Видео" : "Фото")}</p>
                 <h2>{trend.title}</h2>
                 {trend.description ? <details className="feed-trend-description"><summary>Описание</summary><p>{trend.description}</p></details> : null}
-                <div className="feed-card-stats"><RepeatCount count={trend.uses_count} className="feed-card-repeat-count" /></div>
+                <div className="feed-card-stats">
+                  {typeof trend.uses_count === "number" && Number.isInteger(trend.uses_count) && trend.uses_count >= 0 ? <span className="feed-card-stat feed-card-repeat-count whitespace-nowrap"><Repeat2 aria-hidden="true" /><span>Использований: {trend.uses_count}</span></span> : null}
+                </div>
                 <button type="button" className="apix-focus-ring feed-card-repeat" onClick={() => onRepeat(trend)}><Repeat2 aria-hidden="true" /><span>Повторить тренд</span></button>
               </div>
             </Card>
