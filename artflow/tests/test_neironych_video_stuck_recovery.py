@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import ANY, AsyncMock
+from unittest.mock import ANY, AsyncMock, Mock
 
 import pytest
 
@@ -510,14 +510,17 @@ async def test_history_video_reconciliation_releases_db_before_provider_download
 @pytest.mark.asyncio
 async def test_user_history_video_check_uses_persisted_state_without_provider_io(monkeypatch):
     gen = _video(age_minutes=2)
+    gen.is_public_feed = False
     reconcile = AsyncMock()
+    serialize = Mock(side_effect=lambda value, *, remixes=None: value)
     monkeypatch.setattr(miniapp_routes.repo, "get_generation_by_id", AsyncMock(return_value=gen))
     monkeypatch.setattr(miniapp_routes, "_reconcile_generation_status", reconcile)
-    monkeypatch.setattr(miniapp_routes, "_gen_out", lambda value: value)
+    monkeypatch.setattr(miniapp_routes, "_gen_out", serialize)
     result = await miniapp_routes.get_generation(
         gen.id, object(), SimpleNamespace(id=gen.user_id),
     )
     assert result is gen
+    serialize.assert_called_once_with(gen, remixes=None)
     reconcile.assert_not_awaited()
 
 
@@ -542,13 +545,16 @@ async def test_history_reconciles_other_models_but_skips_seedance_network(monkey
 @pytest.mark.asyncio
 async def test_website_neironych_status_is_read_from_db_without_polling(monkeypatch):
     gen = _video(age_minutes=40)
+    gen.is_public_feed = False
     gen.task_id = "web:neironych:provider-uuid"
     monkeypatch.setattr(miniapp_routes.repo, "get_generation_by_id", AsyncMock(return_value=gen))
     reconcile = AsyncMock()
+    serialize = Mock(side_effect=lambda value, *, remixes=None: value)
     monkeypatch.setattr(miniapp_routes, "_reconcile_generation_status", reconcile)
-    monkeypatch.setattr(miniapp_routes, "_gen_out", lambda value: value)
+    monkeypatch.setattr(miniapp_routes, "_gen_out", serialize)
     result = await miniapp_routes.get_generation(gen.id, object(), SimpleNamespace(id=gen.user_id))
     assert result is gen
+    serialize.assert_called_once_with(gen, remixes=None)
     reconcile.assert_not_awaited()
 
 
