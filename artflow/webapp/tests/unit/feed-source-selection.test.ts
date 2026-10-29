@@ -24,8 +24,10 @@ function loadProduction(path: string, dependencies: Record<string, unknown>, exp
 
 // Execute the real stateless viewer and React event handlers; isolate unrelated
 // portals and visual wrappers only, with no source-text assertions.
+const repeatCount = loadProduction("../../src/components/repeat-count.tsx", { "@/lib/utils": utils });
 const { MediaViewer } = loadProduction("../../src/features/feed-screen.tsx", {
   "sonner": {}, "@/components/ui/badge": { Badge: "badge" },
+  "@/components/repeat-count": repeatCount,
   "@/components/ui/button": { Button: "button" }, "@/components/ui/card": { Card: "card" },
   "@/features/trend-runner": {}, "@/lib/telegram": {}, "@/lib/utils": utils,
 }, "\nexports.MediaViewer = MediaViewer;");
@@ -247,6 +249,7 @@ test("card decoration passes pointer input to the gallery while actions stay ind
   };
   const { FeedScreen } = loadProduction("../../src/features/feed-screen.tsx", {
     react, "react-dom": require("react-dom"), "sonner": {}, "@/components/ui/badge": { Badge: "badge" },
+    "@/components/repeat-count": repeatCount,
     "@/components/ui/button": { Button: "button" }, "@/components/ui/card": { Card: "card" },
     "@/features/trend-runner": {}, "@/lib/telegram": {}, "@/lib/utils": utils,
   });

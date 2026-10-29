@@ -395,7 +395,10 @@ async def generation_detail(
     image_session = None
     if getattr(generation, "image_session_id", None):
         image_session = await repo.get_image_session(session, int(generation.image_session_id), user_id=user.id)
-    return ok(GenerationCard.from_generation(generation, image_session=image_session).model_dump())
+    remix_counts = await repo.get_public_generation_remix_counts(session, [generation])
+    return ok(GenerationCard.from_generation(
+        generation, image_session=image_session, remixes=remix_counts.get(generation.id),
+    ).model_dump())
 
 
 @router.post("/generations/{generation_id}/share")

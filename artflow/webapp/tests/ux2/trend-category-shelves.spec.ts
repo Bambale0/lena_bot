@@ -3,9 +3,9 @@ import { expect, test, type Page } from "@playwright/test";
 const categories = {
   items: [
     { key: "portrait", title: "Портреты и образы", sort_order: 0, trend_count: 7, preview_items: [
-      { id: 11, kind: "image", title: "Неоновый портрет", description: "Мягкий свет", preview_url: "https://media.example.test/11.png", category: "portrait", category_title: "Портреты и образы" },
-      { id: 12, kind: "video", title: "Оживший портрет", description: "Плавное движение", preview_url: "https://media.example.test/12.mp4", category: "portrait", category_title: "Портреты и образы" },
-      { id: 13, kind: "image", title: "Обложка журнала", preview_url: "https://media.example.test/broken.png", category: "portrait", category_title: "Портреты и образы" },
+      { id: 11, kind: "image", title: "Неоновый портрет", description: "Мягкий свет", uses_count: 5, preview_url: "https://media.example.test/11.png", category: "portrait", category_title: "Портреты и образы" },
+      { id: 12, kind: "video", title: "Оживший портрет", description: "Плавное движение", uses_count: 17, preview_url: "https://media.example.test/12.mp4", category: "portrait", category_title: "Портреты и образы" },
+      { id: 13, kind: "image", title: "Обложка журнала", uses_count: 0, preview_url: "https://media.example.test/broken.png", category: "portrait", category_title: "Портреты и образы" },
     ] },
     { key: "animals", title: "С животными 🐾", sort_order: 1, trend_count: 1, preview_items: [
       { id: 21, kind: "image", title: "С медведем", preview_url: "https://media.example.test/21.png", category: "animals", category_title: "С животными 🐾" },
@@ -114,6 +114,26 @@ test("black lilac trends are live category shelves with a full folder", async ({
   await page.getByRole("button", { name: "Показать ещё" }).click();
   await expect(page.getByText("Новый портрет", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Показать ещё" })).toHaveCount(0);
+});
+
+test("video and photo repeat counts survive shelf, folder and failed media previews", async ({ page }, info) => {
+  await prepare(page);
+  await page.goto("/?ux=3");
+  await page.getByRole("button", { name: "По шаблону", exact: true }).click();
+  const tile = (title: string) => page.locator(".trend-live-tile").filter({ has: page.getByRole("button", { name: `Повторить: ${title}`, exact: true }) });
+  await tile("Оживший портрет").scrollIntoViewIfNeeded();
+  await expect(tile("Оживший портрет").locator(".trend-live-fallback")).toBeVisible();
+  for (const width of [320, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    await expect(tile("Оживший портрет").getByText("Повторов: 17", { exact: true })).toBeVisible();
+    await expect(tile("Неоновый портрет").getByText("Повторов: 5", { exact: true })).toBeVisible();
+    await expect(tile("Обложка журнала").getByText("Повторов: 0", { exact: true })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  }
+  await page.screenshot({ path: info.outputPath("trend-repeat-counts.png"), fullPage: true });
+  await page.getByRole("button", { name: "Смотреть все: Портреты и образы" }).click();
+  await expect(tile("Оживший портрет").getByText("Повторов: 17", { exact: true })).toBeVisible();
+  await expect(tile("Обложка журнала").getByText("Повторов: 0", { exact: true })).toBeVisible();
 });
 
 test("admin manages categories while ordinary users never see controls", async ({ page, browser }) => {

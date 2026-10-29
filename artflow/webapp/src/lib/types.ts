@@ -109,6 +109,8 @@ export interface GenerationTask {
   created_at?: string;
   completed_at?: string | null;
   is_public_feed?: boolean;
+  /** Completed repeats of a published work; absent/null means unavailable. */
+  remixes?: number | null;
   is_prompt_library?: boolean;
 }
 

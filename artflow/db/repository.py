@@ -2591,6 +2591,43 @@ async def update_suno_voice(
     return voice
 
 
+def _feed_remix_counts_stmt(generation_ids: list[int] | None = None):
+    # Feed attribution survives successive edits in source_feed_gen_id.
+    # parent_generation_id is the technical lineage, used only by legacy rows.
+    source_id = func.coalesce(Generation.source_feed_gen_id, Generation.parent_generation_id)
+    statement = (
+        select(source_id.label("source_id"), func.count(Generation.id).label("remix_count"))
+        .where(source_id.is_not(None), Generation.status == GenerationStatus.done)
+        .group_by(source_id)
+    )
+    if generation_ids is not None:
+        statement = statement.where(source_id.in_(generation_ids))
+    return statement
+
+
+async def get_public_generation_remix_counts(
+    session: AsyncSession,
+    generations: list[Generation],
+) -> dict[int, int]:
+    """Read counts for already-authorized published tasks in one bounded batch.
+
+    An absent key means the task has no applicable public counter. A present
+    zero is a measured empty count, not a fallback for an unavailable value.
+    """
+    generation_ids = sorted({
+        int(generation.id)
+        for generation in generations
+        if getattr(generation, "is_public_feed", False)
+        and getattr(generation, "gen_type", None) in (GenerationType.image, GenerationType.video)
+    })
+    if not generation_ids:
+        return {}
+    result = await session.execute(_feed_remix_counts_stmt(generation_ids))
+    counts = dict.fromkeys(generation_ids, 0)
+    counts.update({int(source_id): int(count) for source_id, count in result.all()})
+    return counts
+
+
 def _feed_score(gen: Generation, remix_count: int) -> float:
     generation_count = 1 + remix_count
     score = (
@@ -2614,23 +2651,12 @@ async def _feed_cards_from_stmt(
     require_media: bool = True,
     sort_by_score: bool = True,
 ) -> list[FeedGenerationCard]:
-    remix_counts = (
-        select(
-            Generation.parent_generation_id.label("parent_id"),
-            func.count(Generation.id).label("remix_count"),
-        )
-        .where(
-            Generation.parent_generation_id.is_not(None),
-            Generation.status == GenerationStatus.done,
-        )
-        .group_by(Generation.parent_generation_id)
-        .subquery()
-    )
+    remix_counts = _feed_remix_counts_stmt().subquery()
 
     result = await session.execute(
         stmt.outerjoin(User, Generation.user_id == User.id)
         .outerjoin(ImageSession, Generation.image_session_id == ImageSession.id)
-        .outerjoin(remix_counts, remix_counts.c.parent_id == Generation.id)
+        .outerjoin(remix_counts, remix_counts.c.source_id == Generation.id)
         .add_columns(
             User.username,
             User.full_name,

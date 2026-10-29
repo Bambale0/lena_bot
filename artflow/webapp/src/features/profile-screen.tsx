@@ -3,6 +3,7 @@ import { Copy, Gift, Globe2, History, Play, RefreshCw, Share2, Sparkles, Users, 
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
+import { RepeatCount } from "@/components/repeat-count";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -355,7 +356,7 @@ function TaskTile({ task, onOpenTask }: { task: GenerationTask; onOpenTask: (tas
         <Badge variant={task.status === "failed" ? "destructive" : task.status === "done" ? "success" : "warning"} className="absolute left-1 top-1 px-1.5 py-0 text-[8px]">{generationStatusLabel(task.status)}</Badge>
         {task.is_public_feed ? <Badge variant="outline" className="absolute bottom-1 left-1 bg-background/80 px-1.5 py-0 text-[8px]">в профиле</Badge> : null}
       </div>
-      <div className="px-2 py-1.5"><p className="truncate text-[10px] font-semibold">{task.model}</p><p className="mt-0.5 flex justify-between gap-1 text-[9px] text-muted-foreground"><span>{formatRelativeDate(task.created_at)}</span><span>{formatCredits(task.credits_spent)}</span></p></div>
+      <div className="px-2 py-1.5"><p className="truncate text-[10px] font-semibold">{task.model}</p>{task.is_public_feed && <RepeatCount count={task.remixes} className="mt-1 text-[10px] text-muted-foreground" />}<p className="mt-0.5 flex justify-between gap-1 text-[9px] text-muted-foreground"><span>{formatRelativeDate(task.created_at)}</span><span>{formatCredits(task.credits_spent)}</span></p></div>
     </button>
   );
 }
