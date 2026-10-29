@@ -111,9 +111,10 @@ function uniqueMediaUrls(item: FeedItem): string[] {
 function cardPreview(item: FeedItem): { url: string; poster: string; video: boolean } {
   const previews = uniqueSafeUrls([item.preview_url, ...(item.preview_urls || [])]);
   const original = uniqueMediaUrls(item)[0] || "";
-  if (!itemLooksVideo(item)) return { url: previews[0] || original, poster: "", video: false };
+  // A legacy preview can point at a different output; match the viewer's first result.
+  if (!itemLooksVideo(item)) return { url: original, poster: "", video: false };
   const poster = previews.find((url) => !mediaLooksVideo(url)) || "";
-  const video = previews.find(mediaLooksVideo) || original;
+  const video = original;
   return { url: video || poster, poster, video: Boolean(video && (video !== poster || mediaLooksVideo(video))) };
 }
 

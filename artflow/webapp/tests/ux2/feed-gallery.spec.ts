@@ -3,6 +3,8 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 const mediaOrigin = "https://gallery.example.test";
 const originalA = `${mediaOrigin}/original-a.png`;
 const originalB = `${mediaOrigin}/original-b.png`;
+const originalVideo = `${mediaOrigin}/second-video.mp4`;
+const staleVideo = `${mediaOrigin}/stale-video.mp4`;
 const hiddenPrompt = "PRIVATE_RECIPE_MUST_NEVER_APPEAR_IN_THE_GALLERY";
 const longAuthor = "Студия северного света и необычных визуальных историй";
 const boundResults = [0, 1].map(index => `/api/v1/feed/201/preview.webp?index=${index}&output_id=${(index ? "b" : "a").repeat(64)}`);
@@ -22,12 +24,12 @@ const items = [
   { id: 205, author: "Архитектура и свет", model: "image-fixture", gen_type: "image",
     result_url: `${mediaOrigin}/architecture.png`, result_urls: [`${mediaOrigin}/architecture.png`], remixes: 7 },
   { id: 206, author: "Ещё один видеосюжет", model: "video-fixture", gen_type: "video",
-    result_url: `${mediaOrigin}/second-video.mp4`, result_urls: [`${mediaOrigin}/second-video.mp4`],
-    preview_url: `${mediaOrigin}/second-video.mp4`, remixes: 3 },
+    result_url: originalVideo, result_urls: [originalVideo],
+    preview_url: staleVideo, remixes: 3 },
 ].map(item => ({ ...item, prompt_hidden: true, prompt: hiddenPrompt }));
 
 async function prepare(page: Page, protectedAlbum = false) {
-  const state = { writes: [] as string[], quotes: [] as Record<string, unknown>[], likes: 0 };
+  const state = { writes: [] as string[], mediaRequests: [] as string[], quotes: [] as Record<string, unknown>[], likes: 0 };
   const feedItems = items.map(item => item.id === 201 && protectedAlbum ? {
     ...item, is_mine: false, source_image_recipe_available: true, result_url: "", result_urls: [],
     preview_url: boundResults[0], preview_urls: boundResults,
@@ -45,6 +47,7 @@ async function prepare(page: Page, protectedAlbum = false) {
   });
   await page.route("**/telegram-web-app.js", route => route.fulfill({ body: "" }));
   await page.route(`${mediaOrigin}/**`, route => {
+    state.mediaRequests.push(route.request().url());
     const path = new URL(route.request().url()).pathname;
     if (path.includes("unavailable") || path.endsWith(".mp4")) return route.abort("failed");
     return route.fulfill({ contentType: "image/svg+xml", body:
@@ -145,6 +148,8 @@ for (const [width, columns] of [[320, 1], [390, 2], [1440, 4]] as const) {
     for (const control of [repeat, album.getByRole("button", { name: "Лайк", exact: true }),
       failedVideo.getByRole("button", { name: "Повторить", exact: true }),
       cards.last().getByRole("button", { name: "Повторить", exact: true })]) await expectReachable(control);
+    await expect.poll(() => state.mediaRequests.includes(originalVideo)).toBe(true);
+    expect(state.mediaRequests).not.toContain(staleVideo);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     expect(await page.locator(".apix-shell > main").evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
     await expect(page.getByText(hiddenPrompt, { exact: true })).toHaveCount(0);
@@ -166,6 +171,8 @@ for (const protectedAlbum of [false, true]) {
     const state = await prepare(page, protectedAlbum);
     await openGallery(page);
     const album = cardByAuthor(page, longAuthor);
+    await expect(album.locator(".apix-feed-media img")).toHaveAttribute("src",
+      new URL(protectedAlbum ? boundResults[0] : originalA, page.url()).href);
     const like = album.getByRole("button", { name: "Лайк", exact: true });
     await expectReachable(like);
     await like.click();
