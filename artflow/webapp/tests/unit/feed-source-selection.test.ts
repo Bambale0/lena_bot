@@ -230,7 +230,7 @@ test("all shared-link journey fixtures satisfy the production v1 hydration clien
   await assert.rejects(client.getPublicFeedItem(99999), (error: any) => error.status === 404);
 });
 
-test("card decoration passes pointer input to the gallery while actions stay independent", (t) => {
+test("card author opens the gallery while like and repeat stay independent", (t) => {
   const body = { nodeType: 1 };
   const previousWindow = globalThis.window, previousDocument = globalThis.document;
   Object.defineProperty(globalThis, "window", { configurable: true, writable: true, value: { location: { origin: "https://apix.example" } } });
@@ -263,22 +263,28 @@ test("card decoration passes pointer input to the gallery while actions stay ind
   const portal = (tree: any) => descendants(tree).find(node => (node as any).containerInfo === body) as any;
   const initial = render();
   assert.equal(portal(initial), undefined);
-  const footer = descendants(initial).find(node => node.type === "div"
-    && node.props?.className?.includes("bottom-0") && textOf(node).includes("Artist QA"))!;
-  assert.ok(footer.props!.className.split(" ").includes("pointer-events-none"), "Decorative metadata must not intercept cover taps");
-  const repeat = descendants(footer).find(node => node.type === "button")!;
-  assert.ok(repeat.props!.className.split(" ").includes("pointer-events-auto"), "Repeat must remain clickable inside the transparent footer");
-  const event = { stopPropagation() {} };
+  const author = descendants(initial).find(node => node.type === "button"
+    && node.props?.["aria-label"] === "Открыть работу автора Artist QA")!;
+  assert.ok(author, "Author metadata has an explicit, keyboard-accessible gallery action");
+  const repeat = descendants(initial).find(node => node.type === "button" && textOf(node) === "Повторить")!;
+  assert.ok(repeat, "Repeat remains a separate action below the media");
+  const event = { currentTarget: {}, stopPropagation() {} };
   repeat.props!.onClick(event);
   assert.deepEqual(repeated, [item, item.preview_url]);
   assert.equal(portal(render()), undefined, "Repeat must not open the gallery");
   descendants(initial).find(node => node.props?.["aria-label"] === "Лайк")!.props!.onClick(event);
   assert.equal(liked, item);
   assert.equal(portal(render()), undefined, "Like must not open the gallery");
-  descendants(initial).find(node => node.props?.["aria-label"] === "Открыть внутри приложения")!.props!.onClick();
+  descendants(initial).find(node => node.props?.["aria-label"] === "Открыть внутри приложения")!.props!.onClick(event);
   const opened = portal(render());
   assert.ok(opened, "Gallery must escape feed/main containing and stacking contexts");
   assert.equal(opened.$$typeof, Symbol.for("react.portal"));
   opened.children.props.onClose();
+  assert.equal(portal(render()), undefined);
+  author.props!.onClick(event);
+  const reopened = portal(render());
+  assert.ok(reopened, "Author action opens the same internal gallery");
+  assert.equal(reopened.children.props.viewer.item, item);
+  reopened.children.props.onClose();
   assert.equal(portal(render()), undefined);
 });

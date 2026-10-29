@@ -15,6 +15,7 @@ import "@/styles/ux2.css";
 import "@/styles/lilac.css";
 import "@/styles/creation-menu.css";
 import "@/styles/creation-studio.css";
+import "@/styles/feed-gallery.css";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Mini App root element is missing");
