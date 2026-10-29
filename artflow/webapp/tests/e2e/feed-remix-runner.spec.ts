@@ -105,7 +105,11 @@ async function mockMiniAppApi(page: Page, withTelegram = true, nativeBack = fals
 
   await page.route("https://example.test/source.png", (route) => route.fulfill({
     contentType: "image/png",
-    body: Buffer.from([0x89, 0x50, 0x4e, 0x47]),
+    body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=", "base64"),
+  }));
+  await page.route("**/api/v1/feed/201/preview.webp?**", (route) => route.fulfill({
+    contentType: "image/svg+xml",
+    body: '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="500"><rect width="400" height="500" fill="#706092"/></svg>',
   }));
   await page.route("**/api/v1/me", (route) => route.fulfill({ json: user }));
   await page.route("**/api/v1/models/image", (route) => route.fulfill({ json: imageModels }));
@@ -930,6 +934,7 @@ test("text-only source video can replay author prompt without photos", async ({ 
 
 
 async function expectCenterIsReachable(target: Locator, message: string) {
+  await target.scrollIntoViewIfNeeded();
   await expect(target).toBeVisible();
   await expect.poll(() => target.evaluate(element => {
     const rect = element.getBoundingClientRect();
@@ -945,7 +950,7 @@ async function expectViewerRepeatIsReachable(page: Page) {
   );
 }
 
-test("feed cover decoration leaves media reachable and its Repeat action stays clickable", async ({ page }) => {
+test("feed cover and author open media while like and Repeat stay independently reachable", async ({ page }) => {
   await mockMiniAppApi(page);
   let likes = 0;
   await page.route("**/api/v1/feed/201/like", route => {
@@ -955,20 +960,21 @@ test("feed cover decoration leaves media reachable and its Repeat action stays c
   await page.goto("/?tgWebAppData=test");
   const card = page.locator(".apix-feed-card").first();
   const cover = card.getByRole("button", { name: "Открыть внутри приложения", exact: true }).first();
-  await expectCenterIsReachable(cover, "Decorative author/model footer must not swallow the visible cover tap");
+  await expectCenterIsReachable(cover, "The visible cover must open its media");
   await cover.click();
   await expect(page.locator(".apix-media-viewer")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.locator(".apix-media-viewer")).toHaveCount(0);
   const author = card.getByText("Artist QA", { exact: true });
+  await author.scrollIntoViewIfNeeded();
   await expect(author).toBeVisible();
   const point = await author.evaluate(element => {
     const rect = element.getBoundingClientRect();
     const x = rect.left + rect.width / 2, y = rect.top + rect.height / 2;
-    const opener = element.closest(".apix-feed-card")!.querySelector('button[aria-label="Открыть внутри приложения"]')!;
+    const opener = element.closest('button[aria-label="Открыть работу автора Artist QA"]')!;
     return { x, y, opensMedia: opener.contains(element.ownerDocument.elementFromPoint(x, y)) };
   });
-  expect(point.opensMedia, "Tapping decorative author text must target the media opener").toBe(true);
+  expect(point.opensMedia, "Author text must be inside its reachable gallery button").toBe(true);
   if (test.info().project.use.hasTouch) await page.touchscreen.tap(point.x, point.y);
   else await page.mouse.click(point.x, point.y);
   await expect(page.locator(".apix-media-viewer")).toBeVisible();
@@ -986,7 +992,7 @@ test("feed cover decoration leaves media reachable and its Repeat action stays c
   await page.keyboard.press("Escape");
   await expect(page.locator(".apix-media-viewer")).toHaveCount(0);
   const repeat = card.getByRole("button", { name: "Повторить", exact: true });
-  await expectCenterIsReachable(repeat, "Repeat must receive clicks inside the pointer-transparent footer");
+  await expectCenterIsReachable(repeat, "Repeat below the media must receive its own click");
   await repeat.click();
   await expect(page.getByRole("dialog", { name: "Повторить работу" })).toBeVisible();
   await expect(page.locator(".apix-media-viewer")).toHaveCount(0);

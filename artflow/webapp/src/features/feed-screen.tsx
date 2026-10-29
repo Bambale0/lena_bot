@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type Ref } from "react";
 import { createPortal } from "react-dom";
 import {
   ChevronLeft,
@@ -6,25 +6,26 @@ import {
   Film,
   Heart,
   ImageIcon,
+  Images,
   LoaderCircle,
   Maximize2,
   Play,
   RefreshCw,
   Repeat2,
+  Share2,
   Sparkles,
   UserRound,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { Badge } from "@/components/ui/badge";
 import { RepeatCount } from "@/components/repeat-count";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { openTrendRunner } from "@/features/trend-runner";
 import type { FeedItem, TrendItem } from "@/lib/types";
 import { notifyHaptic, readTelegramInitData } from "@/lib/telegram";
-import { cn, firstMedia, safeExternalUrl } from "@/lib/utils";
+import { cn, safeExternalUrl } from "@/lib/utils";
 
 type FeedSource = "recent" | "top_day" | "top";
 type WorkFilter = "all" | "image" | "video" | "mine";
@@ -77,7 +78,7 @@ const trendKindFilters = [
 ];
 
 function itemLooksVideo(item: FeedItem): boolean {
-  const media = firstMedia(item);
+  const media = uniqueMediaUrls(item)[0];
   return item.gen_type === "video" || mediaLooksVideo(media);
 }
 
@@ -85,14 +86,7 @@ function mediaLooksVideo(url: string | null | undefined): boolean {
   return /\.(mp4|webm|mov|m4v)(\?|$)/i.test(String(url || ""));
 }
 
-function uniqueMediaUrls(item: FeedItem): string[] {
-  const candidates = [
-    ...(item.result_urls || []),
-    item.result_url,
-    ...(item.preview_urls || []),
-    item.preview_url,
-    firstMedia(item),
-  ];
+function uniqueSafeUrls(candidates: (string | null | undefined)[]): string[] {
   const seen = new Set<string>();
   const urls: string[] = [];
   for (const candidate of candidates) {
@@ -104,12 +98,23 @@ function uniqueMediaUrls(item: FeedItem): string[] {
   return urls;
 }
 
-function cardMediaShape(index: number, isVideo: boolean): string {
-  if (isVideo) return index % 6 === 0 ? "aspect-[16/10]" : "aspect-[4/5]";
-  if (index % 10 === 0) return "aspect-[3/4]";
-  if (index % 7 === 0) return "aspect-square";
-  if (index % 5 === 0) return "aspect-[2/3]";
-  return "aspect-[4/5]";
+function uniqueMediaUrls(item: FeedItem): string[] {
+  const results = uniqueSafeUrls(item.result_urls || []);
+  if (results.length) return results;
+  const result = safeExternalUrl(item.result_url);
+  if (result) return [result];
+  // Public and legacy responses may expose output-bound media only through preview URLs.
+  const previews = uniqueSafeUrls(item.preview_urls || []);
+  return previews.length ? previews : uniqueSafeUrls([item.preview_url]);
+}
+
+function cardPreview(item: FeedItem): { url: string; poster: string; video: boolean } {
+  const previews = uniqueSafeUrls([item.preview_url, ...(item.preview_urls || [])]);
+  const original = uniqueMediaUrls(item)[0] || "";
+  // A legacy preview can point at a different output; match the viewer's first result.
+  if (!itemLooksVideo(item)) return { url: original, poster: "", video: false };
+  const poster = previews.find((url) => url !== original && !mediaLooksVideo(url)) || "";
+  return { url: original, poster, video: true };
 }
 
 function trendCategoryKey(trend: TrendItem): string {
@@ -159,12 +164,16 @@ function FeedScreen({
   const [myLoading, setMyLoading] = useState(false);
   const [visibleWorkCount, setVisibleWorkCount] = useState(WORK_RENDER_BATCH);
   const [viewer, setViewer] = useState<MediaViewerState | null>(null);
+  const [viewerFailedUrl, setViewerFailedUrl] = useState<string | null>(null);
   const [trends, setTrends] = useState<TrendItem[]>([]);
   const [trendsLoading, setTrendsLoading] = useState(false);
   const [trendKind, setTrendKind] = useState<TrendKindFilter>("all");
   const [trendCategory, setTrendCategory] = useState("all");
   const [visibleTrendCount, setVisibleTrendCount] = useState(TREND_RENDER_BATCH);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const viewerDialogRef = useRef<HTMLDivElement | null>(null);
+  const viewerReturnFocus = useRef<HTMLElement | null>(null);
+  const viewerOpen = viewer !== null;
 
   const loadMyFeed = useCallback(async () => {
     setMyLoading(true);
@@ -282,15 +291,79 @@ function FeedScreen({
   }, [canRevealMoreWorks, contentMode, hasMore, loadingMore, onLoadMore, visibleItems.length, workFilter, worksLoading]);
 
   useEffect(() => {
-    if (!viewer) return undefined;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setViewer(null);
-      if (event.key === "ArrowLeft") setViewer((current) => current ? { ...current, index: Math.max(0, current.index - 1) } : current);
-      if (event.key === "ArrowRight") setViewer((current) => current ? { ...current, index: Math.min(current.urls.length - 1, current.index + 1) } : current);
+    const dialog = viewerDialogRef.current;
+    if (!viewerOpen || !dialog) return undefined;
+    const returnTarget = viewerReturnFocus.current;
+    let lastFocus: HTMLElement | null = null;
+    let suspended = false;
+    const focusableSelector = 'button:not([disabled]),a[href],video[controls],[tabindex]:not([tabindex="-1"])';
+    const isVisible = (node: HTMLElement) => !node.closest('[hidden],[inert],[aria-hidden="true"]') && node.getClientRects().length > 0;
+    const anotherDialogOpen = () => Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"],[role="alertdialog"][aria-modal="true"]')).some((node) => node !== dialog && isVisible(node));
+    const focusable = () => Array.from(dialog.querySelectorAll<HTMLElement>(focusableSelector)).filter((node) => node.getAttribute("tabindex") !== "-1" && isVisible(node));
+    const focusViewer = () => {
+      if (anotherDialogOpen()) return;
+      const target = lastFocus?.isConnected && dialog.contains(lastFocus) ? lastFocus : dialog.querySelector<HTMLElement>('[data-feed-viewer-close]') || dialog;
+      target.focus({ preventScroll: true });
     };
+    const syncLayer = () => {
+      const next = anotherDialogOpen();
+      if (next === suspended) return;
+      suspended = next;
+      // The repeat/payment Sheet owns focus and Telegram Back while it is open.
+      dialog.inert = next;
+      if (next) dialog.setAttribute("aria-hidden", "true");
+      else {
+        dialog.removeAttribute("aria-hidden");
+        focusViewer();
+      }
+    };
+    const onFocusIn = (event: FocusEvent) => {
+      if (event.target instanceof HTMLElement && dialog.contains(event.target)) lastFocus = event.target;
+      else if (!anotherDialogOpen()) focusViewer();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || anotherDialogOpen()) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setViewer(null);
+        return;
+      }
+      if (event.key === "Tab") {
+        const controls = focusable();
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+        if (!first || !last) {
+          event.preventDefault();
+          dialog.focus();
+        } else if (event.shiftKey && (document.activeElement === first || !dialog.contains(document.activeElement))) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && (document.activeElement === last || !dialog.contains(document.activeElement))) {
+          event.preventDefault();
+          first.focus();
+        }
+        return;
+      }
+      if (event.target instanceof HTMLVideoElement) return;
+      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+        event.preventDefault();
+        setViewerFailedUrl(null);
+        setViewer((current) => current ? { ...current, index: Math.max(0, Math.min(current.urls.length - 1, current.index + (event.key === "ArrowLeft" ? -1 : 1))) } : current);
+      }
+    };
+    const observer = new MutationObserver(syncLayer);
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["hidden", "aria-hidden", "inert"] });
+    const frame = window.requestAnimationFrame(() => { syncLayer(); focusViewer(); });
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [viewer]);
+    document.addEventListener("focusin", onFocusIn);
+    return () => {
+      observer.disconnect();
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("focusin", onFocusIn);
+      if (returnTarget?.isConnected && !anotherDialogOpen()) returnTarget.focus({ preventScroll: true });
+    };
+  }, [viewerOpen]);
 
   const loadTrends = useCallback(async () => {
     if (trendsLoading) return;
@@ -315,9 +388,11 @@ function FeedScreen({
     setTrendCategory("all");
   }, [trendKind]);
 
-  const openViewer = useCallback((item: FeedItem, index = 0) => {
+  const openViewer = useCallback((item: FeedItem, index = 0, trigger?: HTMLElement) => {
     const urls = uniqueMediaUrls(item);
     if (!urls.length) return;
+    viewerReturnFocus.current = trigger || (typeof HTMLElement !== "undefined" && document.activeElement instanceof HTMLElement ? document.activeElement : null);
+    setViewerFailedUrl(null);
     setViewer({
       urls,
       index: Math.min(index, urls.length - 1),
@@ -333,258 +408,185 @@ function FeedScreen({
   }, []);
 
   return (
-    <div className="grid gap-2">
-      <div className="apix-feed-toolbar">
-        <div className="flex min-w-0 items-center gap-2">
-          <h1 className="text-lg font-bold tracking-tight sm:text-xl">Лента</h1>
-          <Badge variant="outline" className="shrink-0 text-[10px]">
-            {contentMode === "works" ? `${renderedItems.length}/${visibleItems.length}` : `${renderedTrends.length}/${visibleTrends.length}`}
-          </Badge>
-          <div className="ml-auto flex min-w-0 items-center justify-end gap-1">
-            <div className="inline-flex shrink-0 rounded-xl border border-border/70 bg-muted/35 p-0.5">
-              {[
-                { value: "works" as const, label: "Работы" },
-                { value: "trends" as const, label: "Тренды" },
-              ].map((tab) => (
-                <button
-                  key={tab.value}
-                  type="button"
-                  className={cn(
-                    "apix-focus-ring min-h-7 rounded-lg px-2.5 text-[11px] font-bold transition",
-                    contentMode === tab.value ? "bg-background text-foreground shadow-sm" : "text-muted-foreground",
-                  )}
-                  onClick={() => setContentMode(tab.value)}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-8 min-h-8 shrink-0 rounded-xl"
-              disabled={contentMode === "works" ? worksLoading : trendsLoading}
-              onClick={contentMode === "works" ? (workFilter === "mine" ? () => void loadMyFeed() : onRefresh) : () => void loadTrends()}
-              aria-label="Обновить ленту"
-            >
-              <RefreshCw className={cn("size-4", (contentMode === "works" ? worksLoading : trendsLoading) && "animate-spin")} />
-            </Button>
+    <div className="apix-feed-gallery">
+      <header className="apix-feed-toolbar feed-gallery-toolbar">
+        <div className="feed-gallery-heading">
+          <h1>Лента</h1>
+          <div className="feed-gallery-modes" role="group" aria-label="Содержимое ленты">
+            {[
+              { value: "works" as const, label: "Работы" },
+              { value: "trends" as const, label: "Тренды" },
+            ].map((tab) => (
+              <button key={tab.value} type="button" className="apix-focus-ring" aria-pressed={contentMode === tab.value} onClick={() => setContentMode(tab.value)}>
+                {tab.label}
+              </button>
+            ))}
           </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="feed-gallery-refresh"
+            disabled={contentMode === "works" ? worksLoading : trendsLoading}
+            onClick={contentMode === "works" ? (workFilter === "mine" ? () => void loadMyFeed() : onRefresh) : () => void loadTrends()}
+            aria-label="Обновить ленту"
+          >
+            <RefreshCw className={cn((contentMode === "works" ? worksLoading : trendsLoading) && "animate-spin")} />
+          </Button>
         </div>
 
-        <details className="apix-help hidden max-w-xl">
-          <summary>Как работает лента</summary>
-          <p className="pb-2">Карточки выводятся порциями, чтобы Mini App не держала всю ленту в DOM. Фото и видео открываются внутри приложения.</p>
-        </details>
-
-        {contentMode === "works" ? (
-          <div className="apix-chip-rail flex gap-1.5 overflow-x-auto pb-0.5">
-            {sourceFilters.map((filter) => (
-              <button
-                key={filter.value}
-                type="button"
-                className={cn(
-                  "apix-focus-ring min-h-8 shrink-0 rounded-full border px-3 text-xs font-semibold transition",
-                  source === filter.value
-                    ? "border-primary/40 bg-primary/15 text-primary"
-                    : "border-border bg-card/55 text-muted-foreground",
-                )}
-                onClick={() => onSourceChange(filter.value)}
-              >
-                {filter.label}
-              </button>
-            ))}
-            <span className="my-1 w-px shrink-0 bg-border/70" aria-hidden="true" />
-            {workFilters.map((filter) => (
-              <button
-                key={filter.value}
-                type="button"
-                className={cn(
-                  "apix-focus-ring min-h-8 shrink-0 rounded-full border px-3 text-xs font-semibold transition",
-                  workFilter === filter.value
-                    ? "border-cyan-400/45 bg-cyan-400/15 text-cyan-700 dark:text-cyan-200"
-                    : "border-border bg-card/55 text-muted-foreground",
-                )}
-                onClick={() => setWorkFilter(filter.value)}
-              >
-                {filter.label}
-              </button>
-            ))}
-          </div>
-        ) : (
-          <div className="apix-chip-rail flex gap-1.5 overflow-x-auto pb-0.5">
-            {trendKindFilters.map(({ value, label, icon: Icon }) => (
-              <button
-                key={value}
-                type="button"
-                className={cn(
-                  "apix-focus-ring flex min-h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-semibold transition",
-                  trendKind === value
-                    ? "border-primary/40 bg-primary/15 text-primary"
-                    : "border-border bg-card/55 text-muted-foreground",
-                )}
-                onClick={() => setTrendKind(value)}
-              >
-                <Icon className="size-3.5" />
-                {label}
-              </button>
-            ))}
-            <span className="my-1 w-px shrink-0 bg-border/70" aria-hidden="true" />
-            {trendCategories.map((category) => (
-              <button
-                key={category.key}
-                type="button"
-                className={cn(
-                  "apix-focus-ring flex min-h-8 shrink-0 items-center gap-1 rounded-full border px-3 text-xs font-semibold transition",
-                  trendCategory === category.key
-                    ? "border-fuchsia-400/45 bg-fuchsia-400/15 text-fuchsia-700 dark:text-fuchsia-200"
-                    : "border-border bg-card/55 text-muted-foreground",
-                )}
-                onClick={() => setTrendCategory(category.key)}
-              >
-                <span>{category.emoji}</span>
-                <span>{category.title}</span>
-                <span className="text-[10px] opacity-70">{category.count}</span>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+        <div className="feed-gallery-controls">
+          {contentMode === "works" ? (
+            <>
+              <div className="feed-gallery-filter-group" role="group" aria-label="Тип работ">
+                {workFilters.map((filter) => (
+                  <button key={filter.value} type="button" className="apix-focus-ring" aria-pressed={workFilter === filter.value} onClick={() => setWorkFilter(filter.value)}>
+                    {filter.label}
+                  </button>
+                ))}
+              </div>
+              <div className="feed-gallery-filter-group feed-gallery-sort" role="group" aria-label="Сортировка работ">
+                {sourceFilters.map((filter) => (
+                  <button key={filter.value} type="button" className="apix-focus-ring" aria-pressed={source === filter.value} onClick={() => onSourceChange(filter.value)}>
+                    {filter.label}
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="feed-gallery-filter-group" role="group" aria-label="Тип трендов">
+                {trendKindFilters.map(({ value, label, icon: Icon }) => (
+                  <button key={value} type="button" className="apix-focus-ring" aria-pressed={trendKind === value} onClick={() => setTrendKind(value)}>
+                    <Icon aria-hidden="true" />{label}
+                  </button>
+                ))}
+              </div>
+              <div className="feed-gallery-filter-group feed-gallery-categories" role="group" aria-label="Категория трендов">
+                {trendCategories.map((category) => (
+                  <button key={category.key} type="button" className="apix-focus-ring" aria-pressed={trendCategory === category.key} onClick={() => setTrendCategory(category.key)}>
+                    <span aria-hidden="true">{category.emoji}</span><span>{category.title}</span><span className="feed-filter-count">{category.count}</span>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      </header>
 
       {contentMode === "works" ? (
         visibleItems.length ? (
           <>
-            <div className="apix-media-grid apix-feed-mosaic">
+            <div className="apix-media-grid apix-feed-mosaic feed-gallery-grid" aria-busy={worksLoading}>
               {renderedItems.map((item, index) => {
                 const mediaUrls = uniqueMediaUrls(item);
-                const media = mediaUrls[0] || "";
+                const preview = cardPreview(item);
                 const isVideo = itemLooksVideo(item);
                 const remixing = remixingId === item.id;
-                const isFeatured = index % 9 === 0;
+                const author = item.author || "Автор";
+                const authorPhoto = safeExternalUrl(item.author_photo_url);
                 return (
-                  <Card key={item.id} className={cn("apix-feed-card overflow-hidden shadow-none", isFeatured && "apix-feed-card-featured")}>
-                    <div className={cn("apix-feed-media group relative w-full overflow-hidden bg-muted", cardMediaShape(index, isVideo))}>
-                      {media ? (
-                        isVideo ? (
-                          <video src={media} muted playsInline preload="metadata" className="size-full object-cover transition duration-300 group-active:scale-[1.02]" />
-                        ) : (
-                          <img
-                            src={media}
-                            alt=""
-                            loading={index < 4 ? "eager" : "lazy"}
-                            decoding="async"
-                            fetchPriority={index < 2 ? "high" : "auto"}
-                            className="size-full object-cover transition duration-300 group-active:scale-[1.02]"
-                          />
-                        )
-                      ) : (
-                        <div className="grid size-full place-items-center text-xs text-muted-foreground">Нет preview</div>
-                      )}
-                      <button type="button" className="absolute inset-0 z-10 cursor-zoom-in" aria-label="Открыть внутри приложения" onClick={() => openViewer(item)} />
-                      <span className="pointer-events-none absolute inset-0 z-10 bg-[linear-gradient(to_top,rgba(0,0,0,.82),transparent_62%)]" />
-                      {isVideo ? <span className="pointer-events-none absolute inset-0 z-10 grid place-items-center"><span className="grid size-10 place-items-center rounded-full bg-black/55 text-white backdrop-blur"><Play className="ml-0.5 size-4" /></span></span> : null}
-
-                      <div className="absolute right-2 top-2 z-20 flex gap-1">
-                        <button
-                          type="button"
-                          className="apix-focus-ring grid size-7 place-items-center rounded-full bg-black/45 text-white backdrop-blur active:scale-95"
-                          aria-label="Лайк"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            onLike(item);
-                          }}
-                        >
-                          <Heart className="size-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          className="apix-focus-ring grid size-7 place-items-center rounded-full bg-black/45 text-white backdrop-blur active:scale-95"
-                          aria-label="Открыть внутри приложения"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            openViewer(item);
-                          }}
-                        >
-                          <Maximize2 className="size-3.5" />
-                        </button>
+                  <Card key={item.id} className="apix-feed-card feed-gallery-card" role="article" aria-label={`Работа автора ${author}`}>
+                    <div className="apix-feed-media feed-card-media">
+                      <FeedPreview key={`${preview.url}:${preview.poster}`} url={preview.url} poster={preview.poster} video={preview.video} eager={index < 4} />
+                      <button
+                        type="button"
+                        className="apix-focus-ring feed-card-open"
+                        aria-label="Открыть внутри приложения"
+                        disabled={!mediaUrls.length}
+                        onClick={(event) => openViewer(item, 0, event.currentTarget)}
+                      />
+                      <div className="feed-card-badges" aria-hidden="true">
+                        {isVideo ? <span><Film />Видео</span> : mediaUrls.length > 1 ? <span><Images />{mediaUrls.length} фото</span> : null}
                       </div>
-
-                      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 grid gap-1.5 px-2 pb-2 pt-10 text-white">
-                        <div className="flex items-center justify-between gap-1">
-                          <span className="flex min-w-0 items-center gap-1.5">
-                            <span className="grid size-5 shrink-0 place-items-center overflow-hidden rounded-full bg-white/20">
-                              {item.author_photo_url ? <img src={item.author_photo_url} alt="" loading="lazy" decoding="async" className="size-full object-cover" /> : <UserRound className="size-3" />}
-                            </span>
-                            <span className="truncate text-[9px] font-semibold">{item.author || "Автор"}</span>
-                          </span>
-                          <span className="flex shrink-0 items-center gap-1 text-[8px] opacity-85">
-                            {isFeatured ? <span>выбор</span> : null}
-                            {item.is_mine ? <span>моё</span> : null}
-                            {item.aspect_ratio ? <span>{item.aspect_ratio}</span> : null}
-                          </span>
-                        </div>
-                        {isFeatured && item.prompt && !item.prompt_hidden ? <span className="line-clamp-2 text-left text-[10px] font-semibold leading-tight opacity-95">{item.prompt}</span> : null}
-                        <div className="grid min-w-0 gap-1">
-                          <span className="min-w-0 max-w-full justify-self-start truncate rounded-full bg-black/35 px-2 py-1 text-[8px] text-white/85 backdrop-blur">{item.model}</span>
-                          <button
-                            type="button"
-                            className="apix-focus-ring pointer-events-auto inline-flex min-h-7 w-full min-w-0 items-center justify-center gap-1 overflow-hidden whitespace-nowrap rounded-full bg-primary/95 px-2 text-[9px] font-bold leading-none text-primary-foreground shadow-md shadow-black/20 active:scale-[0.98] disabled:opacity-75"
-                            disabled={remixing}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              onRemix(item, firstMedia(item));
-                            }}
-                          >
-                            <Repeat2 className={cn("size-3 shrink-0", remixing && "animate-spin")} />
-                            <span className="truncate">{remixing ? "Запуск" : "Повторить"}</span>
-                          </button>
-                        </div>
+                      {isVideo && preview.url ? <span className="feed-card-play" aria-hidden="true"><Play /></span> : null}
+                      <div className="feed-card-tools">
+                        <button type="button" className="apix-focus-ring feed-card-icon-button" aria-label="Лайк" onClick={(event) => { event.stopPropagation(); onLike(item); }}>
+                          <Heart aria-hidden="true" />
+                        </button>
+                        <button type="button" className="apix-focus-ring feed-card-icon-button" aria-label="Открыть внутри приложения" disabled={!mediaUrls.length} onClick={(event) => { event.stopPropagation(); openViewer(item, 0, event.currentTarget); }}>
+                          <Maximize2 aria-hidden="true" />
+                        </button>
                       </div>
                     </div>
 
-                    <div className="flex gap-2 px-2 py-1.5 text-[9px] text-muted-foreground">
-                      <span>♥ {item.likes_count || 0}</span>
-                      <span>↗ {item.shares_count || 0}</span>
-                      <span>↻ {item.remixes || 0}</span>
+                    <div className="feed-card-caption">
+                      <button type="button" className="apix-focus-ring feed-card-author" aria-label={`Открыть работу автора ${author}`} disabled={!mediaUrls.length} onClick={(event) => openViewer(item, 0, event.currentTarget)}>
+                        <span className="feed-card-avatar" aria-hidden="true">
+                          <UserRound />
+                          {authorPhoto ? <img src={authorPhoto} alt="" loading="lazy" decoding="async" onError={(event) => { event.currentTarget.hidden = true; }} /> : null}
+                        </span>
+                        <span className="feed-card-author-name">{author}</span>
+                        {item.is_mine ? <span className="feed-card-owned">Моё</span> : null}
+                      </button>
+                      <div className="feed-card-details">
+                        <span className="feed-card-model" title={item.model}>{item.model}</span>
+                        {item.aspect_ratio ? <span className="feed-card-ratio">{item.aspect_ratio}</span> : null}
+                      </div>
+                      <div className="feed-card-stats">
+                        {typeof item.likes_count === "number" && Number.isInteger(item.likes_count) && item.likes_count >= 0 ? <span className="feed-card-stat" aria-label={`Лайков: ${item.likes_count}`}><Heart aria-hidden="true" /><span>{item.likes_count}</span></span> : null}
+                        {typeof item.shares_count === "number" && Number.isInteger(item.shares_count) && item.shares_count >= 0 ? <span className="feed-card-stat" aria-label={`Поделились: ${item.shares_count}`}><Share2 aria-hidden="true" /><span>{item.shares_count}</span></span> : null}
+                        <RepeatCount count={item.remixes} className="feed-card-repeat-count" />
+                      </div>
+                      <button type="button" className="apix-focus-ring feed-card-repeat" disabled={remixing} onClick={(event) => { event.stopPropagation(); onRemix(item, mediaUrls[0]); }}>
+                        <Repeat2 aria-hidden="true" className={cn(remixing && "animate-spin")} /><span>{remixing ? "Запуск" : "Повторить"}</span>
+                      </button>
                     </div>
                   </Card>
                 );
               })}
             </div>
 
-            <div ref={sentinelRef} className="grid min-h-16 place-items-center pb-2 text-xs text-muted-foreground">
+            <div ref={sentinelRef} className="feed-gallery-more" role="status">
               {worksLoading || (workFilter !== "mine" && loadingMore) ? (
-                <span className="inline-flex items-center gap-2"><LoaderCircle className="size-4 animate-spin" /> Подгружаем ещё…</span>
+                <span><LoaderCircle className="animate-spin" aria-hidden="true" />Подгружаем ещё…</span>
               ) : canRevealMoreWorks ? (
-                <Button variant="ghost" size="sm" onClick={() => setVisibleWorkCount((current) => Math.min(current + WORK_RENDER_BATCH, visibleItems.length))}>Показать ещё</Button>
+                <Button variant="ghost" onClick={() => setVisibleWorkCount((current) => Math.min(current + WORK_RENDER_BATCH, visibleItems.length))}>Показать ещё</Button>
               ) : workFilter !== "mine" && hasMore && onLoadMore ? (
-                <Button variant="ghost" size="sm" onClick={onLoadMore}>Загрузить ещё</Button>
+                <Button variant="ghost" onClick={onLoadMore}>Загрузить ещё</Button>
               ) : (
                 <span>Это всё по текущей подборке</span>
               )}
             </div>
           </>
         ) : (
-          <div className="grid min-h-28 place-items-center rounded-xl border border-dashed border-border text-center text-xs text-muted-foreground">
-            {worksLoading || (workFilter !== "mine" && loadingMore) ? "Ищем работы по фильтру…" : "По этому фильтру работ пока нет"}
+          <div className="feed-gallery-empty" role="status">
+            {worksLoading || (workFilter !== "mine" && loadingMore) ? <><LoaderCircle className="animate-spin" aria-hidden="true" /><p>Ищем работы по фильтру…</p></> : <><Images aria-hidden="true" /><h2>Работ пока нет</h2><p>Выберите другой фильтр или обновите ленту.</p></>}
           </div>
         )
       ) : (
-        <TrendCategorySurface
-          trends={renderedTrends}
-          loading={trendsLoading}
-          canRevealMore={canRevealMoreTrends}
-          onRevealMore={() => setVisibleTrendCount((current) => Math.min(current + TREND_RENDER_BATCH, visibleTrends.length))}
-          onRepeat={(trend) => repeatTrend(trend)}
-        />
+        <TrendCategorySurface trends={renderedTrends} loading={trendsLoading} canRevealMore={canRevealMoreTrends} onRevealMore={() => setVisibleTrendCount((current) => Math.min(current + TREND_RENDER_BATCH, visibleTrends.length))} onRepeat={(trend) => repeatTrend(trend)} />
       )}
 
-      {/* Escape the feed's containing block; keep gallery above navigation and below sheets. */}
+      {/* Escape the feed containing block; keep the gallery below repeat/payment sheets. */}
       {viewer ? createPortal(
-        <MediaViewer viewer={viewer} onClose={() => setViewer(null)} onChangeIndex={(index) => setViewer((current) => current ? { ...current, index } : current)} onRemix={onRemix} remixingId={remixingId} />,
+        <MediaViewer
+          viewer={viewer}
+          dialogRef={viewerDialogRef}
+          failedUrl={viewerFailedUrl}
+          onMediaError={setViewerFailedUrl}
+          onClose={() => setViewer(null)}
+          onChangeIndex={(index) => { setViewerFailedUrl(null); setViewer((current) => current ? { ...current, index } : current); }}
+          onRemix={onRemix}
+          remixingId={remixingId}
+        />,
         document.body,
       ) : null}
     </div>
+  );
+}
+
+function FeedPreview({ url, poster = "", video, eager = false }: { url: string; poster?: string; video: boolean; eager?: boolean }) {
+  const [failed, setFailed] = useState(false);
+  if (!url || failed) {
+    return <div className="feed-media-fallback">
+      {video ? <Film aria-hidden="true" /> : <ImageIcon aria-hidden="true" />}
+      <span>{failed ? "Превью недоступно" : "Нет превью"}</span>
+    </div>;
+  }
+  return video ? (
+    <video src={url} poster={poster || undefined} muted playsInline preload="metadata" onError={() => setFailed(true)} />
+  ) : (
+    <img src={url} alt="" loading={eager ? "eager" : "lazy"} fetchPriority={eager ? "high" : "auto"} decoding="async" onError={() => setFailed(true)} />
   );
 }
 
@@ -602,69 +604,56 @@ function TrendCategorySurface({
   onRepeat: (trend: TrendItem) => void;
 }) {
   if (!trends.length) {
-    return (
-      <div className="grid min-h-28 place-items-center rounded-xl border border-dashed border-border text-center text-xs text-muted-foreground">
-        {loading ? "Загружаем тренды…" : "В этой категории пока нет трендов"}
-      </div>
-    );
+    return <div className="feed-gallery-empty" role="status">
+      {loading ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}
+      <p>{loading ? "Загружаем тренды…" : "В этой категории пока нет трендов"}</p>
+    </div>;
   }
 
   return (
-    <div className="grid gap-3">
-      <div className="apix-media-grid apix-trend-category-grid">
+    <div className="feed-trend-surface">
+      <div className="apix-media-grid apix-trend-category-grid feed-gallery-grid" aria-busy={loading}>
         {trends.map((trend, index) => {
           const media = safeExternalUrl(trend.preview_url);
           const isVideo = trend.kind === "video";
           return (
-            <Card key={trend.id} className={cn("apix-feed-card overflow-hidden shadow-none", index % 6 === 0 && "apix-feed-card-featured")}>
-              <div className={cn("apix-feed-media relative overflow-hidden bg-muted", index % 6 === 0 ? "aspect-[3/4]" : "aspect-[4/5]") }>
-                {media ? (
-                  isVideo ? (
-                    <video src={media} muted playsInline preload="metadata" className="size-full object-cover" />
-                  ) : (
-                    <img src={media} alt="" loading="lazy" decoding="async" className="size-full object-cover" />
-                  )
-                ) : (
-                  <div className="grid size-full place-items-center text-muted-foreground">{isVideo ? <Film /> : <ImageIcon />}</div>
-                )}
-                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-2 pb-2 pt-10 text-white">
-                  <div className="mb-1 flex items-center gap-1 text-[8px] opacity-85">
-                    <span>{trend.category_emoji || (isVideo ? "🎬" : "🖼️")}</span>
-                    <span className="truncate">{trend.category_title || trend.kind}</span>
-                    {trend.uses_count ? <span className="ml-auto">↻ {trend.uses_count}</span> : null}
-                  </div>
-                  <h2 className="line-clamp-2 text-[11px] font-semibold leading-tight">{trend.title}</h2>
-                </div>
+            <Card key={trend.id} className="apix-feed-card feed-gallery-card" role="article" aria-label={trend.title}>
+              <div className="apix-feed-media feed-card-media">
+                <FeedPreview key={media} url={media} video={isVideo} eager={index < 4} />
+                <div className="feed-card-badges" aria-hidden="true"><span>{isVideo ? <Film /> : <ImageIcon />}{isVideo ? "Видео" : "Фото"}</span></div>
               </div>
-              <div className="grid gap-1.5 p-1.5">
-                {trend.description ? (
-                  <details className="apix-help border-0">
-                    <summary className="py-1 text-[10px]">Описание</summary>
-                    <p className="line-clamp-6 pb-1 text-[10px]">{trend.description}</p>
-                  </details>
-                ) : null}
-                <Button className="min-h-8 px-2 text-[10px]" onClick={() => onRepeat(trend)}>
-                  <Repeat2 className="size-3.5" />
-                  Повторить тренд
-                </Button>
+              <div className="feed-card-caption feed-trend-caption">
+                <p className="feed-trend-category">{trend.category_emoji ? <span aria-hidden="true">{trend.category_emoji}</span> : null}{trend.category_title || (isVideo ? "Видео" : "Фото")}</p>
+                <h2>{trend.title}</h2>
+                {trend.description ? <details className="feed-trend-description"><summary>Описание</summary><p>{trend.description}</p></details> : null}
+                <div className="feed-card-stats">
+                  {typeof trend.uses_count === "number" && Number.isInteger(trend.uses_count) && trend.uses_count >= 0 ? <span className="feed-card-stat feed-card-repeat-count whitespace-nowrap"><Repeat2 aria-hidden="true" /><span>Использований: {trend.uses_count}</span></span> : null}
+                </div>
+                <button type="button" className="apix-focus-ring feed-card-repeat" onClick={() => onRepeat(trend)}><Repeat2 aria-hidden="true" /><span>Повторить тренд</span></button>
               </div>
             </Card>
           );
         })}
       </div>
-      {canRevealMore ? <Button variant="ghost" size="sm" onClick={onRevealMore}>Показать ещё тренды</Button> : null}
+      {canRevealMore ? <div className="feed-gallery-more"><Button variant="ghost" onClick={onRevealMore}>Показать ещё тренды</Button></div> : null}
     </div>
   );
 }
 
 function MediaViewer({
   viewer,
+  dialogRef,
+  failedUrl = null,
+  onMediaError,
   onClose,
   onChangeIndex,
   onRemix,
   remixingId,
 }: {
   viewer: MediaViewerState | null;
+  dialogRef?: Ref<HTMLDivElement>;
+  failedUrl?: string | null;
+  onMediaError?: (url: string) => void;
   onClose: () => void;
   onChangeIndex: (index: number) => void;
   onRemix: (item: FeedItem, sourceMediaUrl?: string) => void;
@@ -678,56 +667,43 @@ function MediaViewer({
   const remixing = remixingId === viewer.item.id;
 
   return (
-    <div className="apix-media-viewer fixed inset-0 z-[1100] grid bg-black/92 text-white backdrop-blur-xl" role="dialog" aria-modal="true">
-      <button type="button" className="absolute inset-0 cursor-zoom-out" aria-label="Закрыть просмотр" onClick={onClose} />
-      <div className="relative z-10 grid min-h-0 grid-rows-[auto_1fr_auto] p-2 pt-[max(8px,env(safe-area-inset-top))]">
-        <div className="flex items-center justify-between gap-2 rounded-2xl bg-white/8 px-2 py-1.5 backdrop-blur">
-          <div className="min-w-0">
-            <p className="truncate text-xs font-semibold">{viewer.title || "Работа"}</p>
-            <p className="truncate text-[10px] text-white/65">{viewer.meta}</p>
-            <RepeatCount count={viewer.item.remixes} className="text-white/80" />
+    <div ref={dialogRef} className="apix-media-viewer feed-gallery-viewer" role="dialog" aria-modal="true" aria-label="Просмотр работы" tabIndex={-1}>
+      <button type="button" className="feed-viewer-backdrop" tabIndex={-1} aria-label="Закрыть просмотр" onClick={onClose} />
+      <div className="feed-viewer-content">
+        <header className="feed-viewer-header">
+          <div className="feed-viewer-heading">
+            <h2>{viewer.title || "Работа"}</h2>
+            <p>{viewer.meta}</p>
+            <RepeatCount count={viewer.item.remixes} className="feed-viewer-repeats" />
           </div>
-          <Button variant="ghost" size="icon" className="size-9 min-h-9 text-white hover:bg-white/10" onClick={onClose} aria-label="Закрыть">
-            <X className="size-5" />
-          </Button>
-        </div>
+          <Button variant="ghost" size="icon" className="feed-viewer-close" data-feed-viewer-close onClick={onClose} aria-label="Закрыть"><X aria-hidden="true" /></Button>
+        </header>
 
-        <div className="relative grid min-h-0 place-items-center py-2">
-          {canPrev ? (
-            <Button variant="ghost" size="icon" className="absolute left-1 z-20 size-10 rounded-full bg-black/35 text-white hover:bg-black/55" onClick={() => onChangeIndex(viewer.index - 1)} aria-label="Предыдущее фото">
-              <ChevronLeft />
-            </Button>
-          ) : null}
-          {isVideo ? (
-            <video src={url} controls autoPlay playsInline className="max-h-[calc(100dvh-132px-env(safe-area-inset-top)-env(safe-area-inset-bottom))] max-w-full rounded-2xl object-contain shadow-2xl" />
+        <div className="feed-viewer-stage">
+          {canPrev ? <Button variant="ghost" size="icon" className="feed-viewer-step feed-viewer-prev" onClick={() => onChangeIndex(viewer.index - 1)} aria-label="Предыдущее фото"><ChevronLeft /></Button> : null}
+          {!url || failedUrl === url ? (
+            <div className="feed-media-fallback feed-viewer-fallback" role="status">
+              {isVideo ? <Film aria-hidden="true" /> : <ImageIcon aria-hidden="true" />}
+              <p>Не удалось загрузить {isVideo ? "видео" : "фото"}</p><span>Закройте просмотр и попробуйте снова.</span>
+            </div>
+          ) : isVideo ? (
+            <video key={url} src={url} controls autoPlay playsInline className="feed-viewer-result" onError={() => onMediaError?.(url)} />
           ) : (
-            <img src={url} alt="" decoding="async" className="max-h-[calc(100dvh-132px-env(safe-area-inset-top)-env(safe-area-inset-bottom))] max-w-full rounded-2xl object-contain shadow-2xl" />
+            <img key={url} src={url} alt={viewer.title || "Работа"} decoding="async" className="feed-viewer-result" onError={() => onMediaError?.(url)} />
           )}
-          {canNext ? (
-            <Button variant="ghost" size="icon" className="absolute right-1 z-20 size-10 rounded-full bg-black/35 text-white hover:bg-black/55" onClick={() => onChangeIndex(viewer.index + 1)} aria-label="Следующее фото">
-              <ChevronRight />
-            </Button>
-          ) : null}
+          {canNext ? <Button variant="ghost" size="icon" className="feed-viewer-step feed-viewer-next" onClick={() => onChangeIndex(viewer.index + 1)} aria-label="Следующее фото"><ChevronRight /></Button> : null}
         </div>
 
-        <div className="grid gap-1.5 pb-[max(8px,env(safe-area-inset-bottom))]">
+        <footer className="feed-viewer-footer">
           {viewer.urls.length > 1 ? (
-            <div className="flex justify-center gap-1">
-              {viewer.urls.map((item, index) => (
-                <button
-                  key={item}
-                  type="button"
-                  className={cn("size-1.5 rounded-full transition", index === viewer.index ? "bg-white" : "bg-white/35")}
-                  onClick={() => onChangeIndex(index)}
-                  aria-label={`Открыть вариант ${index + 1}`}
-                />
-              ))}
+            <div className="feed-viewer-pages" role="group" aria-label="Варианты работы">
+              {viewer.urls.map((item, index) => <button key={item} type="button" className="apix-focus-ring" aria-pressed={index === viewer.index} aria-label={`Открыть вариант ${index + 1}`} onClick={() => onChangeIndex(index)}><span aria-hidden="true">{index + 1}</span></button>)}
             </div>
           ) : null}
-          <Button className="min-h-10 rounded-xl" disabled={remixing} onClick={() => onRemix(viewer.item, url)}>
-            <Repeat2 className={cn("size-4", remixing && "animate-spin")} /> {remixing ? "Запуск повтора" : "Повторить эту работу"}
+          <Button className="feed-viewer-repeat" disabled={remixing} onClick={() => onRemix(viewer.item, url)}>
+            <Repeat2 aria-hidden="true" className={cn(remixing && "animate-spin")} />{remixing ? "Запуск повтора" : "Повторить эту работу"}
           </Button>
-        </div>
+        </footer>
       </div>
     </div>
   );

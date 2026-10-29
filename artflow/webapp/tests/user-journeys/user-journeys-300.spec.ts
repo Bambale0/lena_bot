@@ -9,7 +9,7 @@ if (EXPECTED_TEST_COUNT !== 300) {
 }
 
 const TINY_PNG = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9WlZ5xkAAAAASUVORK5CYII=",
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=",
   "base64",
 );
 
@@ -731,7 +731,10 @@ registerDomain("12 · Ошибки, пустые данные и валидац�
   await expect(page.locator(".apix-shell")).toBeVisible();
 
   if (mode === 0) {
-    await expect(page.getByText("По этому фильтру работ пока нет")).toBeVisible();
+    const emptyFeed = page.locator(".feed-gallery-empty");
+    await expect(emptyFeed.getByRole("heading", { name: "Работ пока нет", exact: true })).toBeVisible();
+    await expect(emptyFeed.getByText("Выберите другой фильтр или обновите ленту.", { exact: true })).toBeVisible();
+    await expect(page.locator(".apix-feed-card")).toHaveCount(0);
   } else if (mode === 1) {
     await page.getByRole("tab", { name: "Тренды", exact: true }).click();
     await expect(page.getByRole("tab", { name: "Тренды", exact: true })).toHaveAttribute("aria-selected", "true");

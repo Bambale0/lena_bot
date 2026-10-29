@@ -73,7 +73,11 @@ def test_secondary_help_is_collapsed_and_primary_surfaces_are_dense() -> None:
     assert 'activeTab === "feed" || activeTab === "studio"' in app
     assert 'import { StudioScreen }' not in app
     assert '<details className="apix-help' in generation
-    assert '<details className="apix-help' in feed
+    # Feed descriptions remain secondary, explicitly expandable content.
+    # The former hidden implementation-help paragraph is no longer product UI.
+    assert '<details className="feed-trend-description">' in feed
+    assert '<summary>Описание</summary>' in feed
+    assert '<details className="feed-trend-description" open' not in feed
     assert '<details className="apix-help' in trends
     assert '<details className="apix-help' in services
     assert 'Выложенные работы' in profile
@@ -122,29 +126,41 @@ def test_feed_is_first_tab_and_repeat_is_inside_feed() -> None:
     assert 'label: "Повторы"' not in shell
     assert 'title="Повторы"' not in app
     assert 'repeatFirst' not in app
-    assert '<h1 className="text-lg font-bold tracking-tight sm:text-xl">Лента</h1>' in feed
+    assert '<h1>Лента</h1>' in feed
     assert 'Повторить' in feed
-    assert 'Карточки выводятся порциями' in feed
+    assert 'onRemix(item, mediaUrls[0])' in feed
+    assert 'disabled={remixing}' in feed
 
 
-def test_feed_controls_are_compact_and_actions_stay_inside_media() -> None:
+def test_feed_controls_are_semantic_and_repeat_has_a_readable_caption() -> None:
     feed = read(SRC / "features/feed-screen.tsx")
-    css = read(SRC / "styles/globals.css")
+    css = read(SRC / "styles/feed-gallery.css")
 
     assert 'apix-feed-toolbar' in feed
-    assert 'apix-chip-rail' in feed
+    for label in ("Содержимое ленты", "Тип работ", "Сортировка работ"):
+        assert f'role="group" aria-label="{label}"' in feed
+    assert 'aria-pressed={contentMode === tab.value}' in feed
+    assert 'aria-pressed={workFilter === filter.value}' in feed
+    assert 'aria-pressed={source === filter.value}' in feed
     assert 'sticky top-[48px]' not in feed
     assert 'grid grid-cols-2 gap-1 rounded-lg bg-muted/45 p-1' not in feed
-    assert 'apix-feed-media group relative' in feed
-    assert 'cursor-zoom-in' in feed
-    assert 'grid min-w-0 gap-1' in feed
-    assert 'inline-flex min-h-7 w-full min-w-0 items-center justify-center' in feed
-    assert 'overflow-hidden whitespace-nowrap rounded-full bg-primary/95' in feed
-    assert '<span className="truncate">{remixing ? "Запуск" : "Повторить"}</span>' in feed
+    assert 'className="apix-feed-media feed-card-media"' in feed
+    assert 'className="feed-card-caption"' in feed
+    assert 'className="apix-focus-ring feed-card-repeat"' in feed
+    assert '<span>{remixing ? "Запуск" : "Повторить"}</span>' in feed
+    assert 'aria-label="Лайк"' in feed
+    assert 'onLike(item)' in feed
+    assert '<RepeatCount count={item.remixes}' in feed
     assert 'event.stopPropagation();' in feed
-    assert '.apix-feed-toolbar' in css
-    assert '.apix-chip-rail' in css
-    assert '.apix-feed-media' in css
+    caption = css.split('.feed-card-caption {', 1)[1].split('}', 1)[0]
+    repeat = css.split('.feed-card-repeat {', 1)[1].split('}', 1)[0]
+    icons = css.split('.feed-card-icon-button {', 1)[1].split('}', 1)[0]
+    assert 'display: grid' in caption
+    assert 'position: absolute' not in caption
+    assert 'min-height: 44px' in repeat
+    assert 'width: 44px' in icons and 'height: 44px' in icons
+    # tests/ux2/feed-gallery.spec.ts proves caption/action geometry below media,
+    # readable metadata and hit targets above navigation at 320/390/1440px.
 
 
 def test_infinite_feed_uses_intersection_observer_and_growing_limit() -> None:
@@ -179,37 +195,61 @@ def test_feed_render_window_keeps_loaded_items_from_overloading_dom() -> None:
     assert 'setVisibleWorkCount((current) => Math.min(current + WORK_RENDER_BATCH, visibleItems.length))' in feed
     assert 'visibleTrendCount' in feed
     assert 'renderedTrends' in feed
-    assert 'loading={index < 4 ? "eager" : "lazy"}' in feed
+    assert 'function FeedPreview' in feed
+    assert 'eager={index < 4}' in feed
+    assert 'eager = false' in feed
+    assert 'loading={eager ? "eager" : "lazy"}' in feed
     assert 'decoding="async"' in feed
-    assert 'fetchPriority={index < 2 ? "high" : "auto"}' in feed
+    assert 'fetchPriority={eager ? "high" : "auto"}' in feed
 
 
 def test_feed_media_opens_inside_app_viewer_not_browser() -> None:
     feed = read(SRC / "features/feed-screen.tsx")
-    css = read(SRC / "styles/globals.css")
+    css = read(SRC / "styles/feed-gallery.css")
 
     assert 'interface MediaViewerState' in feed
     assert 'function MediaViewer' in feed
-    assert 'apix-media-viewer fixed inset-0' in feed
-    assert 'onClick={() => openViewer(item)}' in feed
+    assert 'apix-media-viewer feed-gallery-viewer' in feed
+    assert 'createPortal(' in feed
+    assert 'document.body' in feed
+    assert 'role="dialog" aria-modal="true" aria-label="Просмотр работы"' in feed
+    assert 'openViewer(item, 0, event.currentTarget)' in feed
     assert 'Открыть внутри приложения' in feed
     assert 'openExternalUrl' not in feed
-    assert '.apix-media-viewer' in css
-    assert '@keyframes apix-media-viewer-in' in css
+    viewer = css.split('.feed-gallery-viewer {', 1)[1].split('}', 1)[0]
+    assert 'position: fixed' in viewer and 'inset: 0' in viewer
+    assert 'z-index: 1100' in viewer
+    assert 'event.key === "Tab"' in feed
+    assert 'event.key === "Escape"' in feed
+    assert 'event.defaultPrevented || anotherDialogOpen()' in feed
+    assert 'dialog.inert = next' in feed
+    assert 'returnTarget.focus({ preventScroll: true })' in feed
+    # The gallery browser regression exercises focus trapping, Sheet ownership
+    # and restoration to the exact opener, beyond these structural guards.
 
 
-def test_feed_uses_mosaic_cards_instead_of_monotone_grid() -> None:
+def test_feed_uses_stable_responsive_grid_and_consistent_media_shape() -> None:
     feed = read(SRC / "features/feed-screen.tsx")
-    css = read(SRC / "styles/globals.css")
+    css = read(SRC / "styles/feed-gallery.css")
+    main = read(SRC / "main.tsx")
 
-    assert 'function cardMediaShape' in feed
-    assert 'index % 10 === 0' in feed
-    assert 'index % 7 === 0' in feed
-    assert 'apix-feed-mosaic' in feed
-    assert 'apix-feed-card-featured' in feed
-    assert 'выбор' in feed
-    assert '.apix-feed-mosaic' in css
-    assert '.apix-feed-card-featured' in css
+    assert 'import "@/styles/feed-gallery.css"' in main
+    assert 'feed-gallery-grid' in feed
+    grid = css.split('.apix-feed-gallery .feed-gallery-grid {', 1)[1].split('}', 1)[0]
+    assert 'display: grid' in grid
+    assert 'grid-template-columns: minmax(0, 1fr)' in grid
+    assert 'grid-auto-flow: row' in grid
+    assert 'columns: auto' in grid
+    for breakpoint, columns in ((380, 2), (700, 3), (1100, 4)):
+        rule = css.split(f'@media (min-width: {breakpoint}px) {{', 1)[1].split('}', 1)[0]
+        assert f'grid-template-columns: repeat({columns}, minmax(0, 1fr))' in rule
+    assert 'max-width: 1600px' in css
+    media = css.split('.apix-feed-gallery .feed-card-media {', 1)[1].split('}', 1)[0]
+    assert 'aspect-ratio: 4 / 5' in media
+    assert 'function cardMediaShape' not in feed
+    assert 'isFeatured' not in feed
+    assert 'apix-feed-card-featured' not in feed
+    assert 'выбор' not in feed
 
 
 def test_feed_has_categorized_trends_tab() -> None:
