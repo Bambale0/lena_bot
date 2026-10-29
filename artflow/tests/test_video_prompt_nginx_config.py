@@ -7,6 +7,7 @@ No production certificates, secrets, networks, services or ports are used.
 """
 from __future__ import annotations
 
+import ast
 import http.client
 import ipaddress
 import os
@@ -24,6 +25,9 @@ ROOT = Path(__file__).resolve().parents[1]
 OFFICIAL_IMAGE = "nginx:alpine"
 CERT_ROOT = Path("/etc/letsencrypt")
 CONFIG_FILES = {"default.conf": "nginx.conf", "media.conf": "nginx-media.conf"}
+FEED_HOSTS = ("apixbotai.com", "testapi.chillcreative.ru", "apix.chillcreative.ru")
+# Transport fixture: deterministic bytes, not a video decoder fixture.
+FEED_RANGE_BODY = bytes(range(256)) * 512
 
 
 def _runtime_hosts(config: str) -> list[str]:
@@ -161,6 +165,42 @@ def running_nginx(tmp_path):
     challenge = webroot / ".well-known" / "acme-challenge" / "fixture-probe"
     challenge.parent.mkdir(parents=True)
     challenge.write_text("acme-fixture-ok")
+    # The legacy ASGI FileResponse ignores Range. Reproduce that behavior with
+    # a loopback-only synthetic upstream, so RED is 200/full body, not a missing
+    # application (502). Both canonical configuration files remain unchanged.
+    uploads = tmp_path / "uploads"
+    feed = uploads / "feed"
+    feed.mkdir(parents=True)
+    (feed / "clip.mp4").write_bytes(FEED_RANGE_BODY)
+    (uploads / "outside-feed.mp4").write_bytes(b"outside-feed-fixture")
+    (feed / ".hidden.mp4").write_bytes(b"hidden-fixture")
+    hidden_directory = feed / ".internal"
+    hidden_directory.mkdir()
+    (hidden_directory / "clip.mp4").write_bytes(b"hidden-directory-fixture")
+    indexed_directory = feed / "directory"
+    indexed_directory.mkdir()
+    (indexed_directory / "index.html").write_text("directory-index-must-not-be-served")
+    (feed / "escape.mp4").symlink_to("/etc/nginx/conf.d/default.conf")
+    (feed / "linked.mp4").symlink_to("clip.mp4")
+    (conf_dir / "fixture-upstream.conf").write_text(
+        "server {\n"
+        "    listen 127.0.0.1:8000;\n"
+        "    server_name fixture-upstream.invalid;\n"
+        "    location /static/upload/ {\n"
+        "        alias /var/www/apix-media/uploads/;\n"
+        "        max_ranges 0;\n"
+        "        add_header X-Fixture-Upstream legacy-static;\n"
+        "        add_header X-Fixture-Request-Method $request_method;\n"
+        "        add_header X-Fixture-Request-URI $request_uri;\n"
+        "        add_header X-Fixture-Origin $http_origin;\n"
+        "        add_header X-Fixture-Requested-Method $http_access_control_request_method;\n"
+        "        add_header X-Fixture-Requested-Headers $http_access_control_request_headers;\n"
+        # Only reflect delegation, without reimplementing the ASGI CORS policy.
+        "        if ($request_method = OPTIONS) { return 204; }\n"
+        "    }\n"
+        "    location / { return 404; }\n"
+        "}\n"
+    )
     command = _docker_command(image, conf_dir, tls_dir, hosts)
     # Only synthetic inputs; random loopback ports avoid all production listeners.
     command[command.index("none")] = "bridge"
@@ -168,6 +208,7 @@ def running_nginx(tmp_path):
     command[-2:] = [
         "--publish", "127.0.0.1::80", "--publish", "127.0.0.1::443",
         "--mount", f"type=bind,src={webroot},dst=/var/www/certbot,readonly",
+        "--mount", f"type=bind,src={uploads},dst=/var/www/apix-media/uploads,readonly",
         image, "-g", "daemon off;",
     ]
     container = subprocess.check_output(command, text=True, timeout=30).strip()
@@ -235,3 +276,208 @@ def test_retired_and_unknown_hosts_do_not_reach_applications(running_nginx, host
     with socket.create_connection(("127.0.0.1", running_nginx[1]), timeout=5) as raw:
         with pytest.raises(ssl.SSLError):
             context.wrap_socket(raw, server_hostname=host)
+
+
+def _application_cors_origins() -> set[str]:
+    """Keep the static location aligned with the application's existing policy."""
+    tree = ast.parse((ROOT / "main.py").read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not node.args:
+            continue
+        if not isinstance(node.func, ast.Attribute) or node.func.attr != "add_middleware":
+            continue
+        if not isinstance(node.args[0], ast.Name) or node.args[0].id != "CORSMiddleware":
+            continue
+        for keyword in node.keywords:
+            if keyword.arg == "allow_origins":
+                origins = ast.literal_eval(keyword.value)
+                assert isinstance(origins, list) and all(isinstance(origin, str) for origin in origins)
+                return set(origins)
+    pytest.fail("Application CORS policy was not found")
+
+
+def _feed_tls_request(running_nginx, host, path, *, method="GET", headers=None, body=None):
+    context = ssl.create_default_context(cafile=str(running_nginx[2]))
+    context.check_hostname = False  # Synthetic certificate, real SNI/vhost routing.
+    connection = http.client.HTTPConnection("127.0.0.1", running_nginx[1], timeout=5)
+    try:
+        connection.sock = context.wrap_socket(
+            socket.create_connection(("127.0.0.1", running_nginx[1]), timeout=5),
+            server_hostname=host,
+        )
+        connection.request(method, path, body=body, headers={"Host": host, **(headers or {})})
+        response = connection.getresponse()
+        return response.status, dict(response.getheaders()), response.read()
+    finally:
+        connection.close()
+
+
+def _lower_headers(headers):
+    return {name.lower(): value for name, value in headers.items()}
+
+
+def test_feed_video_range_responses_contain_only_requested_bytes(running_nginx):
+    """Exercise native static serving through every actual APIX HTTPS vhost."""
+    size = len(FEED_RANGE_BODY)
+    ranges = [
+        ("bytes=0-65535", 0, 65535),
+        ("bytes=37-91", 37, 91),
+        ("bytes=-64", size - 64, size - 1),
+        (f"bytes={size - 64}-", size - 64, size - 1),
+    ]
+    for host in FEED_HOSTS:
+        for requested, first, last in ranges:
+            status, raw_headers, body = _feed_tls_request(
+                running_nginx, host, "/static/upload/feed/clip.mp4",
+                headers={"Range": requested},
+            )
+            headers = _lower_headers(raw_headers)
+            assert status == 206, (host, requested, status, headers)
+            assert headers["content-range"] == f"bytes {first}-{last}/{size}"
+            assert int(headers["content-length"]) == last - first + 1
+            assert headers["content-type"] == "video/mp4"
+            assert body == FEED_RANGE_BODY[first:last + 1]
+            assert "cache-control" not in headers
+
+        status, raw_headers, _ = _feed_tls_request(
+            running_nginx, host, "/static/upload/feed/clip.mp4",
+            headers={"Range": f"bytes={size + 1}-"},
+        )
+        headers = _lower_headers(raw_headers)
+        assert status == 416
+        assert headers["content-range"] == f"bytes */{size}"
+        assert "no-store" in headers.get("cache-control", "")
+
+
+def test_feed_video_get_head_and_conditional_requests_preserve_validators(running_nginx):
+    path = "/static/upload/feed/clip.mp4"
+    for host in FEED_HOSTS:
+        status, raw_headers, body = _feed_tls_request(running_nginx, host, path)
+        headers = _lower_headers(raw_headers)
+        assert status == 200 and body == FEED_RANGE_BODY
+        assert headers["content-type"] == "video/mp4"
+        assert int(headers["content-length"]) == len(FEED_RANGE_BODY)
+        assert headers["accept-ranges"] == "bytes"
+        assert headers["etag"] and headers["last-modified"]
+        assert "cache-control" not in headers
+        assert headers["x-content-type-options"] == "nosniff"
+
+        status, raw_head_headers, head_body = _feed_tls_request(
+            running_nginx, host, path, method="HEAD",
+        )
+        head_headers = _lower_headers(raw_head_headers)
+        assert status == 200 and head_body == b""
+        for name in ("content-type", "content-length", "etag", "last-modified", "accept-ranges"):
+            assert head_headers[name] == headers[name]
+
+        for conditional in (
+            {"If-None-Match": headers["etag"]},
+            {"If-Modified-Since": headers["last-modified"]},
+        ):
+            status, _, body = _feed_tls_request(running_nginx, host, path, headers=conditional)
+            assert status == 304 and body == b""
+
+        status, raw_range_headers, body = _feed_tls_request(
+            running_nginx, host, path,
+            headers={"Range": "bytes=8-23", "If-Range": headers["etag"]},
+        )
+        assert status == 206 and body == FEED_RANGE_BODY[8:24]
+        assert _lower_headers(raw_range_headers)["content-range"] == f"bytes 8-23/{len(FEED_RANGE_BODY)}"
+
+        status, _, body = _feed_tls_request(
+            running_nginx, host, path,
+            headers={"Range": "bytes=8-23", "If-Range": '"different-fixture-version"'},
+        )
+        assert status == 200 and body == FEED_RANGE_BODY
+
+
+def test_feed_video_static_alias_keeps_writes_and_paths_restricted(running_nginx):
+    for host in FEED_HOSTS:
+        for method in ("POST", "PUT", "PATCH", "DELETE"):
+            status, raw_headers, _ = _feed_tls_request(
+                running_nginx, host, "/static/upload/feed/clip.mp4",
+                method=method, body=b"must-not-replace-the-file",
+            )
+            assert status in (403, 405), (host, method, status)
+            assert "no-store" in _lower_headers(raw_headers).get("cache-control", "")
+        status, _, body = _feed_tls_request(running_nginx, host, "/static/upload/feed/clip.mp4")
+        assert status == 200 and body == FEED_RANGE_BODY
+
+        # Deny both directory listing and a directory's implicit index.html.
+        # Symlink targets include the readable synthetic Nginx config, so an
+        # absent target cannot make the escape assertion pass accidentally.
+        for path in (
+            "/static/upload/feed/",
+            "/static/upload/feed/directory/",
+            "/static/upload/feed/.hidden.mp4",
+            "/static/upload/feed/%2ehidden.mp4",
+            "/static/upload/feed/.internal/clip.mp4",
+            "/static/upload/feed/escape.mp4",
+            "/static/upload/feed/linked.mp4",
+            "/static/upload/feed/missing.mp4",
+        ):
+            status, raw_headers, body = _feed_tls_request(running_nginx, host, path)
+            assert status in (403, 404), (host, path, status)
+            assert "no-store" in _lower_headers(raw_headers).get("cache-control", "")
+            assert b"directory-index-must-not-be-served" not in body
+            assert b"ssl_certificate" not in body
+            assert b"hidden-fixture" not in body
+
+        # An existing sibling stays on the application's old route. This proves
+        # that the new native alias did not expand to the entire upload mount.
+        status, raw_headers, body = _feed_tls_request(
+            running_nginx, host, "/static/upload/outside-feed.mp4",
+        )
+        assert status == 200 and body == b"outside-feed-fixture"
+        assert _lower_headers(raw_headers)["x-fixture-upstream"] == "legacy-static"
+
+
+def test_feed_video_static_cors_preserves_application_allowed_origins(running_nginx):
+    allowed_origins = _application_cors_origins()
+    assert allowed_origins and "*" not in allowed_origins
+    for host in FEED_HOSTS:
+        for origin in sorted(allowed_origins):
+            status, raw_headers, body = _feed_tls_request(
+                running_nginx, host, "/static/upload/feed/clip.mp4",
+                headers={"Origin": origin, "Range": "bytes=0-15"},
+            )
+            headers = _lower_headers(raw_headers)
+            assert status == 206 and body == FEED_RANGE_BODY[:16]
+            assert headers["access-control-allow-origin"] == origin
+            assert "origin" in headers.get("vary", "").lower()
+            assert "access-control-allow-credentials" not in headers
+        for origin in (None, "https://untrusted.example", "null"):
+            status, raw_headers, _ = _feed_tls_request(
+                running_nginx, host, "/static/upload/feed/clip.mp4",
+                headers={"Origin": origin} if origin else {},
+            )
+            headers = _lower_headers(raw_headers)
+            assert status == 200
+            assert "access-control-allow-origin" not in headers
+            assert "access-control-allow-credentials" not in headers
+
+
+def test_feed_video_preflight_delegates_original_request_to_application(running_nginx):
+    path = "/static/upload/feed/clip.mp4?download=1&output=fixture"
+    requested_headers = "Authorization, X-Telegram-Init-Data"
+    for host in FEED_HOSTS:
+        for origin in ("https://apixbotai.com", "https://untrusted.example"):
+            status, raw_headers, body = _feed_tls_request(
+                running_nginx, host, path, method="OPTIONS",
+                headers={
+                    "Origin": origin,
+                    "Access-Control-Request-Method": "GET",
+                    "Access-Control-Request-Headers": requested_headers,
+                },
+            )
+            headers = _lower_headers(raw_headers)
+            assert status == 204 and body == b"", (host, origin, status, headers)
+            assert headers["x-fixture-upstream"] == "legacy-static"
+            assert headers["x-fixture-request-method"] == "OPTIONS"
+            assert headers["x-fixture-request-uri"] == path
+            assert headers["x-fixture-origin"] == origin
+            assert headers["x-fixture-requested-method"] == "GET"
+            assert headers["x-fixture-requested-headers"] == requested_headers
+            # The real application owns this decision. Its synthetic replacement
+            # emits no permission, so Nginx must not manufacture one here.
+            assert "access-control-allow-origin" not in headers

@@ -7,10 +7,18 @@ function primeVideoFrame(video: HTMLVideoElement): void {
   if (video.dataset.apixFramePrimed === "1") return;
   if (!Number.isFinite(video.duration) || video.duration <= 0) return;
 
+  if (video.dataset.apixFrameSeekRequested === "1") {
+    if (video.seeking || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+    video.dataset.apixFramePrimed = "1";
+    video.pause();
+    return;
+  }
+
   const target = Math.min(PRIME_TIME_SECONDS, Math.max(0.01, video.duration / 100));
   try {
     video.currentTime = target;
-    video.dataset.apixFramePrimed = "1";
+    // Assigning currentTime requests a seek; it does not confirm a decoded frame.
+    video.dataset.apixFrameSeekRequested = "1";
     video.pause();
   } catch {
     // Some WebViews reject seeking until the first media data arrives.
@@ -23,16 +31,23 @@ function activateVideo(video: HTMLVideoElement): void {
   video.preload = "auto";
 
   const prime = () => primeVideoFrame(video);
+  const resetFrame = () => {
+    delete video.dataset.apixFramePrimed;
+    delete video.dataset.apixFrameSeekRequested;
+  };
+  video.addEventListener("emptied", resetFrame, { passive: true });
   video.addEventListener("loadedmetadata", prime, { passive: true });
   video.addEventListener("loadeddata", prime, { passive: true });
   video.addEventListener("canplay", prime, { passive: true });
+  video.addEventListener("seeked", prime, { passive: true });
 
-  if (video.readyState >= HTMLMediaElement.HAVE_METADATA) prime();
+  // Reload before seeking: load() discards the old resource's playback position.
   try {
     video.load();
   } catch {
     // The browser can still load the existing src normally.
   }
+  if (video.readyState >= HTMLMediaElement.HAVE_METADATA) prime();
 }
 
 function registerVideo(video: HTMLVideoElement, observer: IntersectionObserver | null): void {
