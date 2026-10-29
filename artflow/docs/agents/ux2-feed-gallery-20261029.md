@@ -55,7 +55,7 @@ Public seams are the rendered gallery, toolbar, viewer, repeat-sheet handoff, an
 4. [x] Implement scoped gallery and viewer improvements.
 5. [x] Focused unit/browser/WebKit checks and screenshot critique.
 6. [x] Independent code review and secret/whitespace check.
-7. [ ] PR, exact-head CI, native squash auto-merge.
+7. [ ] PR #325, exact-head CI, native squash auto-merge (enabled; checks in progress).
 8. [ ] Main CI/autodeploy and production asset/health verification.
 
 ## Skills materially applied
@@ -74,7 +74,8 @@ Public seams are the rendered gallery, toolbar, viewer, repeat-sheet handoff, an
 - Existing gallery e2e: 16/16 passed across the four configured Chromium device profiles. WebKit: 9/9 passed using Playwright's installed WebKit 27.2 engine, not a Chromium mobile emulation.
 - Public-media visual QA: 5/5 passed at 320/390/768/1440/1920px, with screenshots of the filled gallery and viewer. Images actually decoded, viewport geometry and final-action hit-tests passed, and no paid write or runtime page error occurred. The temporary fixture and images stay outside git.
 - Final mobile critique reduced toolbar whitespace by 44px without reducing touch targets. After this refinement, 9/9 Chromium scenarios, 3/3 WebKit responsive cases and the real-media 390px case passed again. A preceding browser-start crash was traced to the isolated QA container's process limit; restarting it and using one worker resolved the environment failure without changing product code or assertions.
-- Final review approved the seven-file diff with no open product P0/P1/P2. Whitespace and credential-pattern scan passed. Main remained at the baseline SHA before commit.
+- Final review approved the implementation with no open product P0/P1/P2. Whitespace and credential-pattern scan passed. Main remained at the baseline SHA before commit.
+- Initial full backend CI found six legacy structural tests requiring the replaced mosaic, controls over media and exact old utility classes. Those six functions in `test_apix_production_trends_surface.py` now assert the new scoped grid, semantic controls, caption actions, lazy/eager preview boundary, portal and focus ownership. All 16 tests are retained; AST comparison confirmed the other ten tests and helper are unchanged. Independent review approved this eighth changed file. Direct execution of all 16 pure structural checks against the full worktree passed; fresh full CI is required on the updated head.
 - The optional local backend container snapshot failed before tests could start because an old image digest was unavailable. Backend code is unchanged; the required full backend CI remains the release gate and is not claimed as locally executed.
 - The only build warning is the existing Vite chunk-size warning. No new dependency or code-splitting change is included in this visual task.
 - Final merge-SHA CI, deployment and runtime evidence will be appended to the PR description, avoiding a documentation-only redeploy. Browser-engine QA does not claim physical iPhone/Telegram-device testing.
