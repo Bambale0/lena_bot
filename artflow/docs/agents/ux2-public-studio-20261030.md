@@ -65,3 +65,10 @@ Release identifiers and final runtime evidence will be recorded in the PR after 
 - Include this authenticated, read-only local-public-upload inspector in the release. Preserve its URL/path allowlist, no-network behavior, symlink protection, response privacy and logging. It does not grant ownership, renew files, or change generation authorization.
 - The historical E10 program remains separate from this explicitly authorized launch. Record this delivery and its evidence here; do not claim completion of research or roadmap items that have not been performed.
 - The checker regression first produced two expected failures and 34 passes. After removing only the additional admin gate and unused import, all 58 combined backend cases and Ruff for all 617 tracked Python files pass.
+
+### Full-CI navigation adjustment
+
+- PR #327's first head (`75e7cc1c`) passed backend quality, bot navigation, provider contracts, user journeys and Pinterest backend checks. The web job passed 152 unit, 392 smoke, 340 of 341 UX2 cases and both WebKit video cases.
+- The remaining counter-viewer test assumed `/` opened the feed immediately. It now follows the actual default Studio home through Ideas and the feed before opening the viewer. Its repeat-count and no-write assertions remain intact.
+- The counter fixture now describes an ordinary account with Studio capability and an independent false administrative role. Existing classic-profile assertions use explicit `?ux=1`. This correction changes tests only; the reviewed production source is unchanged.
+- The corrected counter file and the public-entry/foundation scenarios pass together: 18 browser cases after a fresh build and TypeScript check.

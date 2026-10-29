@@ -9,7 +9,7 @@ const tasks = [
   { id: 706, model: "model-706", gen_type: "video", prompt: "Счётчик недоступен", remixes: null, is_public_feed: true },
 ].map(task => ({ ...task, status: "done", created_at: "2026-10-29T10:00:00Z", result_url: `https://media.example.test/${task.id}.${task.gen_type === "video" ? "mp4" : "png"}` }));
 
-async function prepare(page: Page, admin = true) {
+async function prepare(page: Page) {
   let repeats = 7;
   const writes: string[] = [];
   await page.addInitScript(() => {
@@ -24,9 +24,9 @@ async function prepare(page: Page, admin = true) {
     if (route.request().method() !== "GET") writes.push(path);
     const json = (value: unknown) => route.fulfill({ json: value });
     if (path.endsWith("/auth/config")) return json({ bot_username: "fixture_bot" });
-    if (path === "/api/v1/me") return json({ id: 7, tg_id: 123, full_name: "Тест", credits: 120, language: "ru", miniapp_ux2_available: admin });
-    if (path.endsWith("/me/permissions")) return json({ is_admin: admin });
-    if (path.endsWith("/studio/preview")) return admin ? json({ allowed: true, ui_version: 3 }) : route.fulfill({ status: 403, json: { detail: "Admin access required" } });
+    if (path === "/api/v1/me") return json({ id: 7, tg_id: 123, full_name: "Тест", credits: 120, language: "ru", miniapp_ux2_available: true, is_admin: false });
+    if (path.endsWith("/me/permissions")) return json({ is_admin: false });
+    if (path.endsWith("/studio/preview")) return json({ allowed: true, ui_version: 3 });
     if (path.endsWith("/history")) return json(tasks.map(task => task.id === 701 ? { ...task, remixes: repeats } : task));
     if (/\/generations\/\d+$/.test(path)) {
       const task = tasks.find(row => row.id === Number(path.split("/").at(-1)));
@@ -78,14 +78,17 @@ test("published video and photo repeat counts remain visible in profile and task
 test("video repeat count is available inside the feed media viewer", async ({ page }) => {
   const state = await prepare(page);
   await page.goto("/");
+  await expect(page.locator('[data-ui-version="3"]')).toBeVisible();
+  await page.getByRole("navigation", { name: "Основная навигация" }).getByRole("tab", { name: "Идеи", exact: true }).click();
+  await page.getByRole("button", { name: "Лента работ", exact: true }).click();
   await page.getByRole("button", { name: "Открыть внутри приложения", exact: true }).first().click();
   await expect(page.getByRole("dialog").getByText("Повторов: 7", { exact: true })).toBeVisible();
   expect(state.writes).toEqual([]);
 });
 
-test("ordinary profile tiles show the published video repeat count", async ({ page }) => {
-  await prepare(page, false);
-  await page.goto("/");
+test("explicit classic profile tiles show the published video repeat count", async ({ page }) => {
+  await prepare(page);
+  await page.goto("/?ux=1");
   await page.getByRole("navigation").getByText("Профиль", { exact: true }).click();
   await expect(page.getByRole("button", { name: /model-701/ }).first().getByText("Повторов: 7", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /model-702/ }).first().getByText("Повторов: 0", { exact: true })).toBeVisible();
