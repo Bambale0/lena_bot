@@ -1,7 +1,8 @@
 import type { AppTab, UserProfile } from "./types";
 
 export function lilacRequested(user: UserProfile, search: string): boolean {
-  return user.miniapp_ux2_available === true && new URLSearchParams(search).get("ux") === "3";
+  const requested = new URLSearchParams(search).get("ux");
+  return user.miniapp_ux2_available === true && (requested === null || requested === "3");
 }
 
 export function lilacPrimaryTab(tab: AppTab): AppTab {

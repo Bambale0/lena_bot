@@ -2020,8 +2020,9 @@ async def _resolve_video_price_table(
 # ── schemas ───────────────────────────────────────────────────────────────────
 
 class UserProfile(BaseModel):
-    # Admin-only opt-in preview; never inferred from Telegram initDataUnsafe.
+    # Studio availability is separate from server-authorized administrative rights.
     miniapp_ux2_available: bool = False
+    is_admin: bool = False
     id: int
     tg_id: int
     username: str | None
@@ -2336,7 +2337,8 @@ def _credits_out(value: float | int | None) -> float:
 
 def _user_profile(user: User) -> UserProfile:
     return UserProfile(
-        miniapp_ux2_available=_is_admin_user(user),
+        miniapp_ux2_available=True,
+        is_admin=_is_admin_user(user),
         id=user.id,
         tg_id=user.tg_id,
         username=user.username,
@@ -2401,12 +2403,11 @@ async def admit_lilac_studio(
     response: Response,
     user: User = Depends(get_miniapp_user),
 ) -> dict:
-    """Admit an authenticated administrator to the opt-in Studio UI.
+    """Admit an authenticated user to the standard Studio UI.
 
     Shared generation/payment endpoints retain their existing authorization.
     The query string and browser storage are never authorization inputs.
     """
-    _admin_guard(user)
     response.headers["Cache-Control"] = "private, no-store"
     response.headers["Vary"] = "X-Telegram-Init-Data, X-Web-Auth-Token"
     logger.info("lilac_studio_admitted actor=%s ui_version=3", user.id)

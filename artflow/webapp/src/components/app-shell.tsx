@@ -195,9 +195,9 @@ function AppShell({ activeTab, user, children, onTabChange, onBalanceOpen, ux2 =
           <span>{formatKisses(user.credits, { compact: true })}</span>
         </Button>
         {!lilac && user.miniapp_ux2_available === true && onNewStudio && <button type="button" className="lilac-launch apix-focus-ring" aria-label="Открыть новую студию APIX" disabled={previewBusy} onClick={onNewStudio}>
-          <Sparkles size={20} /><span><strong>{previewBusy ? "Проверяем доступ…" : "Новая студия APIX"}</strong><small>Для администратора · полный функционал</small></span><Plus size={18} />
+          <Sparkles size={20} /><span><strong>{previewBusy ? "Проверяем доступ…" : "Новая студия APIX"}</strong><small>{en ? "Photos, video and music" : "Фото, видео и музыка"}</small></span><Plus size={18} />
         </button>}
-        {lilac && onExitStudio && <div className="lilac-preview-caption"><span>Доступ администратора</span><button type="button" onClick={onExitStudio}>Обычный интерфейс</button></div>}
+        {lilac && onExitStudio && <div className="lilac-preview-caption"><span>{en ? "APIX Studio" : "Студия APIX"}</span><button type="button" onClick={onExitStudio}>Обычный интерфейс</button></div>}
       </header>
 
       <main>

@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-async function prepare(page: Page) {
+async function prepare(page: Page, admin = false) {
   const writes: Array<{ path: string; body: any }> = [];
   await page.addInitScript(() => { window.Telegram = { WebApp: { initData: "studio-capability-fixture", initDataUnsafe: { user: { id: 123 } }, colorScheme: "dark", ready() {}, expand() {}, openLink() {}, HapticFeedback: { impactOccurred() {}, notificationOccurred() {} } } } as any; });
   await page.route("**/telegram-web-app.js", route => route.fulfill({ body: "" }));
@@ -8,9 +8,9 @@ async function prepare(page: Page) {
     const path = new URL(route.request().url()).pathname;
     if (route.request().method() !== "GET") writes.push({ path, body: route.request().headers()["content-type"]?.includes("application/json") ? route.request().postDataJSON() : route.request().postData() });
     const json = (value: unknown) => route.fulfill({ json: value });
-    if (path === "/api/v1/me") return json({ id: 7, tg_id: 123, full_name: "Администратор", credits: 500, language: "ru", miniapp_ux2_available: true });
+    if (path === "/api/v1/me") return json({ id: 7, tg_id: 123, full_name: "Администратор", credits: 500, language: "ru", miniapp_ux2_available: true, is_admin: admin });
     if (path === "/api/web/me") return json({ data: { id: 7, full_name: "Администратор", username: "tester", email: "fixture@example.test", phone: "", language: "ru", has_password: true } });
-    if (path.endsWith("/me/permissions")) return json({ is_admin: true });
+    if (path.endsWith("/me/permissions")) return json({ is_admin: admin });
     if (path.endsWith("/studio/preview")) return json({ allowed: true, ui_version: 3 });
     if (path.endsWith("/models/image")) return json([{ key: "image-fixture", display_name: "Фото модель", credits: 5, modes: ["text", "image"], max_refs: 2, aspect_ratios: ["1:1"], counts: [1] }]);
     if (path.endsWith("/models/video")) return json([{ key: "video-fixture", display_name: "Видео модель", credits: 10, modes: ["text", "image"], max_refs: 1, durations: [5], resolutions: ["720p"], aspect_ratios: ["16:9"] }]);
@@ -117,7 +117,7 @@ test("video library prompt opens video editor with its own model", async ({ page
 });
 
 test("owner can inspect payments already returned in user detail", async ({ page }) => {
-  await prepare(page);
+  await prepare(page, true);
   await page.route("**/api/v1/admin/users/9", route => route.fulfill({ json: { user: { id: 9, full_name: "Тестовый клиент", credits: 30 }, stats: { generations_count: 4, payments_count: 1, paid_rub: 250, referrals: { l1: 2, l2: 0, l3: 0 } }, ledger: [], generations: [], transactions: [{ id: 42, amount_rub: 250, credits: 100, provider: "tbank", status: "paid", created_at: "2026-10-24T12:00:00Z" }], withdrawals: [] } }));
   await page.goto("/?ux=3"); await page.getByRole("tab", { name: "Профиль", exact: true }).click(); await page.getByRole("button", { name: "Управление APIX", exact: true }).click();
   await page.getByRole("button", { name: /Тестовый клиент/ }).click();
@@ -136,7 +136,7 @@ test("library collections are folders and select the real tag source", async ({ 
 });
 
 test("owner moderation requires explicit confirmation and reason", async ({ page }) => {
-  const writes = await prepare(page);
+  const writes = await prepare(page, true);
   await page.route("**/api/web/admin/prompts?status=pending", route => route.fulfill({ json: { data: { items: [{ id: 91, title: "Задание на проверке", prompt_text: "Текст проверяемого задания", status: "pending" }] } } }));
   await page.goto("/?ux=3"); await page.getByRole("tab", { name: "Профиль", exact: true }).click(); await page.getByRole("button", { name: "Управление APIX", exact: true }).click();
   await page.getByRole("button", { name: "Проверить публикации", exact: true }).click();

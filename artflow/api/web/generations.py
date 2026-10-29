@@ -20,7 +20,6 @@ from api.miniapp_routes import (
     PromptImproveRequest,
     TopupRequest,
     VideoGenRequest,
-    _is_admin_user,
     _is_supported_reference_image,
     _reconcile_user_active_generations,
     miniapp_improve_prompt,
@@ -526,8 +525,6 @@ async def check_reference_availability(body: ReferenceCheckRequest, user=Depends
     """Inspect a known public upload; never fetch external URLs or renew access."""
     if auth_error := _auth_required(user):
         return auth_error
-    if not _is_admin_user(user):
-        return error_response(403, "Reference availability preview requires administrator access")
     started = time.monotonic()
     state = await asyncio.to_thread(inspect_local_photo_reference, body.url)
     logging.getLogger(__name__).info(

@@ -28,7 +28,7 @@ async function setup(page: Page) {
         products = [...products.filter(p => p.product_id !== id), row]; return json(row);
       }
     }
-    if (path.endsWith("/me")) return json({ id: 7, tg_id: 123, credits: 100, miniapp_ux2_available: true });
+    if (path.endsWith("/me")) return json({ id: 7, tg_id: 123, credits: 100, miniapp_ux2_available: true, is_admin: true });
     if (path.endsWith("/me/permissions")) return json({ is_admin: true });
     if (path.endsWith("/studio/preview")) return json({ allowed: true, ui_version: 3 });
     if (path.endsWith("/auth/config")) return json({ bot_username: "fixture" });

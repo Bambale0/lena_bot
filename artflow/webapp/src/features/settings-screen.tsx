@@ -42,14 +42,14 @@ function SettingsScreen({ user, busy, onLanguageChange, onResetApp, previewEnabl
       {user.miniapp_ux2_available === true && onPreviewChange && <Card>
         <CardHeader><CardTitle>APIX UX 2.0</CardTitle></CardHeader>
         <CardContent className="grid gap-3">
-          <p className="text-sm text-muted-foreground">{currentLanguage === "en" ? "Admin preview. You can return to the current interface at any time." : "Админский предпросмотр. Обычный интерфейс можно вернуть в любой момент."}</p>
+          <p className="text-sm text-muted-foreground">{currentLanguage === "en" ? "You can return to the classic interface at any time." : "Обычный интерфейс можно вернуть в любой момент."}</p>
           <Button variant="outline" onClick={() => onPreviewChange(!previewEnabled)}>
             {previewEnabled ? (currentLanguage === "en" ? "Return to current interface" : "Вернуть обычный интерфейс") : (currentLanguage === "en" ? "Open preview" : "Открыть предпросмотр")}
           </Button>
         </CardContent>
       </Card>}
 
-      {user.is_admin && <Card>
+      {user.is_admin === true && <Card>
         <CardHeader><CardTitle>Провайдеры Wan</CardTitle></CardHeader>
         <CardContent><a href="/wan-routing-admin.html" className="text-primary underline">Открыть настройки маршрутизации</a></CardContent>
       </Card>}

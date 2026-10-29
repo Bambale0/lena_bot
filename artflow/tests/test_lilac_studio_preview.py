@@ -15,7 +15,10 @@ def preview_client(monkeypatch):
     async def session_override():
         yield object()
 
-    user = SimpleNamespace(id=7, tg_id=123, is_banned=False, is_admin=True)
+    user = SimpleNamespace(
+        id=7, tg_id=123, username="test", full_name="Test", credits=0,
+        referral_code="test", referral_balance=0, is_banned=False, is_admin=True,
+    )
     monkeypatch.setattr(miniapp_routes.settings, "ADMIN_IDS", [123])
     monkeypatch.setattr(miniapp_auth, "_verify_init_data", lambda value: {"id": user.tg_id})
     monkeypatch.setattr(miniapp_auth.repo, "get_user_by_tg_id", AsyncMock(side_effect=lambda *_: user))
@@ -26,32 +29,74 @@ def preview_client(monkeypatch):
         yield client, user
 
 
-def test_admin_can_admit_preview_without_caching_identity(preview_client):
-    client, _ = preview_client
-    response = client.get("/api/v1/studio/preview", headers={"X-Telegram-Init-Data": "signed-fixture"})
+def _auth_headers(user, auth_method):
+    if auth_method == "web":
+        return {"X-Web-Auth-Token": miniapp_auth.create_web_auth_token(user.tg_id)}
+    return {"X-Telegram-Init-Data": "signed-fixture"}
+
+
+@pytest.mark.parametrize("tg_id", [123, 456])
+@pytest.mark.parametrize("auth_method", ["telegram", "web"])
+def test_authenticated_user_can_enter_studio_without_caching_identity(
+    preview_client, tg_id, auth_method,
+):
+    client, user = preview_client
+    user.tg_id = tg_id
+    response = client.get("/api/v1/studio/preview", headers=_auth_headers(user, auth_method))
     assert response.status_code == 200
-    assert response.json()["allowed"] is True
-    assert response.json()["ui_version"] == 3
-    assert "no-store" in response.headers["cache-control"]
+    assert response.json() == {"allowed": True, "ui_version": 3}
+    assert response.headers["cache-control"] == "private, no-store"
+    assert response.headers["vary"] == "X-Telegram-Init-Data, X-Web-Auth-Token"
 
 
-def test_preview_does_not_trust_client_admin_marker(preview_client):
+@pytest.mark.parametrize(("tg_id", "expected_admin"), [(123, True), (456, False)])
+@pytest.mark.parametrize("auth_method", ["telegram", "web"])
+def test_current_profile_keeps_server_role_separate_from_studio_access(
+    preview_client, tg_id, expected_admin, auth_method,
+):
+    client, user = preview_client
+    user.tg_id = tg_id
+    response = client.get("/api/v1/me?admin=1&ux=3", headers=_auth_headers(user, auth_method))
+    assert response.status_code == 200
+    assert response.json()["miniapp_ux2_available"] is True
+    assert response.json()["is_admin"] is expected_admin
+
+
+@pytest.mark.parametrize("endpoint", ["/api/v1/studio/preview", "/api/v1/me"])
+def test_studio_and_profile_require_signed_identity(preview_client, endpoint):
+    client, _ = preview_client
+    assert client.get(f"{endpoint}?admin=1&ux=3").status_code == 401
+
+
+@pytest.mark.parametrize("tg_id", [123, 456])
+@pytest.mark.parametrize("auth_method", ["telegram", "web"])
+def test_banned_user_cannot_enter_studio(preview_client, tg_id, auth_method):
+    client, user = preview_client
+    user.tg_id = tg_id
+    user.is_banned = True
+    response = client.get("/api/v1/studio/preview", headers=_auth_headers(user, auth_method))
+    assert response.status_code == 403
+    assert response.json() == {"detail": "User is banned"}
+
+
+@pytest.mark.parametrize("auth_method", ["telegram", "web"])
+@pytest.mark.parametrize(
+    ("method", "endpoint", "body"),
+    [
+        ("GET", "/api/v1/admin/overview", None),
+        ("POST", "/api/v1/admin/users/8/credits", {"amount": 10, "note": "fixture"}),
+    ],
+)
+def test_ordinary_user_cannot_access_admin_apis_with_client_admin_marker(
+    preview_client, auth_method, method, endpoint, body,
+):
     client, user = preview_client
     user.tg_id = 456
-    response = client.get("/api/v1/studio/preview?admin=1&ux=3", headers={"X-Telegram-Init-Data": "signed-fixture"})
+    response = client.request(
+        method, f"{endpoint}?admin=1&ux=3", headers=_auth_headers(user, auth_method), json=body,
+    )
     assert response.status_code == 403
-
-
-def test_preview_requires_signed_identity(preview_client):
-    client, _ = preview_client
-    assert client.get("/api/v1/studio/preview?ux=3").status_code == 401
-
-
-def test_banned_admin_cannot_enter_preview(preview_client):
-    client, user = preview_client
-    user.is_banned = True
-    response = client.get("/api/v1/studio/preview", headers={"X-Telegram-Init-Data": "signed-fixture"})
-    assert response.status_code == 403
+    assert response.json() == {"detail": "Admin access required"}
 
 
 @pytest.mark.parametrize("language", ["ru", "en"])

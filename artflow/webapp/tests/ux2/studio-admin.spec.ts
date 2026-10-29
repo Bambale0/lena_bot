@@ -13,7 +13,7 @@ async function setup(page: Page) {
     if (method === "GET") reads.push(url.pathname + url.search);
     else writes.push({ path, body: r.request().postDataJSON() });
     if (state.forbid && path.includes(state.forbid)) return r.fulfill({ status: 403, json: { detail: "Revoked" } });
-    if (path.endsWith("/me")) return json({ id: 7, tg_id: 123, credits: 100, miniapp_ux2_available: true });
+    if (path.endsWith("/me")) return json({ id: 7, tg_id: 123, credits: 100, miniapp_ux2_available: true, is_admin: true });
     if (path.endsWith("/me/permissions")) return json({ is_admin: true });
     if (path.endsWith("/studio/preview")) return json({ allowed: true, ui_version: 3 });
     if (path.endsWith("/auth/config")) return json({ bot_username: "fixture" });

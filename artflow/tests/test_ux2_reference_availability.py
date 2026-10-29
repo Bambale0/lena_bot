@@ -1,21 +1,44 @@
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 from fastapi import FastAPI
 
-from api.web import generations
-from api.web.deps import get_web_user_or_none
+from api import miniapp_auth, miniapp_routes
+from api.web import deps, generations
+from db.session import get_session
+
+
+@pytest.fixture
+def reference_check_app(monkeypatch):
+    async def session_override():
+        yield object()
+
+    user = SimpleNamespace(id=7, tg_id=123, is_banned=False)
+    lookup = AsyncMock(return_value=user)
+    monkeypatch.setattr(miniapp_routes.settings, "ADMIN_IDS", [123])
+    monkeypatch.setattr(deps, "_verify_init_data", lambda value: {"id": user.tg_id})
+    monkeypatch.setattr(deps.repo, "get_user_by_tg_id", lookup)
+    app = FastAPI()
+    app.include_router(generations.router, prefix="/api/web")
+    app.dependency_overrides[get_session] = session_override
+    return app, user, lookup
+
+
+def _auth_headers(user, auth_method):
+    if auth_method == "web":
+        return {"X-Web-Auth-Token": miniapp_auth.create_web_auth_token(user.tg_id)}
+    return {"X-Telegram-Init-Data": "signed-fixture"}
 
 
 @pytest.mark.asyncio
-async def test_reference_check_requires_authentication():
-    app = FastAPI()
-    app.include_router(generations.router, prefix="/api/web")
-    app.dependency_overrides[get_web_user_or_none] = lambda: None
+async def test_reference_check_requires_authentication(reference_check_app):
+    app, _, lookup = reference_check_app
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         response = await client.post("/api/web/upload-media/check", json={"url": "https://example.test/a.png"})
     assert response.status_code == 401
+    lookup.assert_not_awaited()
 
 
 @pytest.fixture
@@ -99,19 +122,45 @@ def test_symlink_escape_cannot_expose_a_private_file(storage_root, tmp_path):
     assert inspect_local_photo_reference("/static/upload/miniapp/" + storage_root.name) == "forbidden"
 
 
-@pytest.mark.parametrize(("tg_id", "expected"), [(123, 200), (456, 403)])
+@pytest.mark.parametrize("tg_id", [123, 456])
+@pytest.mark.parametrize("auth_method", ["telegram", "web"])
 @pytest.mark.asyncio
-async def test_http_admin_scope_and_no_private_response_fields(storage_root, monkeypatch, tg_id, expected):
-    from api import miniapp_routes
-    monkeypatch.setattr(miniapp_routes.settings, "ADMIN_IDS", [123])
-    app = FastAPI()
-    app.include_router(generations.router, prefix="/api/web")
-    app.dependency_overrides[get_web_user_or_none] = lambda: SimpleNamespace(id=7, tg_id=tg_id)
+async def test_authenticated_user_can_check_public_upload_without_private_response_fields(
+    storage_root, reference_check_app, tg_id, auth_method,
+):
+    app, user, _ = reference_check_app
+    user.tg_id = tg_id
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-        response = await client.post("/api/web/upload-media/check", json={"url": "/static/upload/miniapp/" + storage_root.name})
-    assert response.status_code == expected
-    if expected == 200:
-        assert response.json() == {"ok": True, "data": {"status": "available"}}
+        response = await client.post(
+            "/api/web/upload-media/check",
+            headers=_auth_headers(user, auth_method),
+            json={"url": "/static/upload/miniapp/" + storage_root.name},
+        )
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "data": {"status": "available"}}
+    assert str(storage_root) not in response.text
+    assert storage_root.name not in response.text
+
+
+@pytest.mark.parametrize("account_state", ["banned", "unregistered"])
+@pytest.mark.parametrize("auth_method", ["telegram", "web"])
+@pytest.mark.asyncio
+async def test_reference_check_rejects_unavailable_accounts(
+    storage_root, reference_check_app, account_state, auth_method,
+):
+    app, user, lookup = reference_check_app
+    user.tg_id = 456
+    if account_state == "banned":
+        user.is_banned = True
+    else:
+        lookup.return_value = None
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/api/web/upload-media/check",
+            headers=_auth_headers(user, auth_method),
+            json={"url": "/static/upload/miniapp/" + storage_root.name},
+        )
+    assert response.status_code == 401
     assert str(storage_root) not in response.text
     assert storage_root.name not in response.text
 

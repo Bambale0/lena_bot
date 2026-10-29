@@ -32,7 +32,7 @@ const mp4 = Buffer.from([
 const photo = { key: "fixture-photo", display_name: "Фото из каталога", credits: 5, modes: ["text", "image"], max_refs: 2, aspect_ratios: ["1:1", "9:16"], counts: [1, 2], quality_options: [{ value: "basic", label: "Обычное" }, { value: "high", label: "Высокое" }] };
 const active = { id: 21, model: "fixture-photo", mode: "image", quality: "basic", count: 1, prompt_hidden: true, base_prompt: "DO_NOT_COPY", reference_urls: ["https://media.example.test/private.png"] };
 
-async function prepare(page: Page, previous: unknown = null) {
+async function prepare(page: Page, previous: unknown = null, admin = false) {
   const writes: Array<{ path: string; body: Record<string, unknown> }> = [];
   let mineReads = 0;
   await page.addInitScript(() => { window.Telegram = { WebApp: { initData: "consumer-fixture", initDataUnsafe: { user: { id: 123 } }, ready() {}, expand() {}, HapticFeedback: { impactOccurred() {}, notificationOccurred() {} } } } as any; });
@@ -42,8 +42,8 @@ async function prepare(page: Page, previous: unknown = null) {
     const method = route.request().method();
     if (method !== "GET") writes.push({ path, body: route.request().headers()["content-type"]?.includes("application/json") ? route.request().postDataJSON() : {} });
     const json = (value: unknown) => route.fulfill({ json: value });
-    if (path === "/api/v1/me") return json({ id: 7, tg_id: 123, full_name: "Тест", credits: 120, language: "ru", miniapp_ux2_available: true });
-    if (path.endsWith("/me/permissions")) return json({ is_admin: true });
+    if (path === "/api/v1/me") return json({ id: 7, tg_id: 123, full_name: "Тест", credits: 120, language: "ru", miniapp_ux2_available: true, is_admin: admin });
+    if (path.endsWith("/me/permissions")) return json({ is_admin: admin });
     if (path.endsWith("/studio/preview")) return json({ allowed: true, ui_version: 3 });
     if (path.endsWith("/models/image")) return json([photo, { ...photo, key: "text-only", display_name: "Только текст", modes: ["text"], max_refs: 0, counts: [1], quality_options: [], aspect_ratios: [] }]);
     if (path.endsWith("/models/video")) return json([{ ...photo, key: "fixture-video", display_name: "Видео из каталога" }]);
@@ -471,7 +471,7 @@ test("existing library Sheet traps Tab in both directions and restores its opene
 });
 
 test("existing owner Sheet Escape uses latest busy close guard while its mutation is pending", async ({ page }) => {
-  await prepare(page); let posts = 0;
+  await prepare(page, null, true); let posts = 0;
   let release!: () => void;
   const pending = new Promise<void>(resolve => { release = resolve; });
   await page.route("**/api/v1/admin/overview", route => route.fulfill({ json: { summary: { users_total: 1 } } }));

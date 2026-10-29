@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 const defaultVideoModels = [{ key: "fixture-video", display_name: "Видео модель", modes: ["text", "image"], credits: 10, max_refs: 1, aspect_ratios: ["16:9", "9:16"], durations: [5], resolutions: ["720p"] }];
 
-async function prepare(page: Page, admin = true, videoModels = defaultVideoModels) {
+async function prepare(page: Page, admitted = true, videoModels = defaultVideoModels, isAdmin = false) {
   const writes: Array<{ path: string; body: any }> = [];
   await page.addInitScript(() => {
     window.Telegram = { WebApp: { initData: "lilac-fixture", initDataUnsafe: { user: { id: 123 } },
@@ -18,9 +18,9 @@ async function prepare(page: Page, admin = true, videoModels = defaultVideoModel
     if (method !== "GET") writes.push({ path, body: route.request().headers()["content-type"]?.includes("application/json") ? route.request().postDataJSON() : null });
     const json = (value: unknown) => route.fulfill({ json: value });
     if (path.endsWith("/auth/config")) return json({ bot_username: "fixture_bot" });
-    if (path === "/api/v1/me") return json({ id: 7, tg_id: 123, full_name: "Тестовый администратор", credits: 120, language: "ru", miniapp_ux2_available: admin });
-    if (path.endsWith("/me/permissions")) return json({ is_admin: admin });
-    if (path.endsWith("/studio/preview")) return admin ? json({ allowed: true, ui_version: 3 }) : route.fulfill({ status: 403, json: { detail: "Admin access required" } });
+    if (path === "/api/v1/me") return json({ id: 7, tg_id: 123, full_name: isAdmin ? "Тестовый администратор" : "Обычный пользователь", credits: 120, language: "ru", miniapp_ux2_available: admitted, is_admin: isAdmin });
+    if (path.endsWith("/me/permissions")) return json({ is_admin: isAdmin });
+    if (path.endsWith("/studio/preview")) return admitted ? json({ allowed: true, ui_version: 3 }) : route.fulfill({ status: 403, json: { detail: "Studio unavailable" } });
     if (path.endsWith("/models/image")) return json([{ key: "fixture-image", display_name: "Портретная модель", description: "Фото и иллюстрации", modes: ["text", "image"], credits: 5, max_refs: 2, aspect_ratios: ["1:1", "9:16"], counts: [1], quality_options: [{ value: "basic", label: "Обычное" }] }]);
     if (path.endsWith("/models/video")) return json(videoModels);
     if (path.endsWith("/models/music")) return json([{ key: "fixture-music", display_name: "Музыкальная модель", credits: 20 }]);
@@ -39,14 +39,115 @@ async function prepare(page: Page, admin = true, videoModels = defaultVideoModel
   return writes;
 }
 
-test("new studio is an explicit admin entry while regular UI remains the default", async ({ page }) => {
-  await prepare(page);
-  await page.goto("/");
-  await expect(page.locator('[data-ui-version="3"]')).toHaveCount(0);
-  await page.getByRole("button", { name: "Открыть новую студию APIX" }).click();
+test("public studio: a fresh ordinary account opens Studio without a query or saved opt-in", async ({ page }) => {
+  const writes = await prepare(page);
+  await page.goto("/app/");
   await expect(page.locator('[data-ui-version="3"]')).toBeVisible();
   await expect(page.getByRole("heading", { name: "Что создадим сегодня?" })).toBeVisible();
+  expect(new URL(page.url()).search).toBe("");
+  expect(await page.evaluate(() => sessionStorage.getItem("apix:ux2:preview:7"))).toBeNull();
+  expect(writes).toEqual([]);
 });
+
+test("public studio: a direct link never grants an ordinary account administrator controls or copy", async ({ page }) => {
+  const writes = await prepare(page);
+  const adminRequests: string[] = [];
+  page.on("request", request => { if (new URL(request.url()).pathname.startsWith("/api/v1/admin/")) adminRequests.push(request.url()); });
+  await page.goto("/app/?ux=3&is_admin=true");
+  await expect(page.locator('[data-ui-version="3"]')).toBeVisible();
+  await page.getByRole("tab", { name: "Профиль", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Мои работы", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Управление APIX", exact: true })).toHaveCount(0);
+  await expect(page.getByText("Доступ администратора", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Настройки", exact: true }).click();
+  await expect(page.getByRole("link", { name: "Открыть настройки маршрутизации", exact: true })).toHaveCount(0);
+  await expect(page.getByText(/Админский предпросмотр|Для администратора/)).toHaveCount(0);
+  expect(adminRequests).toEqual([]);
+  expect(writes).toEqual([]);
+});
+
+test("public studio: a missing administrative role fails closed while Studio remains available", async ({ page }) => {
+  await prepare(page);
+  await page.route("**/api/v1/me", route => route.fulfill({ json: { id: 7, tg_id: 123, full_name: "Пользователь без поля роли", credits: 120, language: "ru", miniapp_ux2_available: true } }));
+  await page.goto("/app/?ux=3");
+  await expect(page.locator('[data-ui-version="3"]')).toBeVisible();
+  await page.getByRole("tab", { name: "Профиль", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Мои работы", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Управление APIX", exact: true })).toHaveCount(0);
+  await expect(page.getByText("Доступ администратора", { exact: true })).toHaveCount(0);
+});
+
+test("public studio: losing the administrative role unmounts the owner screen without revoking Studio", async ({ page }) => {
+  await prepare(page, true, defaultVideoModels, true);
+  await page.route("**/api/v1/admin/overview", route => route.fulfill({ json: { summary: { users_total: 1 } } }));
+  await page.route("**/api/v1/admin/users?**", route => route.fulfill({ json: { items: [] } }));
+  await page.route("**/api/v1/admin/withdrawals?**", route => route.fulfill({ json: { items: [] } }));
+  await page.goto("/app/?ux=3");
+  await page.getByRole("tab", { name: "Профиль", exact: true }).click();
+  await page.getByRole("button", { name: "Управление APIX", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Управление APIX", exact: true })).toBeVisible();
+  await page.route("**/api/v1/me", route => route.fulfill({ json: { id: 7, tg_id: 123, credits: 120, language: "ru", miniapp_ux2_available: true, is_admin: false } }));
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await expect(page.getByRole("heading", { name: "Управление APIX", exact: true })).toHaveCount(0);
+  await expect(page.locator('[data-ui-version="3"]')).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Мои работы", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Управление APIX", exact: true })).toHaveCount(0);
+});
+
+for (const version of ["1", "2"]) {
+  test("public studio: explicit ux=" + version + " preserves the selected interface", async ({ page }) => {
+    await prepare(page);
+    await page.goto("/app/?ux=" + version);
+    await expect(page.locator("[data-ui-version='" + version + "']")).toBeVisible();
+    await expect(page.locator('[data-ui-version="3"]')).toHaveCount(0);
+  });
+}
+
+test("public studio: an ordinary account can exit to classic, reload and reenter Studio", async ({ page }) => {
+  await prepare(page);
+  await page.goto("/app/?ux=3");
+  await page.getByRole("button", { name: "Обычный интерфейс", exact: true }).click();
+  await expect(page.locator('[data-ui-version="1"]')).toBeVisible();
+  expect(new URL(page.url()).searchParams.get("ux")).toBe("1");
+  await page.reload();
+  await expect(page.locator('[data-ui-version="1"]')).toBeVisible();
+  await expect(page.getByText(/Для администратора|Доступ администратора/)).toHaveCount(0);
+  await page.getByRole("button", { name: "Открыть новую студию APIX" }).click();
+  await expect(page.locator('[data-ui-version="3"]')).toBeVisible();
+  expect(new URL(page.url()).searchParams.get("ux")).toBe("3");
+});
+
+for (const admission of ["unavailable", "denied", "unsupported-version"] as const) {
+  test("public studio: " + admission + " admission falls back to the classic interface", async ({ page }) => {
+    await prepare(page);
+    let admissionRequests = 0;
+    await page.route("**/api/v1/studio/preview", route => {
+      admissionRequests += 1;
+      if (admission === "unavailable") return route.fulfill({ status: 500, json: { detail: "Temporarily unavailable" } });
+      return route.fulfill({ json: { allowed: admission !== "denied", ui_version: admission === "unsupported-version" ? 2 : 3 } });
+    });
+    await page.goto("/app/");
+    await expect(page.locator('[data-ui-version="1"]')).toBeVisible();
+    await expect.poll(() => admissionRequests).toBe(1);
+    await expect(page.locator('[data-ui-version="3"]')).toHaveCount(0);
+  });
+}
+
+for (const status of [401, 403]) for (const entry of ["default", "classic-button"] as const) {
+  test("public studio: admission " + status + " locks the " + entry + " entry after a successful profile response", async ({ page }) => {
+    const writes = await prepare(page);
+    await page.route("**/api/v1/studio/preview", route => route.fulfill({ status, json: { detail: status === 401 ? "Authentication expired" : "Account is banned" } }));
+    await page.goto(entry === "default" ? "/app/" : "/app/?ux=1");
+    if (entry === "classic-button") {
+      await expect(page.locator('[data-ui-version="1"]')).toBeVisible();
+      await page.getByRole("button", { name: "Открыть новую студию APIX" }).click();
+    }
+    await expect(page.getByText("Откройте приложение через Telegram", { exact: true })).toBeVisible();
+    await expect(page.locator(".apix-shell")).toHaveCount(0);
+    await expect(page.getByRole("navigation", { name: "Основная навигация" })).toHaveCount(0);
+    expect(writes).toEqual([]);
+  });
+}
 
 test("black lilac foundation: palette, five destinations and full profile works", async ({ page }, info) => {
   await prepare(page);
@@ -72,9 +173,10 @@ test("black lilac foundation: palette, five destinations and full profile works"
   await expect(page.getByRole("region", { name: "Баланс профиля" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Пополнить баланс", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Быстрые действия", exact: true })).toBeVisible();
-  for (const action of ["Баланс и платежи", "Мои промпты", "Помощь", "Редактировать профиль", "Настройки", "Управление APIX"]) {
+  for (const action of ["Баланс и платежи", "Мои промпты", "Помощь", "Редактировать профиль", "Настройки"]) {
     await expect(page.getByRole("button", { name: action, exact: true })).toBeVisible();
   }
+  await expect(page.getByRole("button", { name: "Управление APIX", exact: true })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Мои работы", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Обновить работы", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "В работе", exact: true })).toBeVisible();
@@ -411,7 +513,7 @@ for (const revoked of ["admission", "actor"] as const) test(`black lilac foundat
   await expect(page.locator(".studio-overlay-balance")).toHaveCount(0);
 });
 
-test("ordinary user cannot enable new studio by direct query", async ({ page }) => {
+test("an account without server capability cannot enable Studio by direct query", async ({ page }) => {
   await prepare(page, false);
   await page.goto("/?ux=3");
   await expect(page.getByRole("tablist")).toBeVisible();
@@ -419,7 +521,7 @@ test("ordinary user cannot enable new studio by direct query", async ({ page }) 
   await expect(page.getByRole("button", { name: "Открыть новую студию APIX" })).toHaveCount(0);
 });
 
-test("admin studio exposes models library music and help through real destinations", async ({ page }) => {
+test("ordinary Studio exposes models library music and help through real destinations", async ({ page }) => {
   await prepare(page);
   await page.goto("/?ux=3");
   await expect(page.getByRole("heading", { name: "Что создадим сегодня?" })).toBeVisible();
@@ -512,7 +614,7 @@ test("opening from ordinary UI and choosing a model preserves stored draft and r
   await page.addInitScript(() => sessionStorage.setItem("apix:ux2:drafts:v1:7", JSON.stringify({ version: 1, owner: 7, drafts: { image: {
     kind: "image", model: "fixture-image", prompt: "Моя сохранённая идея", promptId: null, sourceTitle: "", aspectRatio: "9:16", quality: "basic", count: 1, taskCount: 1, mode: "image", duration: 5, resolution: "720p", referenceUrls: ["https://media.example.test/input.png"], videoUrl: "", videoStart: 0, videoEnd: null, audioIds: [], characterIds: [], seed: null, grokMode: "normal",
   } } })));
-  await page.goto("/");
+  await page.goto("/?ux=1");
   await page.getByRole("button", { name: "Открыть новую студию APIX" }).click();
   await expect(page.getByText("Моя сохранённая идея", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Все нейросети" }).click();
@@ -563,7 +665,7 @@ test("voice verification uploads the spoken phrase instead of a JSON stub", asyn
 });
 
 test("owner balance adjustment requires review and confirmation", async ({ page }) => {
-  const writes = await prepare(page);
+  const writes = await prepare(page, true, defaultVideoModels, true);
   await page.route("**/api/v1/admin/overview", route => route.fulfill({ json: { summary: { users_total: 1 } } }));
   await page.route("**/api/v1/admin/users?**", route => route.fulfill({ json: { items: [{ id: 9, full_name: "Тестовый клиент", credits: 30 }] } }));
   await page.route("**/api/v1/admin/withdrawals?**", route => route.fulfill({ json: { items: [] } }));
@@ -638,7 +740,7 @@ test("delayed admission cannot replace edits made while access is being checked"
   await page.addInitScript(() => sessionStorage.setItem("apix:ux2:drafts:v1:7", JSON.stringify({ version: 1, owner: 7, drafts: { image: { kind: "image", model: "fixture-image", prompt: "Старый черновик", promptId: null, sourceTitle: "", aspectRatio: "1:1", quality: "basic", count: 1, taskCount: 1, mode: "text", duration: 5, resolution: "720p", referenceUrls: [], videoUrl: "", videoStart: 0, videoEnd: null, audioIds: [], characterIds: [], seed: null, grokMode: "normal" } } })));
   let release!: () => void; const held = new Promise<void>(resolve => { release = resolve; }); let received = false;
   await page.route("**/api/v1/studio/preview", async route => { received = true; await held; return route.fulfill({ json: { allowed: true, ui_version: 3 } }); });
-  await page.goto("/"); await page.getByRole("tab", { name: "Фото", exact: true }).click();
+  await page.goto("/?ux=1"); await page.getByRole("tab", { name: "Фото", exact: true }).click();
   await page.getByRole("button", { name: "Открыть новую студию APIX" }).click();
   await expect.poll(() => received).toBe(true);
   await page.getByRole("textbox", { name: /^Промпт/ }).fill("Самый свежий ввод"); release();
@@ -647,7 +749,7 @@ test("delayed admission cannot replace edits made while access is being checked"
 });
 
 test("lost owner mutation response blocks retry across reopening and reload", async ({ page }) => {
-  await prepare(page);
+  await prepare(page, true, defaultVideoModels, true);
   let credits = 30, posts = 0;
   await page.route("**/api/v1/admin/overview", route => route.fulfill({ json: { summary: { users_total: 1 } } }));
   await page.route("**/api/v1/admin/users?**", route => route.fulfill({ json: { items: [{ id: 9, full_name: "Тестовый клиент", credits }] } }));
