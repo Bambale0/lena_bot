@@ -374,12 +374,15 @@ class GenerationCard(BaseModel):
     credits_spent: float
     is_public_feed: bool
     is_prompt_library: bool
+    remixes: int | None = None
     error: str | None = None
     created_at: str
     finished_at: str = ""
 
     @classmethod
-    def from_generation(cls, generation: Any, *, image_session: Any | None = None) -> "GenerationCard":
+    def from_generation(
+        cls, generation: Any, *, image_session: Any | None = None, remixes: int | None = None,
+    ) -> "GenerationCard":
         prompt_hidden = generation_prompt_is_protected(generation)
         reference_urls = json_url_list(getattr(image_session, "reference_urls", None)) if image_session is not None else []
         reference_url = getattr(image_session, "reference_url", None) if image_session is not None else None
@@ -408,6 +411,7 @@ class GenerationCard(BaseModel):
             credits_spent=float(getattr(generation, "credits_spent", 0) or 0),
             is_public_feed=bool(getattr(generation, "is_public_feed", False)),
             is_prompt_library=bool(getattr(generation, "is_prompt_library", False)),
+            remixes=remixes if getattr(generation, "is_public_feed", False) else None,
             error=generation_public_error(generation),
             created_at=iso_datetime(getattr(generation, "created_at", None)),
             finished_at=iso_datetime(getattr(generation, "finished_at", None)),

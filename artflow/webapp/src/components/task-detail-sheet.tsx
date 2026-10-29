@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { useEffect, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
+import { RepeatCount } from "@/components/repeat-count";
 import { Button } from "@/components/ui/button";
 import { Sheet } from "@/components/ui/sheet";
 import type { GenerationTask } from "@/lib/types";
@@ -144,6 +145,7 @@ function TaskDetailSheet({
           {task.aspect_ratio ? <Badge variant="outline">{task.aspect_ratio}</Badge> : null}
           {task.duration ? <Badge variant="outline">{task.duration} сек</Badge> : null}
           <Badge variant="outline">{formatCredits(task.credits_spent)} кр.</Badge>
+          {task.is_public_feed && <RepeatCount count={task.remixes} className="rounded-full border border-border px-2 py-1" />}
           {isPendingTask(task) ? (
             <Button variant="ghost" size="sm" className="ml-auto" disabled={busy} onClick={() => onRefresh(task)}>
               <RefreshCw className={busy ? "animate-spin" : ""} /> Обновить

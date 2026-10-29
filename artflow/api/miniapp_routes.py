@@ -2090,6 +2090,7 @@ class GenerationOut(BaseModel):
     created_at: str
     is_public_feed: bool = False
     is_prompt_library: bool = False
+    remixes: int | None = None
     result_urls: list[str] = Field(default_factory=list)
     preview_urls: list[str] = Field(default_factory=list)
 
@@ -4043,7 +4044,8 @@ async def get_generation(
         raise HTTPException(status_code=404, detail="Generation not found")
     if not _neironych_video_status_is_background_only(gen):
         gen = await _reconcile_generation_status(session, gen)
-    return _gen_out(gen)
+    remix_counts = await repo.get_public_generation_remix_counts(session, [gen])
+    return _gen_out(gen, remixes=remix_counts.get(gen.id))
 
 
 @router.get("/history", response_model=list[GenerationOut])
@@ -4061,7 +4063,8 @@ async def get_history(
     if offset == 0:
         await _reconcile_user_active_generations(session, user.id)
     gens = await repo.get_user_history(session, user.id, limit=limit, offset=offset)
-    return [_gen_out(g) for g in gens]
+    remix_counts = await repo.get_public_generation_remix_counts(session, gens)
+    return [_gen_out(g, remixes=remix_counts.get(g.id)) for g in gens]
 
 
 # ── feed ──────────────────────────────────────────────────────────────────────
@@ -6067,7 +6070,7 @@ def _generation_primary_result_url(gen) -> str | None:
     return urls[0] if urls else None
 
 
-def _gen_out(gen) -> GenerationOut:
+def _gen_out(gen, *, remixes: int | None = None) -> GenerationOut:
     prompt_hidden = _generation_prompt_hidden(gen)
     return GenerationOut(
         id=gen.id,
@@ -6084,6 +6087,7 @@ def _gen_out(gen) -> GenerationOut:
         created_at=gen.created_at.isoformat() if gen.created_at else "",
         is_public_feed=bool(gen.is_public_feed),
         is_prompt_library=bool(getattr(gen, "is_prompt_library", False)),
+        remixes=remixes if gen.is_public_feed else None,
         result_urls=_generation_result_urls(gen),
         preview_urls=[_preview_media_url(url, gen.gen_type) or url for url in _generation_result_urls(gen)],
     )

@@ -25,10 +25,12 @@ async def history(
         session,
         [int(getattr(item, "image_session_id", 0) or 0) for item in generations],
     )
+    remix_counts = await repo.get_public_generation_remix_counts(session, generations)
     return ok([
         GenerationCard.from_generation(
             item,
             image_session=image_sessions.get(int(getattr(item, "image_session_id", 0) or 0)),
+            remixes=remix_counts.get(item.id),
         ).model_dump()
         for item in generations
     ])

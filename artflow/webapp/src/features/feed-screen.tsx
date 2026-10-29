@@ -18,6 +18,7 @@ import {
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
+import { RepeatCount } from "@/components/repeat-count";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { openTrendRunner } from "@/features/trend-runner";
@@ -684,6 +685,7 @@ function MediaViewer({
           <div className="min-w-0">
             <p className="truncate text-xs font-semibold">{viewer.title || "Работа"}</p>
             <p className="truncate text-[10px] text-white/65">{viewer.meta}</p>
+            <RepeatCount count={viewer.item.remixes} className="text-white/80" />
           </div>
           <Button variant="ghost" size="icon" className="size-9 min-h-9 text-white hover:bg-white/10" onClick={onClose} aria-label="Закрыть">
             <X className="size-5" />

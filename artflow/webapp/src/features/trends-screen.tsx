@@ -3,6 +3,7 @@ import { ArrowLeft, ChevronDown, ChevronUp, Eye, EyeOff, Film, Flame, FolderOpen
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
+import { RepeatCount } from "@/components/repeat-count";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { isPinterestServiceTrend } from "@/features/pinterest-service";
@@ -610,7 +611,7 @@ function ShelfTrendTile({ trend, isAdmin, client, onUpdated, adminCatalog, onAdm
   return <article className="trend-live-tile">
     <button type="button" className="trend-live-open" aria-label={`Повторить: ${trend.title}`} onClick={() => openTrendRunner(trend)}>
       <LiveTrendMedia trend={trend} />
-      <span className="trend-live-copy"><strong>{trend.title}</strong><small>{trend.description || (trend.kind === "video" ? "Видео" : "Фото")}</small><span><Repeat2 size={14} /> Повторить</span></span>
+      <span className="trend-live-copy"><strong>{trend.title}</strong><small>{trend.description || (trend.kind === "video" ? "Видео" : "Фото")}</small><small><RepeatCount count={trend.uses_count} /></small><span><Repeat2 size={14} /> Повторить</span></span>
     </button>
     <div className="trend-live-actions">
       <button type="button" aria-label={`Скопировать ссылку: ${trend.title}`} onClick={async () => {

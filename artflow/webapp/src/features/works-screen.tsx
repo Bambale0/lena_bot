@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertCircle, Film, ImageIcon, LoaderCircle, Music2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { RepeatCount } from "@/components/repeat-count";
 import type { GenerationTask, ModelInfo } from "@/lib/types";
 import { firstMedia, formatRelativeDate, generationStatusLabel, isPendingTask } from "@/lib/utils";
 
@@ -65,6 +66,6 @@ function WorkTile({ task, model, en, onOpen }: { task: GenerationTask; model?: M
         {running && <LoaderCircle size={14} className="animate-spin" aria-hidden="true" />}{status}
       </span>
     </span>
-    <span className="ux2-work-caption"><strong>{title}</strong><span>{formatRelativeDate(task.created_at)}</span></span>
+    <span className="ux2-work-caption"><strong>{title}</strong>{task.is_public_feed && <RepeatCount count={task.remixes} language={en ? "en" : "ru"} />}<span>{formatRelativeDate(task.created_at)}</span></span>
   </button>;
 }
