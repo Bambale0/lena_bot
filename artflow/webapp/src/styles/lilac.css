@@ -178,7 +178,7 @@ html[data-apix-studio="lilac"] :is(button,input,select,textarea,a):focus-visible
 html[data-apix-studio="lilac"] :is(input,textarea,select) { color:var(--foreground); }
 html[data-apix-studio="lilac"] ::placeholder { color:var(--muted-foreground); opacity:1; }
 html[data-apix-studio="lilac"] button:disabled { cursor:not-allowed; }
-.apix-shell[data-ui-version="3"] .apix-app-header { display:grid; background:#000000; }
+.apix-shell[data-ui-version="3"] .apix-app-header { display:grid; }
 .apix-shell[data-ui-version="3"] .apix-balance-button { display:flex; flex-wrap:wrap; gap:4px 8px; max-width:190px; min-width:0; }
 html[data-apix-studio="lilac"] .text-white { color:var(--foreground); }
 .studio-profile-works { display:grid; gap:24px; }
