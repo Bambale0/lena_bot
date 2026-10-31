@@ -42,6 +42,11 @@ async def test_throttling_skips_repeated_message() -> None:
 async def test_auth_middleware_passes_existing_user(monkeypatch) -> None:
     db_user = SimpleNamespace(id=1, tg_id=111, is_banned=False, language="ru")
     monkeypatch.setattr("bot.middlewares.auth.repo.get_user_by_tg_id", AsyncMock(return_value=db_user))
+    touch_activity = AsyncMock()
+    monkeypatch.setattr(
+        "bot.middlewares.auth.repo.touch_telegram_activity",
+        touch_activity,
+    )
     handler = AsyncMock(return_value="handled")
 
     data = {"session": AsyncMock(), "event_from_user": make_user(user_id=111), "bot": AsyncMock()}
@@ -49,6 +54,7 @@ async def test_auth_middleware_passes_existing_user(monkeypatch) -> None:
 
     assert result == "handled"
     assert data["db_user"] is db_user
+    touch_activity.assert_awaited_once_with(data["session"], db_user)
 
 
 @pytest.mark.asyncio

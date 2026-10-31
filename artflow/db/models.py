@@ -113,6 +113,10 @@ class User(Base):
     language: Mapped[str] = mapped_column(String(8), default="ru", nullable=False, server_default="ru")
 
     is_banned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    last_telegram_activity_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     generations: Mapped[list[Generation]] = relationship(back_populates="user", lazy="noload")
@@ -125,6 +129,101 @@ class User(Base):
     )
     withdrawal_requests: Mapped[list[ReferralWithdrawalRequest]] = relationship(back_populates="user", lazy="noload")
     feed_remix_payouts: Mapped[list["FeedRemixPayout"]] = relationship(foreign_keys="FeedRemixPayout.source_user_id", back_populates="source_user", lazy="noload")
+
+
+class BroadcastRun(Base):
+    __tablename__ = "broadcast_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('preparing', 'queued', 'running', 'completed')",
+            name="ck_broadcast_runs_status",
+        ),
+        CheckConstraint(
+            "report_status IN ('pending', 'sent')",
+            name="ck_broadcast_runs_report_status",
+        ),
+        Index("ix_broadcast_runs_due", "status", "scheduled_for"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    idempotency_key: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    segment: Mapped[str] = mapped_column(String(16), nullable=False)
+    source_chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    source_message_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_by_chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    scheduled_for: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="preparing")
+    selected_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    preselection_skipped_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    report_chat_id: Mapped[int | None] = mapped_column(BigInteger)
+    report_message_id: Mapped[int | None] = mapped_column(Integer)
+    report_status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    report_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    report_next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    deliveries: Mapped[list["BroadcastDelivery"]] = relationship(
+        back_populates="run",
+        lazy="noload",
+    )
+
+
+class BroadcastDelivery(Base):
+    __tablename__ = "broadcast_deliveries"
+    __table_args__ = (
+        UniqueConstraint("run_id", "user_id", name="uq_broadcast_delivery_run_user"),
+        UniqueConstraint("run_id", "tg_id", name="uq_broadcast_delivery_run_tg"),
+        CheckConstraint(
+            "status IN ('pending', 'retry_wait', 'sending', 'delivered', 'skipped', 'failed', 'uncertain')",
+            name="ck_broadcast_deliveries_status",
+        ),
+        Index("ix_broadcast_deliveries_run_status", "run_id", "status", "id"),
+        Index("ix_broadcast_deliveries_status_attempt", "status", "last_attempt_at"),
+        Index("ix_broadcast_deliveries_retry_due", "status", "next_attempt_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(
+        String(32),
+        ForeignKey("broadcast_runs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    tg_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    telegram_message_id: Mapped[int | None] = mapped_column(Integer)
+    error_code: Mapped[str | None] = mapped_column(String(64))
+    error_detail: Mapped[str | None] = mapped_column(String(256))
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    run: Mapped[BroadcastRun] = relationship(back_populates="deliveries", lazy="noload")
+    user: Mapped[User] = relationship(lazy="noload")
 
 
 class WebAuthCode(Base):

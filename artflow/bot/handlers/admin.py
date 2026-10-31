@@ -5,13 +5,13 @@
 """
 from __future__ import annotations
 
-import asyncio
 import csv
 import html
 import io
 import logging
 import math
 import re
+import secrets
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -47,13 +47,18 @@ from bot.filters.admin import IsAdmin
 from bot.keyboards.admin_unlimited import image_unlimited_models_kb
 from bot.keyboards.models import model_cost_display_text
 from bot.services import admin_ai_service
-from bot.services.broadcasts import SEGMENT_LABELS, deliver_broadcast, get_recipient_ids
+from bot.services.broadcasts import (
+    SEGMENT_LABELS,
+    count_non_telegram_users,
+    get_recipient_ids,
+    queue_broadcast,
+)
 from bot.services.maintenance_mode import is_maintenance_mode, set_maintenance_mode
 from bot.states import AdminStates
 from bot.utils.telegram_ui import safe_answer_callback
-from core.broadcast_scheduler import schedule_broadcast_job
 from core.model_pricing import pricing_variant_key
 from core.provider_routing import get_nano21_route, set_nano21_route
+from db import broadcast_repository
 from db import repository as repo
 from db.models import (
     CreditLedgerEntry,
@@ -69,7 +74,6 @@ logger = logging.getLogger(__name__)
 router = Router(name="admin")
 router.message.filter(IsAdmin())
 router.callback_query.filter(IsAdmin())
-_background_broadcast_tasks: set[asyncio.Task[None]] = set()
 
 
 def _fmt_price(price: float) -> str:
@@ -973,14 +977,17 @@ async def _show_broadcast_preview(target: Message, state: FSMContext) -> None:
     data = await state.get_data()
     segment = str(data.get("broadcast_segment", "all"))
     recipients = int(data.get("broadcast_recipient_count", 0))
+    skipped = int(data.get("broadcast_skipped_count", 0))
     scheduled_for_iso = data.get("broadcast_scheduled_for")
     scheduled = bool(scheduled_for_iso)
 
     text = (
         "👀 Предпросмотр рассылки\n"
         f"Сегмент: <b>{SEGMENT_LABELS.get(segment, segment)}</b>\n"
-        f"Получателей: <b>{recipients}</b>\n"
+        f"Telegram-получателей: <b>{recipients}</b>\n"
     )
+    if skipped:
+        text += f"Без Telegram-чата, будут пропущены: <b>{skipped}</b>\n"
     if scheduled_for_iso:
         text += f"Время: <b>{_format_broadcast_datetime(datetime.fromisoformat(str(scheduled_for_iso)))}</b>\n"
     text += "\nНиже — сообщение как его увидят пользователи."
@@ -995,55 +1002,6 @@ async def _show_broadcast_preview(target: Message, state: FSMContext) -> None:
         "Если всё ок — подтверждай.",
         reply_markup=_broadcast_preview_kb(scheduled=scheduled),
     )
-
-
-async def _deliver_broadcast_and_report(
-    *,
-    bot: Bot,
-    tg_ids: list[int],
-    source_chat_id: int,
-    source_message_id: int,
-    segment: str,
-    status_msg: Message,
-) -> None:
-    try:
-        sent, failed, errors = await deliver_broadcast(
-            bot=bot,
-            tg_ids=tg_ids,
-            source_chat_id=source_chat_id,
-            source_message_id=source_message_id,
-            status_msg=status_msg,
-        )
-    except Exception:  # noqa: BLE001
-        logger.exception(
-            "Broadcast delivery task failed: segment=%s recipients=%s",
-            segment,
-            len(tg_ids),
-        )
-        try:
-            await status_msg.edit_text(
-                "❌ Рассылка остановилась из-за ошибки. Подробности записаны в лог.",
-                reply_markup=admin_menu_kb(),
-            )
-        except Exception:  # noqa: BLE001
-            logger.warning("Failed to update failed broadcast status message", exc_info=True)
-        return
-
-    report = (
-        "✅ Рассылка завершена\n"
-        f"Сегмент: <b>{SEGMENT_LABELS.get(segment, segment)}</b>\n"
-        f"Доставлено: {sent} · Ошибок: {failed}"
-    )
-    if errors:
-        report += "\n\nПервые ошибки:\n" + "\n".join(f"• {item}" for item in errors)
-
-    await status_msg.edit_text(report, reply_markup=admin_menu_kb())
-
-
-def _start_background_broadcast(coro, *, name: str) -> None:
-    task = asyncio.create_task(coro, name=name)
-    _background_broadcast_tasks.add(task)
-    task.add_done_callback(_background_broadcast_tasks.discard)
 
 
 # ─── Статистика ───────────────────────────────────────────────────────────────
@@ -2469,6 +2427,7 @@ async def handle_broadcast(message: Message, state: FSMContext, session: AsyncSe
     await state.update_data(
         broadcast_source_chat_id=message.chat.id,
         broadcast_source_message_id=message.message_id,
+        broadcast_idempotency_key=secrets.token_hex(16),
     )
     await state.set_state(AdminFSM.await_broadcast_segment)
     await message.answer(
@@ -2481,14 +2440,17 @@ async def handle_broadcast(message: Message, state: FSMContext, session: AsyncSe
 async def cb_broadcast_segment(call: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
     segment = str(call.data).split(":")[-1]
     tg_ids = await get_recipient_ids(session, segment)
+    skipped = await count_non_telegram_users(session, segment)
     await state.update_data(
         broadcast_segment=segment,
         broadcast_recipient_count=len(tg_ids),
+        broadcast_skipped_count=skipped,
     )
     await state.set_state(AdminFSM.await_broadcast_schedule)
     await call.message.answer(  # type: ignore[union-attr]
         f"Аудитория: <b>{SEGMENT_LABELS.get(segment, segment)}</b>\n"
-        f"Получателей сейчас: <b>{len(tg_ids)}</b>\n\n"
+        f"Telegram-получателей сейчас: <b>{len(tg_ids)}</b>\n"
+        f"Без Telegram-чата: <b>{skipped}</b>\n\n"
         "Когда отправить?",
         reply_markup=_broadcast_schedule_kb(),
     )
@@ -2546,49 +2508,54 @@ async def cb_broadcast_send(call: CallbackQuery, state: FSMContext, session: Asy
     source_message_id = data.get("broadcast_source_message_id")
     segment = str(data.get("broadcast_segment", "all"))
     scheduled_for_iso = data.get("broadcast_scheduled_for")
+    idempotency_key = data.get("broadcast_idempotency_key")
 
-    if not source_chat_id or not source_message_id:
+    if not source_chat_id or not source_message_id or not idempotency_key:
         await state.clear()
         await call.message.answer("❌ Не удалось запустить рассылку. Попробуй заново.", reply_markup=admin_menu_kb())  # type: ignore[union-attr]
         return
 
-    if scheduled_for_iso:
-        job_id = await schedule_broadcast_job(
-            source_chat_id=int(source_chat_id),
-            source_message_id=int(source_message_id),
-            segment=segment,
-            scheduled_for=datetime.fromisoformat(str(scheduled_for_iso)),
-            created_by_chat_id=call.from_user.id,
-        )
-        await state.clear()
+    scheduled_for = (
+        datetime.fromisoformat(str(scheduled_for_iso))
+        if scheduled_for_iso
+        else datetime.now(BROADCAST_TZ)
+    )
+    run, created = await queue_broadcast(
+        session,
+        idempotency_key=str(idempotency_key),
+        segment=segment,
+        source_chat_id=int(source_chat_id),
+        source_message_id=int(source_message_id),
+        created_by_chat_id=call.from_user.id,
+        scheduled_for=scheduled_for,
+    )
+    await state.clear()
+    if not created:
         await call.message.answer(  # type: ignore[union-attr]
-            "✅ Рассылка запланирована.\n"
-            f"ID: <code>{job_id}</code>\n"
-            f"Сегмент: <b>{SEGMENT_LABELS.get(segment, segment)}</b>\n"
-            f"Время: <b>{_format_broadcast_datetime(datetime.fromisoformat(str(scheduled_for_iso)))}</b>",
+            "ℹ️ Эта рассылка уже стоит в очереди — повтор не создан.\n"
+            f"ID: <code>{run.id}</code>",
             reply_markup=admin_menu_kb(),
         )
         return
 
-    tg_ids = await get_recipient_ids(session, segment)
-    await state.clear()
-    status_msg = await call.message.answer(  # type: ignore[union-attr]
-        f"📢 Отправляю {len(tg_ids)} пользователям..."
+    heading = "⏰ Рассылка поставлена в очередь" if scheduled_for_iso else "📢 Рассылка поставлена в очередь"
+    status_text = (
+        f"{heading}\n"
+        f"ID: <code>{run.id}</code>\n"
+        f"Сегмент: <b>{SEGMENT_LABELS.get(segment, segment)}</b>\n"
+        f"Telegram-получателей: <b>{run.selected_count}</b>\n"
+        f"Пропущено без Telegram-чата: <b>{run.preselection_skipped_count}</b>"
     )
-
-    _start_background_broadcast(
-        _deliver_broadcast_and_report(
-            bot=call.bot,
-            tg_ids=tg_ids,
-            source_chat_id=int(source_chat_id),
-            source_message_id=int(source_message_id),
-            segment=segment,
-            status_msg=status_msg,
-        ),
-        name=f"broadcast:{segment}:{len(tg_ids)}",
+    if scheduled_for_iso:
+        status_text += f"\nВремя: <b>{_format_broadcast_datetime(scheduled_for)}</b>"
+    status_msg = await call.message.answer(status_text)  # type: ignore[union-attr]
+    await broadcast_repository.attach_report_message(
+        session,
+        run_id=run.id,
+        chat_id=status_msg.chat.id,
+        message_id=status_msg.message_id,
     )
-
     await call.message.answer(  # type: ignore[union-attr]
-        "✅ Рассылка запущена в фоне. Статус обновлю в сообщении выше.",
+        "Статус и итоговые счётчики обновятся в сообщении выше.",
         reply_markup=admin_menu_kb(),
     )
