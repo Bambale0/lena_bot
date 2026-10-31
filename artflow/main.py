@@ -1811,10 +1811,17 @@ async def kie_webhook(
         if strict_nexus_image and payload.get("status") not in {"completed", "failed"}:
             return {"ok": True}
 
+        original_nexus_image_task_id = (
+            getattr(gen, "task_id", None) if provider == "nexus" and gen.gen_type == GenerationType.image else None
+        )
         if not is_success(payload):
             if is_processing(payload):
                 logger.info("KIE webhook ignoring non-terminal task_id=%s status update", safe_identifier(task_id))
                 return {"ok": True}
+            if provider == "nexus" and gen.gen_type == GenerationType.image:
+                from api.nexus_neironych_image_fallback import maybe_start_image_fallback
+                if await maybe_start_image_fallback(session, gen, payload):
+                    return {"ok": True}
             err = extract_error(payload)
             user_err = known_generation_user_error(err) or _sanitize_provider_error(
                 None if generation_prompt_is_protected(gen) else err,
@@ -1825,7 +1832,8 @@ async def kie_webhook(
                 err,
                 refund_note=f"kie_webhook:{user_err}"[:160],
                 **({"video_notice_kind": "failed"} if gen.model in KLING4_MODELS and _should_notify_generation_in_bot(gen) else {}),
-                **({"expected_task_id": gen.task_id} if strict_nexus_image else {}),
+                **({"expected_task_id": original_nexus_image_task_id}
+                   if original_nexus_image_task_id is not None else {}),
             )
             if not failed:
                 logger.info("KIE failure callback ignored for final generation=%s", gen.id)
@@ -1879,6 +1887,8 @@ async def kie_webhook(
                 gen.id,
                 err,
                 refund_note="kie_webhook:no_result_urls",
+                **({"expected_task_id": original_nexus_image_task_id}
+                   if original_nexus_image_task_id is not None else {}),
             )
             if not failed:
                 logger.info("KIE empty-result callback ignored for final generation=%s", gen.id)
@@ -1929,6 +1939,8 @@ async def kie_webhook(
                 gen.id,
                 err,
                 refund_note="kie_webhook:reference_echo",
+                **({"expected_task_id": original_nexus_image_task_id}
+                   if original_nexus_image_task_id is not None else {}),
             )
             if not failed:
                 logger.info("KIE reference-echo callback ignored for final generation=%s", gen.id)
@@ -1950,7 +1962,8 @@ async def kie_webhook(
         wan_notify = strict_wan_video and _should_notify_generation_in_bot(gen)
         finished = await repo.finish_generation(
             session, gen.id, result_url, result_urls=result_urls,
-            **({"expected_task_id": gen.task_id} if strict_nexus_image or strict_wan_video else {}),
+            **({"expected_task_id": original_nexus_image_task_id or gen.task_id}
+               if original_nexus_image_task_id is not None or strict_wan_video else {}),
             **({"queue_neironych_video_notice": True} if wan_notify else {}),
         )
         if not finished:

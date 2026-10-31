@@ -21,6 +21,7 @@ from core.feed_recipe_identity_policy import (
 )
 from core.image_recovery_policy import get_image_recovery_policy, set_image_recovery_policy
 from core.provider_routing import get_nano21_route, set_nano21_route
+from core.image_fallback_policy import EXACT_MODELS, get_image_fallback_route, set_image_fallback_route
 from core.qwen_routing import get_qwen_route, set_qwen_route
 from core.reporting_time import REPORTING_TZ, moscow_day_bounds_utc
 from core.wan30_routing_policy import MODELS as WAN_ROUTE_MODELS
@@ -261,6 +262,44 @@ async def admin_set_nano21_provider(
         "model_key": route.model_key, "primary_provider": route.primary_provider,
         "source": route.source, "updated_by_admin_tg_id": route.updated_by_admin_tg_id,
     })
+
+
+class ImageFallbackRoutingUpdate(BaseModel):
+    enabled: bool
+
+
+@router.get("/admin/provider-routing/image-fallbacks")
+async def admin_get_image_fallbacks(
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if admin_error := _admin_error(user):
+        return admin_error
+    routes = [await get_image_fallback_route(session, key) for key in EXACT_MODELS]
+    return ok({"routes": [
+        {"model_key": item.model_key, "enabled": item.enabled,
+         "fallback_provider": item.fallback_provider, "source": item.source,
+         "updated_by_admin_tg_id": item.updated_by_admin_tg_id}
+        for item in routes
+    ]})
+
+
+@router.put("/admin/provider-routing/image-fallbacks/{model_key}")
+async def admin_set_image_fallback(
+    model_key: str,
+    body: ImageFallbackRoutingUpdate,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_web_user_or_none),
+):
+    if admin_error := _admin_error(user):
+        return admin_error
+    if model_key not in EXACT_MODELS:
+        return error_response(422, "Unsupported exact-model fallback")
+    route = await set_image_fallback_route(
+        session, model_key, body.enabled, admin_tg_id=int(user.tg_id),
+    )
+    return ok({"model_key": route.model_key, "enabled": route.enabled,
+               "fallback_provider": route.fallback_provider, "source": route.source})
 
 
 class SupplierReviewResolutionRequest(BaseModel):

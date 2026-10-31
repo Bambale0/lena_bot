@@ -1253,6 +1253,50 @@ SEEDANCE_SUBMISSION_KEY = "neironych_submission"
 SEEDANCE_SUBMISSION_PREFIXES = ("neironych-submit:", "web:neironych-submit:")
 
 
+async def claim_nexus_image_fallback(
+    session: AsyncSession, gen_id: int, *, expected_task_id: str,
+    fallback_task_id: str, reason_code: str,
+) -> bool:
+    """Atomic at-most-one supplier handoff without a second customer charge.
+
+    Both webhook and poller can observe the same terminal Nexus task. The
+    row lock and persisted Neironych request ID make only one of them win.
+    """
+    if not str(expected_task_id).removeprefix("web:").startswith("nexus:"):
+        raise ValueError("Nexus task identity required")
+    if not str(fallback_task_id).removeprefix("web:").startswith("neironych-image:"):
+        raise ValueError("Neironych fallback request identity required")
+    locked = (await session.execute(
+        select(Generation).where(Generation.id == gen_id).with_for_update()
+        .execution_options(populate_existing=True)
+    )).scalar_one_or_none()
+    if (
+        locked is None
+        or locked.gen_type != GenerationType.image
+        or locked.status not in (GenerationStatus.pending, GenerationStatus.processing)
+        or locked.task_id != expected_task_id
+    ):
+        await session.commit()
+        return False
+    params = parse_input_params(locked.input_params)
+    if params.get("nexus_neironych_image_fallback") is not None:
+        await session.commit()
+        return False
+    params["nexus_neironych_image_fallback"] = {
+        "original_task_id": expected_task_id,
+        "fallback_task_id": fallback_task_id,
+        "fallback_provider": "neironych",
+        "reason_code": reason_code,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+    }
+    locked.input_params = json.dumps(params, ensure_ascii=False)
+    locked.task_id = fallback_task_id
+    locked.status = GenerationStatus.processing
+    await session.commit()
+    await _publish_generation_update(locked)
+    return True
+
+
 async def _locked_seedance_generation(session, gen_id):
     return (await session.execute(
         select(Generation).where(Generation.id == gen_id).with_for_update()
