@@ -43,6 +43,9 @@ def upgrade() -> None:
         ),
         sa.Column("report_chat_id", sa.BigInteger(), nullable=True),
         sa.Column("report_message_id", sa.Integer(), nullable=True),
+        sa.Column("report_status", sa.String(16), nullable=False, server_default="pending"),
+        sa.Column("report_attempts", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("report_next_attempt_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column(
@@ -60,6 +63,10 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "status IN ('preparing', 'queued', 'running', 'completed')",
             name="ck_broadcast_runs_status",
+        ),
+        sa.CheckConstraint(
+            "report_status IN ('pending', 'sent')",
+            name="ck_broadcast_runs_report_status",
         ),
     )
     op.create_index(
@@ -90,6 +97,7 @@ def upgrade() -> None:
         sa.Column("error_code", sa.String(64), nullable=True),
         sa.Column("error_detail", sa.String(256), nullable=True),
         sa.Column("last_attempt_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("next_attempt_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("delivered_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column(
             "created_at",
@@ -104,7 +112,7 @@ def upgrade() -> None:
             server_default=sa.func.now(),
         ),
         sa.CheckConstraint(
-            "status IN ('pending', 'sending', 'delivered', 'skipped', 'failed', 'uncertain')",
+            "status IN ('pending', 'retry_wait', 'sending', 'delivered', 'skipped', 'failed', 'uncertain')",
             name="ck_broadcast_deliveries_status",
         ),
         sa.UniqueConstraint(
@@ -123,9 +131,27 @@ def upgrade() -> None:
         "broadcast_deliveries",
         ["run_id", "status", "id"],
     )
+    op.create_index(
+        "ix_broadcast_deliveries_status_attempt",
+        "broadcast_deliveries",
+        ["status", "last_attempt_at"],
+    )
+    op.create_index(
+        "ix_broadcast_deliveries_retry_due",
+        "broadcast_deliveries",
+        ["status", "next_attempt_at"],
+    )
 
 
 def downgrade() -> None:
+    op.drop_index(
+        "ix_broadcast_deliveries_retry_due",
+        table_name="broadcast_deliveries",
+    )
+    op.drop_index(
+        "ix_broadcast_deliveries_status_attempt",
+        table_name="broadcast_deliveries",
+    )
     op.drop_index(
         "ix_broadcast_deliveries_run_status",
         table_name="broadcast_deliveries",

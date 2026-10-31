@@ -196,6 +196,50 @@ async def get_due_run_ids(
     return list(result.scalars().all())
 
 
+async def get_pending_report_run_ids(
+    session: AsyncSession,
+    *,
+    now: datetime | None = None,
+    limit: int = 10,
+) -> list[str]:
+    now = now or datetime.now(timezone.utc)
+    result = await session.execute(
+        select(BroadcastRun.id)
+        .where(
+            BroadcastRun.status == "completed",
+            BroadcastRun.report_status == "pending",
+            or_(
+                BroadcastRun.report_next_attempt_at.is_(None),
+                BroadcastRun.report_next_attempt_at <= now,
+            ),
+        )
+        .order_by(BroadcastRun.finished_at, BroadcastRun.created_at)
+        .limit(limit)
+    )
+    return list(result.scalars().all())
+
+
+async def record_report_attempt(
+    session: AsyncSession,
+    *,
+    run_id: str,
+    sent: bool,
+) -> None:
+    run = await session.get(BroadcastRun, run_id, with_for_update=True)
+    if run is None or run.status != "completed" or run.report_status == "sent":
+        return
+    run.report_attempts += 1
+    if sent:
+        run.report_status = "sent"
+        run.report_next_attempt_at = None
+    else:
+        delay_seconds = min(900, 30 * (2 ** min(run.report_attempts - 1, 5)))
+        run.report_next_attempt_at = datetime.now(timezone.utc) + timedelta(
+            seconds=delay_seconds
+        )
+    await session.commit()
+
+
 async def activate_stale_preparing_runs(
     session: AsyncSession,
     *,
@@ -218,11 +262,18 @@ async def claim_next_delivery(
     *,
     run_id: str,
 ) -> BroadcastDelivery | None:
+    now = datetime.now(timezone.utc)
     delivery = await session.scalar(
         select(BroadcastDelivery)
         .where(
             BroadcastDelivery.run_id == run_id,
-            BroadcastDelivery.status == "pending",
+            or_(
+                BroadcastDelivery.status == "pending",
+                (
+                    (BroadcastDelivery.status == "retry_wait")
+                    & (BroadcastDelivery.next_attempt_at <= now)
+                ),
+            ),
         )
         .order_by(BroadcastDelivery.id)
         .with_for_update(skip_locked=True)
@@ -231,10 +282,10 @@ async def claim_next_delivery(
     if delivery is None:
         return None
 
-    now = datetime.now(timezone.utc)
     delivery.status = "sending"
     delivery.attempts += 1
     delivery.last_attempt_at = now
+    delivery.next_attempt_at = None
     run = await session.get(BroadcastRun, run_id)
     if run is not None:
         run.status = "running"
@@ -268,9 +319,12 @@ async def complete_delivery(
     telegram_message_id: int | None = None,
     error_code: str | None = None,
     error_detail: str | None = None,
+    next_attempt_at: datetime | None = None,
 ) -> None:
-    if status not in {"delivered", "skipped", "failed", "uncertain"}:
-        raise ValueError(f"Invalid terminal broadcast delivery status: {status}")
+    if status not in {"retry_wait", "delivered", "skipped", "failed", "uncertain"}:
+        raise ValueError(f"Invalid broadcast delivery status: {status}")
+    if status == "retry_wait" and next_attempt_at is None:
+        raise ValueError("retry_wait delivery requires next_attempt_at")
     delivery = await session.get(BroadcastDelivery, delivery_id, with_for_update=True)
     if delivery is None or delivery.status != "sending":
         return
@@ -278,6 +332,7 @@ async def complete_delivery(
     delivery.telegram_message_id = telegram_message_id
     delivery.error_code = error_code[:64] if error_code else None
     delivery.error_detail = error_detail[:256] if error_detail else None
+    delivery.next_attempt_at = next_attempt_at if status == "retry_wait" else None
     if status == "delivered":
         delivery.delivered_at = datetime.now(timezone.utc)
     await session.commit()
@@ -325,7 +380,15 @@ async def get_run_report(session: AsyncSession, *, run_id: str) -> dict[str, Any
                     "uncertain"
                 ),
                 func.sum(
-                    case((BroadcastDelivery.status.in_(("pending", "sending")), 1), else_=0)
+                    case(
+                        (
+                            BroadcastDelivery.status.in_(
+                                ("pending", "retry_wait", "sending")
+                            ),
+                            1,
+                        ),
+                        else_=0,
+                    )
                 ).label("remaining"),
             ).where(BroadcastDelivery.run_id == run_id)
         )

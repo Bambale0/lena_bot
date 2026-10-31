@@ -138,6 +138,10 @@ class BroadcastRun(Base):
             "status IN ('preparing', 'queued', 'running', 'completed')",
             name="ck_broadcast_runs_status",
         ),
+        CheckConstraint(
+            "report_status IN ('pending', 'sent')",
+            name="ck_broadcast_runs_report_status",
+        ),
         Index("ix_broadcast_runs_due", "status", "scheduled_for"),
     )
 
@@ -153,6 +157,9 @@ class BroadcastRun(Base):
     preselection_skipped_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     report_chat_id: Mapped[int | None] = mapped_column(BigInteger)
     report_message_id: Mapped[int | None] = mapped_column(Integer)
+    report_status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    report_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    report_next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
@@ -177,10 +184,12 @@ class BroadcastDelivery(Base):
         UniqueConstraint("run_id", "user_id", name="uq_broadcast_delivery_run_user"),
         UniqueConstraint("run_id", "tg_id", name="uq_broadcast_delivery_run_tg"),
         CheckConstraint(
-            "status IN ('pending', 'sending', 'delivered', 'skipped', 'failed', 'uncertain')",
+            "status IN ('pending', 'retry_wait', 'sending', 'delivered', 'skipped', 'failed', 'uncertain')",
             name="ck_broadcast_deliveries_status",
         ),
         Index("ix_broadcast_deliveries_run_status", "run_id", "status", "id"),
+        Index("ix_broadcast_deliveries_status_attempt", "status", "last_attempt_at"),
+        Index("ix_broadcast_deliveries_retry_due", "status", "next_attempt_at"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -201,6 +210,7 @@ class BroadcastDelivery(Base):
     error_code: Mapped[str | None] = mapped_column(String(64))
     error_detail: Mapped[str | None] = mapped_column(String(256))
     last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

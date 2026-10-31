@@ -69,7 +69,11 @@ def test_broadcast_migration_adds_activity_queue_and_delivery_audit() -> None:
     }
     assert {
         index["name"] for index in inspector.get_indexes("broadcast_deliveries")
-    } >= {"ix_broadcast_deliveries_run_status"}
+    } >= {
+        "ix_broadcast_deliveries_run_status",
+        "ix_broadcast_deliveries_status_attempt",
+        "ix_broadcast_deliveries_retry_due",
+    }
     engine.dispose()
 
 
@@ -305,32 +309,174 @@ async def test_late_report_attachment_does_not_reset_running_run(tmp_path) -> No
 
 @pytest.mark.asyncio
 async def test_second_rate_limit_is_definite_failure_after_bounded_retry(
-    monkeypatch,
 ) -> None:
-    monkeypatch.setattr("bot.services.broadcasts.asyncio.sleep", AsyncMock())
-    bot = SimpleNamespace(
+    first_bot = SimpleNamespace(
         copy_message=AsyncMock(
-            side_effect=[
-                TelegramRetryAfter(method="copyMessage", message="retry", retry_after=1),
-                TelegramRetryAfter(method="copyMessage", message="retry", retry_after=2),
-            ]
+            side_effect=TelegramRetryAfter(
+                method="copyMessage", message="retry", retry_after=1
+            )
         )
     )
-
-    outcome = await broadcasts._deliver_claimed(
-        bot=bot,
-        delivery=SimpleNamespace(tg_id=101),
+    first = await broadcasts._deliver_claimed(
+        bot=first_bot,
+        delivery=SimpleNamespace(tg_id=101, attempts=1),
         source_chat_id=900,
         source_message_id=901,
     )
+    assert first[:4] == (
+        "retry_wait",
+        None,
+        "rate_limited",
+        "Telegram rejected the request; one retry was scheduled",
+    )
+    assert first[4] is not None
 
-    assert outcome == (
+    second_bot = SimpleNamespace(
+        copy_message=AsyncMock(
+            side_effect=TelegramRetryAfter(
+                method="copyMessage", message="retry", retry_after=2
+            )
+        )
+    )
+    second = await broadcasts._deliver_claimed(
+        bot=second_bot,
+        delivery=SimpleNamespace(tg_id=101, attempts=2),
+        source_chat_id=900,
+        source_message_id=901,
+    )
+    assert second == (
         "failed",
         None,
         "retry_rate_limited",
         "Telegram rate limit persisted after the bounded retry",
+        None,
     )
-    assert bot.copy_message.await_count == 2
+    first_bot.copy_message.assert_awaited_once()
+    second_bot.copy_message.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_failed_final_report_is_persisted_and_reconciled(tmp_path) -> None:
+    engine, sessions = await _broadcast_database(tmp_path)
+    try:
+        async with sessions() as session:
+            run, _ = await broadcast_repository.create_run(
+                session,
+                idempotency_key="report-retry",
+                segment="all",
+                source_chat_id=900,
+                source_message_id=901,
+                created_by_chat_id=42,
+                scheduled_for=datetime.now(timezone.utc),
+                recipient_tg_ids=[],
+                preselection_skipped_count=0,
+            )
+            run.status = "completed"
+            run.finished_at = datetime.now(timezone.utc)
+            await session.commit()
+            await broadcast_repository.attach_report_message(
+                session,
+                run_id=run.id,
+                chat_id=42,
+                message_id=500,
+            )
+
+        bot = SimpleNamespace(
+            edit_message_text=AsyncMock(
+                side_effect=[
+                    TelegramNetworkError(
+                        method="editMessageText", message="connection reset"
+                    ),
+                    None,
+                ]
+            )
+        )
+        assert not await broadcasts.reconcile_broadcast_report(
+            bot=bot,
+            run_id=run.id,
+            session_factory=sessions,
+        )
+        async with sessions() as session:
+            stored = await session.get(BroadcastRun, run.id)
+            assert stored.report_status == "pending"
+            assert stored.report_attempts == 1
+            assert stored.report_next_attempt_at is not None
+            assert await broadcast_repository.get_pending_report_run_ids(session) == []
+            stored.report_next_attempt_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+            await session.commit()
+            assert await broadcast_repository.get_pending_report_run_ids(session) == [run.id]
+
+        assert await broadcasts.reconcile_broadcast_report(
+            bot=bot,
+            run_id=run.id,
+            session_factory=sessions,
+        )
+        async with sessions() as session:
+            stored = await session.get(BroadcastRun, run.id)
+            assert stored.report_status == "sent"
+            assert stored.report_attempts == 2
+            assert stored.report_next_attempt_at is None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_worker_persists_rate_limit_wait_before_retrying(tmp_path) -> None:
+    engine, sessions = await _broadcast_database(tmp_path)
+    try:
+        async with sessions() as session:
+            session.add(User(id=1, tg_id=101, credits=0, referral_code="one"))
+            await session.commit()
+            run, _ = await broadcast_repository.create_run(
+                session,
+                idempotency_key="persisted-rate-limit",
+                segment="all",
+                source_chat_id=900,
+                source_message_id=901,
+                created_by_chat_id=42,
+                scheduled_for=datetime.now(timezone.utc),
+                recipient_tg_ids=[101],
+                preselection_skipped_count=0,
+            )
+
+        bot = SimpleNamespace(
+            copy_message=AsyncMock(
+                side_effect=[
+                    TelegramRetryAfter(
+                        method="copyMessage", message="retry", retry_after=60
+                    ),
+                    SimpleNamespace(message_id=7001),
+                ]
+            )
+        )
+        first_report = await broadcasts.process_broadcast_run(
+            bot=bot,
+            run_id=run.id,
+            session_factory=sessions,
+            progress_every=100,
+            sleep_seconds=0,
+        )
+        assert first_report.remaining == 1
+        async with sessions() as session:
+            delivery = await session.scalar(select(BroadcastDelivery))
+            assert delivery.status == "retry_wait"
+            assert delivery.attempts == 1
+            assert delivery.next_attempt_at is not None
+            delivery.next_attempt_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+            await session.commit()
+
+        second_report = await broadcasts.process_broadcast_run(
+            bot=bot,
+            run_id=run.id,
+            session_factory=sessions,
+            progress_every=100,
+            sleep_seconds=0,
+        )
+        assert second_report.delivered == 1
+        assert second_report.remaining == 0
+        assert bot.copy_message.await_count == 2
+    finally:
+        await engine.dispose()
 
 
 @pytest.mark.asyncio

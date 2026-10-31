@@ -2753,6 +2753,14 @@ Steps: [x] root-cause and production preflight; [x] RED/green operator control;
   30 seconds, preserving exactly-once recipient rows and falling back to a
   separate final admin report when no status message could be attached. A
   regression proves one recovered run produces one Telegram copy.
+- PR review hardening: explicit Telegram rate-limit waits are now persisted as
+  `retry_wait` with a due timestamp, so no worker sleeps while a delivery looks
+  ambiguously in-flight; the second rejection remains a definite failure. The
+  global stale-delivery predicate and retry due selector have supporting
+  indexes. Failed final admin reports remain `pending` with bounded exponential
+  backoff and are reconciled by the scheduler until sent. New regressions cover
+  persisted rate-limit deferral, due retry, report failure/backoff/recovery and
+  all added migration indexes.
 - Steps: [x] production read-only logs/DB/runtime/selection investigation;
   [x] RED regression; [x] minimal durable queue/activity implementation;
   [x] full relevant suite and migration validation; [ ] independent open code

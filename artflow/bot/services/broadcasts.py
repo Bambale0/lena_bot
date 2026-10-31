@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Callable
 
 from aiogram import Bot
@@ -144,7 +144,7 @@ async def _deliver_claimed(
     delivery,
     source_chat_id: int,
     source_message_id: int,
-) -> tuple[str, int | None, str | None, str | None]:
+) -> tuple[str, int | None, str | None, str | None, datetime | None]:
     try:
         message_id = await _copy_broadcast_message(
             bot=bot,
@@ -152,30 +152,29 @@ async def _deliver_claimed(
             source_message_id=source_message_id,
             target_chat_id=delivery.tg_id,
         )
-        return "delivered", message_id, None, None
+        return "delivered", message_id, None, None, None
     except TelegramRetryAfter as exc:
-        await asyncio.sleep(float(exc.retry_after) + 0.5)
-        try:
-            message_id = await _copy_broadcast_message(
-                bot=bot,
-                source_chat_id=source_chat_id,
-                source_message_id=source_message_id,
-                target_chat_id=delivery.tg_id,
+        if delivery.attempts >= 2:
+            return (
+                "failed",
+                None,
+                "retry_rate_limited",
+                "Telegram rate limit persisted after the bounded retry",
+                None,
             )
-            return "delivered", message_id, None, None
-        except Exception as retry_exc:  # noqa: BLE001
-            if isinstance(retry_exc, TelegramRetryAfter):
-                return (
-                    "failed",
-                    None,
-                    "retry_rate_limited",
-                    "Telegram rate limit persisted after the bounded retry",
-                )
-            status, code, detail = _error_outcome(retry_exc)
-            return status, None, f"retry_{code}", detail
+        next_attempt_at = datetime.now(timezone.utc) + timedelta(
+            seconds=float(exc.retry_after) + 0.5
+        )
+        return (
+            "retry_wait",
+            None,
+            "rate_limited",
+            "Telegram rejected the request; one retry was scheduled",
+            next_attempt_at,
+        )
     except Exception as exc:  # noqa: BLE001
         status, code, detail = _error_outcome(exc)
-        return status, None, code, detail
+        return status, None, code, detail, None
 
 
 async def _update_admin_report(
@@ -184,7 +183,7 @@ async def _update_admin_report(
     snapshot: dict[str, Any],
     completed: bool,
     session_factory,
-) -> None:
+) -> bool:
     run = snapshot["run"]
     report = _report_from_snapshot(snapshot)
     text = format_broadcast_report(report, completed=completed)
@@ -208,12 +207,47 @@ async def _update_admin_report(
             )
         elif completed:
             await bot.send_message(run.created_by_chat_id, text)
+        return True
+    except TelegramBadRequest as exc:
+        if "message is not modified" in str(exc).lower():
+            return True
+        logger.warning(
+            "Broadcast admin report failed run=%s error_type=%s",
+            run.id,
+            type(exc).__name__,
+        )
+        return False
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             "Broadcast admin report failed run=%s error_type=%s",
             run.id,
             type(exc).__name__,
         )
+        return False
+
+
+async def reconcile_broadcast_report(
+    *,
+    bot: Bot,
+    run_id: str,
+    session_factory: Callable[[], Any] | async_sessionmaker | None = None,
+) -> bool:
+    sessions = _session_factory_or_default(session_factory)
+    async with sessions() as session:
+        snapshot = await broadcast_repo.get_run_report(session, run_id=run_id)
+    sent = await _update_admin_report(
+        bot=bot,
+        snapshot=snapshot,
+        completed=True,
+        session_factory=sessions,
+    )
+    async with sessions() as session:
+        await broadcast_repo.record_report_attempt(
+            session,
+            run_id=run_id,
+            sent=sent,
+        )
+    return sent
 
 
 async def process_broadcast_run(
@@ -244,7 +278,13 @@ async def process_broadcast_run(
                 tg_id=delivery.tg_id,
             )
         if deliverable:
-            status, telegram_message_id, error_code, error_detail = await _deliver_claimed(
+            (
+                status,
+                telegram_message_id,
+                error_code,
+                error_detail,
+                next_attempt_at,
+            ) = await _deliver_claimed(
                 bot=bot,
                 delivery=delivery,
                 source_chat_id=run.source_chat_id,
@@ -253,6 +293,7 @@ async def process_broadcast_run(
         else:
             status, telegram_message_id = "skipped", None
             error_code, error_detail = "recipient_ineligible", "Recipient no longer deliverable"
+            next_attempt_at = None
 
         async with sessions() as session:
             await broadcast_repo.complete_delivery(
@@ -262,8 +303,9 @@ async def process_broadcast_run(
                 telegram_message_id=telegram_message_id,
                 error_code=error_code,
                 error_detail=error_detail,
+                next_attempt_at=next_attempt_at,
             )
-        if status != "delivered":
+        if status not in {"delivered", "retry_wait"}:
             logger.warning(
                 "Broadcast delivery terminal run=%s user=%s status=%s error=%s",
                 run_id,
@@ -288,12 +330,19 @@ async def process_broadcast_run(
     async with sessions() as session:
         snapshot = await broadcast_repo.finalize_run_if_terminal(session, run_id=run_id)
     completed = snapshot["remaining"] == 0
-    await _update_admin_report(
-        bot=bot,
-        snapshot=snapshot,
-        completed=completed,
-        session_factory=sessions,
-    )
+    if completed:
+        await reconcile_broadcast_report(
+            bot=bot,
+            run_id=run_id,
+            session_factory=sessions,
+        )
+    else:
+        await _update_admin_report(
+            bot=bot,
+            snapshot=snapshot,
+            completed=False,
+            session_factory=sessions,
+        )
     report = _report_from_snapshot(snapshot)
     logger.info(
         "Broadcast worker finished run=%s delivered=%s skipped=%s failed=%s uncertain=%s remaining=%s",
