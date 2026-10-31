@@ -17,11 +17,20 @@ async def run_broadcast_scheduler(stop_event: asyncio.Event, bot: Bot) -> None:
     while not stop_event.is_set():
         try:
             async with AsyncSessionLocal() as session:
+                activated = await broadcast_repository.activate_stale_preparing_runs(
+                    session,
+                    stale_before=datetime.now(timezone.utc) - timedelta(seconds=30),
+                )
                 recovered = await broadcast_repository.mark_stale_sending_uncertain(
                     session,
                     stale_before=datetime.now(timezone.utc) - timedelta(minutes=5),
                 )
                 run_ids = await broadcast_repository.get_due_run_ids(session)
+            if activated:
+                logger.warning(
+                    "Broadcast worker activated unattached runs count=%s",
+                    activated,
+                )
             if recovered:
                 logger.warning(
                     "Broadcast worker recovered interrupted deliveries count=%s",

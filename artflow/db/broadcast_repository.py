@@ -193,6 +193,23 @@ async def get_due_run_ids(
     return list(result.scalars().all())
 
 
+async def activate_stale_preparing_runs(
+    session: AsyncSession,
+    *,
+    stale_before: datetime,
+) -> int:
+    result = await session.execute(
+        update(BroadcastRun)
+        .where(
+            BroadcastRun.status == "preparing",
+            BroadcastRun.created_at < stale_before,
+        )
+        .values(status="queued")
+    )
+    await session.commit()
+    return int(result.rowcount or 0)
+
+
 async def claim_next_delivery(
     session: AsyncSession,
     *,

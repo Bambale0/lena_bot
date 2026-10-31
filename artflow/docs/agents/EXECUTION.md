@@ -2748,6 +2748,11 @@ Steps: [x] root-cause and production preflight; [x] RED/green operator control;
   PostgreSQL competing-worker integration case is delegated to exact-head CI;
   the production topology currently owns one scheduler, while row locking and
   unique constraints enforce the multi-worker contract.
+- Follow-up re-review identified the status-message attachment gap as an
+  important stall risk. The scheduler now promotes stale `preparing` runs after
+  30 seconds, preserving exactly-once recipient rows and falling back to a
+  separate final admin report when no status message could be attached. A
+  regression proves one recovered run produces one Telegram copy.
 - Steps: [x] production read-only logs/DB/runtime/selection investigation;
   [x] RED regression; [x] minimal durable queue/activity implementation;
   [x] full relevant suite and migration validation; [ ] independent open code

@@ -230,6 +230,47 @@ async def test_run_is_not_due_until_admin_report_is_attached(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_stale_unattached_run_is_recovered_instead_of_lost(tmp_path) -> None:
+    engine, sessions = await _broadcast_database(tmp_path)
+    try:
+        async with sessions() as session:
+            session.add(User(id=1, tg_id=101, credits=0, referral_code="one"))
+            await session.commit()
+            run, _ = await broadcast_repository.create_run(
+                session,
+                idempotency_key="recover-unattached",
+                segment="all",
+                source_chat_id=900,
+                source_message_id=901,
+                created_by_chat_id=42,
+                scheduled_for=datetime.now(timezone.utc),
+                recipient_tg_ids=[101],
+                preselection_skipped_count=0,
+            )
+            run.created_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+            await session.commit()
+            activated = await broadcast_repository.activate_stale_preparing_runs(
+                session,
+                stale_before=datetime.now(timezone.utc) - timedelta(seconds=30),
+            )
+            assert activated == 1
+            assert await broadcast_repository.get_due_run_ids(session) == [run.id]
+
+        bot = SimpleNamespace(copy_message=AsyncMock(return_value=SimpleNamespace(message_id=1)))
+        report = await broadcasts.process_broadcast_run(
+            bot=bot,
+            run_id=run.id,
+            session_factory=sessions,
+            progress_every=100,
+            sleep_seconds=0,
+        )
+        assert bot.copy_message.await_count == 1
+        assert report.delivered == 1
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_second_rate_limit_is_definite_failure_after_bounded_retry(
     monkeypatch,
 ) -> None:
