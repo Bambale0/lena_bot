@@ -19,9 +19,13 @@ from core.feed_recipe_identity_policy import (
     set_feed_recipe_identity_instruction,
     validate_instruction,
 )
+from core.image_fallback_policy import (
+    EXACT_MODELS,
+    get_image_fallback_route,
+    set_image_fallback_route,
+)
 from core.image_recovery_policy import get_image_recovery_policy, set_image_recovery_policy
 from core.provider_routing import get_nano21_route, set_nano21_route
-from core.image_fallback_policy import EXACT_MODELS, get_image_fallback_route, set_image_fallback_route
 from core.qwen_routing import get_qwen_route, set_qwen_route
 from core.reporting_time import REPORTING_TZ, moscow_day_bounds_utc
 from core.wan30_routing_policy import MODELS as WAN_ROUTE_MODELS

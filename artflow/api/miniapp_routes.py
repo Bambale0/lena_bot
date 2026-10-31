@@ -695,9 +695,9 @@ async def _reconcile_neironych_image_generation(
     """
     expected_task_id = gen.task_id
     age = datetime.now(timezone.utc) - (getattr(gen, "created_at", None) or datetime.now(timezone.utc))
-    from db.repeat_lookup import parse_input_params
-    from core.image_fallback_policy import EXACT_MODELS
     from api import neironych_image_fallback_adapter as fallback_adapter
+    from core.image_fallback_policy import EXACT_MODELS
+    from db.repeat_lookup import parse_input_params
     marker = parse_input_params(gen.input_params).get("nexus_neironych_image_fallback")
     is_fallback = (gen.model in EXACT_MODELS and isinstance(marker, dict)
                    and marker.get("fallback_task_id") == expected_task_id)
