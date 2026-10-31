@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 import sqlalchemy as sa
-from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError
+from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError, TelegramRetryAfter
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from sqlalchemy import create_engine, select
@@ -191,11 +191,72 @@ async def test_queue_is_idempotent_and_snapshots_each_recipient_once(tmp_path) -
         assert first_created is True
         assert second_created is False
         assert second.id == first.id
+        assert first.status == "preparing"
         assert sorted(item.tg_id for item in deliveries) == [101, 202]
         assert first.selected_count == 2
         assert first.preselection_skipped_count == 3
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_run_is_not_due_until_admin_report_is_attached(tmp_path) -> None:
+    engine, sessions = await _broadcast_database(tmp_path)
+    try:
+        async with sessions() as session:
+            session.add(User(id=1, tg_id=101, credits=0, referral_code="one"))
+            await session.commit()
+            run, _ = await broadcast_repository.create_run(
+                session,
+                idempotency_key="attach-before-send",
+                segment="all",
+                source_chat_id=900,
+                source_message_id=901,
+                created_by_chat_id=42,
+                scheduled_for=datetime.now(timezone.utc),
+                recipient_tg_ids=[101],
+                preselection_skipped_count=0,
+            )
+            assert await broadcast_repository.get_due_run_ids(session) == []
+            await broadcast_repository.attach_report_message(
+                session,
+                run_id=run.id,
+                chat_id=42,
+                message_id=500,
+            )
+            assert await broadcast_repository.get_due_run_ids(session) == [run.id]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_second_rate_limit_is_definite_failure_after_bounded_retry(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("bot.services.broadcasts.asyncio.sleep", AsyncMock())
+    bot = SimpleNamespace(
+        copy_message=AsyncMock(
+            side_effect=[
+                TelegramRetryAfter(method="copyMessage", message="retry", retry_after=1),
+                TelegramRetryAfter(method="copyMessage", message="retry", retry_after=2),
+            ]
+        )
+    )
+
+    outcome = await broadcasts._deliver_claimed(
+        bot=bot,
+        delivery=SimpleNamespace(tg_id=101),
+        source_chat_id=900,
+        source_message_id=901,
+    )
+
+    assert outcome == (
+        "failed",
+        None,
+        "retry_rate_limited",
+        "Telegram rate limit persisted after the bounded retry",
+    )
+    assert bot.copy_message.await_count == 2
 
 
 @pytest.mark.asyncio

@@ -128,7 +128,7 @@ async def create_run(
         source_message_id=int(source_message_id),
         created_by_chat_id=int(created_by_chat_id),
         scheduled_for=scheduled_for.astimezone(timezone.utc),
-        status="queued",
+        status="preparing",
         selected_count=len(recipients),
         preselection_skipped_count=max(0, int(preselection_skipped_count)),
     )
@@ -165,7 +165,11 @@ async def attach_report_message(
     await session.execute(
         update(BroadcastRun)
         .where(BroadcastRun.id == run_id)
-        .values(report_chat_id=int(chat_id), report_message_id=int(message_id))
+        .values(
+            report_chat_id=int(chat_id),
+            report_message_id=int(message_id),
+            status="queued",
+        )
     )
     await session.commit()
 

@@ -164,6 +164,13 @@ async def _deliver_claimed(
             )
             return "delivered", message_id, None, None
         except Exception as retry_exc:  # noqa: BLE001
+            if isinstance(retry_exc, TelegramRetryAfter):
+                return (
+                    "failed",
+                    None,
+                    "retry_rate_limited",
+                    "Telegram rate limit persisted after the bounded retry",
+                )
             status, code, detail = _error_outcome(retry_exc)
             return status, None, f"retry_{code}", detail
     except Exception as exc:  # noqa: BLE001

@@ -135,7 +135,7 @@ class BroadcastRun(Base):
     __tablename__ = "broadcast_runs"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('queued', 'running', 'completed')",
+            "status IN ('preparing', 'queued', 'running', 'completed')",
             name="ck_broadcast_runs_status",
         ),
         Index("ix_broadcast_runs_due", "status", "scheduled_for"),
@@ -148,7 +148,7 @@ class BroadcastRun(Base):
     source_message_id: Mapped[int] = mapped_column(Integer, nullable=False)
     created_by_chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     scheduled_for: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    status: Mapped[str] = mapped_column(String(16), nullable=False, default="queued")
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="preparing")
     selected_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     preselection_skipped_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     report_chat_id: Mapped[int | None] = mapped_column(BigInteger)

@@ -33,7 +33,7 @@ def upgrade() -> None:
         sa.Column("source_message_id", sa.Integer(), nullable=False),
         sa.Column("created_by_chat_id", sa.BigInteger(), nullable=False),
         sa.Column("scheduled_for", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("status", sa.String(16), nullable=False, server_default="queued"),
+        sa.Column("status", sa.String(16), nullable=False, server_default="preparing"),
         sa.Column("selected_count", sa.Integer(), nullable=False, server_default="0"),
         sa.Column(
             "preselection_skipped_count",
@@ -58,7 +58,7 @@ def upgrade() -> None:
             server_default=sa.func.now(),
         ),
         sa.CheckConstraint(
-            "status IN ('queued', 'running', 'completed')",
+            "status IN ('preparing', 'queued', 'running', 'completed')",
             name="ck_broadcast_runs_status",
         ),
     )
