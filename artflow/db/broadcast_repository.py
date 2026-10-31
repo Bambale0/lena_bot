@@ -168,7 +168,10 @@ async def attach_report_message(
         .values(
             report_chat_id=int(chat_id),
             report_message_id=int(message_id),
-            status="queued",
+            status=case(
+                (BroadcastRun.status == "preparing", "queued"),
+                else_=BroadcastRun.status,
+            ),
         )
     )
     await session.commit()

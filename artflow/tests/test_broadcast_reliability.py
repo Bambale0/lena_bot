@@ -271,6 +271,39 @@ async def test_stale_unattached_run_is_recovered_instead_of_lost(tmp_path) -> No
 
 
 @pytest.mark.asyncio
+async def test_late_report_attachment_does_not_reset_running_run(tmp_path) -> None:
+    engine, sessions = await _broadcast_database(tmp_path)
+    try:
+        async with sessions() as session:
+            session.add(User(id=1, tg_id=101, credits=0, referral_code="one"))
+            await session.commit()
+            run, _ = await broadcast_repository.create_run(
+                session,
+                idempotency_key="late-attachment",
+                segment="all",
+                source_chat_id=900,
+                source_message_id=901,
+                created_by_chat_id=42,
+                scheduled_for=datetime.now(timezone.utc),
+                recipient_tg_ids=[101],
+                preselection_skipped_count=0,
+            )
+            run.status = "running"
+            await session.commit()
+            await broadcast_repository.attach_report_message(
+                session,
+                run_id=run.id,
+                chat_id=42,
+                message_id=500,
+            )
+            await session.refresh(run)
+            assert run.status == "running"
+            assert run.report_message_id == 500
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_second_rate_limit_is_definite_failure_after_bounded_retry(
     monkeypatch,
 ) -> None:
