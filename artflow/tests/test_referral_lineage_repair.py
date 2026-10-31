@@ -46,7 +46,7 @@ def test_referral_lineage_migration_is_current_head() -> None:
     config.set_main_option("script_location", "db/migrations")
     scripts = ScriptDirectory.from_config(config)
 
-    assert scripts.get_heads() == ["055_referral_credit"]
+    assert scripts.get_heads() == ["056_broadcast_delivery"]
     assert scripts.get_revision("055_referral_credit").down_revision == "054_referral_lineage"
 
     source = Path("db/migrations/versions/054_referral_lineage_immutability.py").read_text(

@@ -228,6 +228,24 @@ async def get_user_by_tg_id(session: AsyncSession, tg_id: int) -> User | None:
     return result.scalar_one_or_none()
 
 
+async def touch_telegram_activity(
+    session: AsyncSession,
+    user: User,
+    *,
+    now: datetime | None = None,
+    minimum_interval: timedelta = timedelta(minutes=5),
+) -> None:
+    now = now or datetime.now(timezone.utc)
+    previous = getattr(user, "last_telegram_activity_at", None)
+    if previous is not None:
+        if previous.tzinfo is None:
+            previous = previous.replace(tzinfo=timezone.utc)
+        if previous >= now - minimum_interval:
+            return
+    user.last_telegram_activity_at = now
+    await session.commit()
+
+
 async def get_user_by_username(session: AsyncSession, username: str) -> User | None:
     cleaned = username.strip().lstrip("@")
     if not cleaned:
@@ -286,6 +304,7 @@ async def create_user(
         username=username,
         full_name=full_name,
         credits=welcome_credits,
+        last_telegram_activity_at=datetime.now(timezone.utc),
         referral_code=secrets.token_urlsafe(8),
         referrer_id=referrer.id if referrer else None,
         referrer_l2_id=referrer_l2.id if referrer_l2 else None,
@@ -978,48 +997,18 @@ async def get_all_user_ids(session: AsyncSession) -> list[int]:
 
 
 async def get_broadcast_recipient_ids(session: AsyncSession, segment: str = "all") -> list[int]:
-    base = select(User.tg_id).where(User.is_banned.is_(False))
+    from db import broadcast_repository
 
-    if segment == "all":
-        result = await session.execute(base)
-        return list(result.scalars().all())
+    return await broadcast_repository.get_recipient_ids(session, segment)
 
-    if segment == "paid":
-        stmt = (
-            select(User.tg_id)
-            .join(Transaction, Transaction.user_id == User.id)
-            .where(
-                User.is_banned.is_(False),
-                Transaction.status == TransactionStatus.paid,
-            )
-            .distinct()
-        )
-        result = await session.execute(stmt)
-        return list(result.scalars().all())
 
-    if segment == "new":
-        cutoff = datetime.now(timezone.utc) - timedelta(days=7)
-        stmt = base.where(User.created_at >= cutoff)
-        result = await session.execute(stmt)
-        return list(result.scalars().all())
+async def count_broadcast_non_telegram_users(
+    session: AsyncSession,
+    segment: str = "all",
+) -> int:
+    from db import broadcast_repository
 
-    if segment == "active":
-        cutoff = datetime.now(timezone.utc) - timedelta(days=14)
-        recent_generation_users = select(Generation.user_id).where(Generation.created_at >= cutoff)
-        recent_paid_users = select(Transaction.user_id).where(
-            Transaction.created_at >= cutoff,
-            Transaction.status == TransactionStatus.paid,
-        )
-        stmt = base.where(
-            (User.id.in_(recent_generation_users))
-            | (User.id.in_(recent_paid_users))
-            | (User.created_at >= cutoff)
-        )
-        result = await session.execute(stmt)
-        return list(result.scalars().all())
-
-    result = await session.execute(base)
-    return list(result.scalars().all())
+    return await broadcast_repository.count_non_telegram_users(session, segment)
 
 
 async def get_referral_leaders(session: AsyncSession, limit: int = 20) -> list[ReferralLeader]:

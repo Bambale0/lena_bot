@@ -720,9 +720,9 @@ async def test_handle_broadcast() -> None:
 
 
 @pytest.mark.asyncio
-async def test_cb_broadcast_send_starts_delivery_in_background() -> None:
+async def test_cb_broadcast_send_queues_durable_idempotent_run() -> None:
     call = make_callback(data="adm:broadcast:send")
-    status_msg = AsyncMock()
+    status_msg = SimpleNamespace(chat=SimpleNamespace(id=10), message_id=777)
     call.message.answer = AsyncMock(side_effect=[status_msg, AsyncMock()])
     state = AsyncMock()
     state.get_data = AsyncMock(
@@ -730,30 +730,37 @@ async def test_cb_broadcast_send_starts_delivery_in_background() -> None:
             "broadcast_source_chat_id": 10,
             "broadcast_source_message_id": 20,
             "broadcast_segment": "all",
+            "broadcast_idempotency_key": "draft-123",
         }
     )
     session = AsyncMock()
-    created_tasks: list[tuple[object, str | None]] = []
-
-    def capture_task(coro, *, name: str):
-        created_tasks.append((coro, name))
-        coro.close()
+    run = SimpleNamespace(
+        id="run-123",
+        selected_count=2,
+        preselection_skipped_count=1,
+    )
 
     with (
         patch("bot.handlers.admin.safe_answer_callback", AsyncMock()) as answer_callback,
-        patch("bot.handlers.admin.get_recipient_ids", AsyncMock(return_value=[101, 202])) as recipients,
-        patch("bot.handlers.admin.deliver_broadcast", AsyncMock()) as deliver,
-        patch("bot.handlers.admin._start_background_broadcast", MagicMock(side_effect=capture_task)) as start_task,
+        patch("bot.handlers.admin.queue_broadcast", AsyncMock(return_value=(run, True))) as queue,
+        patch(
+            "bot.handlers.admin.broadcast_repository.attach_report_message",
+            AsyncMock(),
+        ) as attach_report,
     ):
         await admin.cb_broadcast_send(call, state, session)
 
     answer_callback.assert_awaited_once_with(call)
-    recipients.assert_awaited_once_with(session, "all")
+    queue.assert_awaited_once()
+    assert queue.await_args.kwargs["idempotency_key"] == "draft-123"
     state.clear.assert_awaited_once()
     assert call.message.answer.await_count == 2
-    start_task.assert_called_once()
-    assert created_tasks[0][1] == "broadcast:all:2"
-    deliver.assert_not_awaited()
+    attach_report.assert_awaited_once_with(
+        session,
+        run_id="run-123",
+        chat_id=10,
+        message_id=777,
+    )
 
 
 # ── handle_credits_tg_id ─────────────────────────────────────────────────────

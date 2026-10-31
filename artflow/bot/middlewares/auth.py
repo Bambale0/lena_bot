@@ -222,6 +222,8 @@ class AuthMiddleware(BaseMiddleware):
                 )
         elif db_user.is_banned:
             return  # Просто игнорируем забаненных
+        else:
+            await repo.touch_telegram_activity(session, db_user)
 
         # Referral lineage is immutable after account creation. Shared links may carry
         # a referral code, but an existing account must never be rebound to it.

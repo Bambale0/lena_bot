@@ -2689,3 +2689,59 @@ Steps: [x] root-cause and production preflight; [x] RED/green operator control;
   [x] final focused regression rerun; [ ] protected PR CI, merge-SHA deploy
   and public delivery proof. Exact-head CI and deployment evidence will be
   recorded in the PR after the protected delivery flow completes.
+
+## 2026-10-31 — durable Telegram broadcast delivery and audit
+
+- Baseline: production/main `37e454ab50eb15c025ace5f2c0fb64425103cf8a`;
+  branch `fix/broadcast-delivery-audit-20261031`. User authorized diagnosis,
+  regression repair, protected release and production verification, while
+  explicitly forbidding replay of the complained-about broadcast or balance
+  changes.
+- Production evidence: the app container had zero restarts and no persisted
+  broadcast run/delivery records because the legacy implementation launched a
+  serial in-memory coroutine from the webhook request. Successes and ordinary
+  Telegram `Forbidden`/`BadRequest` outcomes were not logged. The complained-of
+  creator qualified for the active selector at the reported time, was not
+  banned, and the bot can resolve the private chat as a member. The historical
+  per-recipient outcome therefore cannot be reconstructed safely and is not
+  replayed.
+- Selection finding: `active` used only account age, generations and paid
+  transactions; the schema had no Telegram activity timestamp. `all` also
+  included web-only accounts with synthetic negative Telegram IDs. The
+  production snapshot contained 13,872 non-banned accounts, 13,863 usable
+  Telegram IDs and 10 web-only IDs; the legacy active selector returned 1,963.
+- Repair contract: record throttled per-user Telegram activity; exclude
+  non-Telegram IDs before delivery and report them as skipped; snapshot each
+  selected recipient into a database-backed run; make confirmation idempotent;
+  claim each delivery once; persist Telegram message IDs and terminal outcomes;
+  retry only explicit rate limits; classify ambiguous network/worker outcomes
+  as uncertain without automatic replay; recover stale in-flight rows without
+  duplicating messages; show delivered/skipped/failed/uncertain counts to the
+  administrator.
+- Scope/parity: `telegram_bot` admin and delivery paths are applicable. `site`
+  and `mini_app` expose neither broadcast composition nor delivery controls, so
+  no UI change applies there. Pricing, balances, provider routes, credentials,
+  generation behavior and public content remain unchanged.
+- TDD evidence: the new reliability suite first failed because the
+  durable broadcast repository/models did not exist. Focused green run now
+  covers real Telegram activity selection, web-only exclusion, fail-closed
+  segment names, migration schema, run idempotency, one delivery row per user,
+  delivered/failed/uncertain persistence and no-replay recovery. Admin and auth
+  middleware regressions pass in the same run. The final relevant suite also
+  covers all migration-head guards, FSM and payment-audit migrations; it passes
+  with five existing environment skips. Ruff, Python compilation and diff
+  whitespace validation pass. The broader Windows run reaches 100%; its
+  unrelated stale frontend/OpenAPI/environment failures are outside the
+  broadcast paths, while all four migration-head failures introduced by the
+  new revision were corrected and rerun green. Exact-head Linux CI remains the
+  authoritative repository gate.
+- Skills/guides: project `systematic-debugging`, `test-driven-development`,
+  `verification-before-completion`, `requesting-code-review`; Bambale0/claw QA
+  audit checklist; wondelai legacy characterization and clean-code guidance;
+  APIX production-release runbook. Anthropic Skills contained no applicable
+  Telegram/backend broadcast guide.
+- Steps: [x] production read-only logs/DB/runtime/selection investigation;
+  [x] RED regression; [x] minimal durable queue/activity implementation;
+  [x] full relevant suite and migration validation; [ ] independent open code
+  review; [ ] protected PR exact-head gates; [ ] merge/autodeploy and live
+  migration/worker/health verification with zero broadcast replay.
