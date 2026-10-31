@@ -4,7 +4,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import case, func, or_, select, update
+from sqlalchemy import case, exists, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -184,11 +184,34 @@ async def get_due_run_ids(
     limit: int = 10,
 ) -> list[str]:
     now = now or datetime.now(timezone.utc)
+    actionable_delivery = exists(
+        select(BroadcastDelivery.id).where(
+            BroadcastDelivery.run_id == BroadcastRun.id,
+            or_(
+                BroadcastDelivery.status == "pending",
+                (
+                    (BroadcastDelivery.status == "retry_wait")
+                    & (BroadcastDelivery.next_attempt_at <= now)
+                ),
+            ),
+        )
+    )
+    nonterminal_delivery = exists(
+        select(BroadcastDelivery.id).where(
+            BroadcastDelivery.run_id == BroadcastRun.id,
+            BroadcastDelivery.status.in_(("pending", "retry_wait", "sending")),
+        )
+    )
     result = await session.execute(
         select(BroadcastRun.id)
         .where(
             BroadcastRun.status.in_(("queued", "running")),
             BroadcastRun.scheduled_for <= now,
+            or_(
+                BroadcastRun.status == "queued",
+                actionable_delivery,
+                ~nonterminal_delivery,
+            ),
         )
         .order_by(BroadcastRun.scheduled_for, BroadcastRun.created_at)
         .limit(limit)

@@ -480,6 +480,65 @@ async def test_worker_persists_rate_limit_wait_before_retrying(tmp_path) -> None
 
 
 @pytest.mark.asyncio
+async def test_future_retry_wait_does_not_starve_fresh_queued_run(tmp_path) -> None:
+    engine, sessions = await _broadcast_database(tmp_path)
+    try:
+        async with sessions() as session:
+            session.add_all(
+                [
+                    User(id=1, tg_id=101, credits=0, referral_code="waiting"),
+                    User(id=2, tg_id=202, credits=0, referral_code="fresh"),
+                ]
+            )
+            await session.commit()
+            waiting, _ = await broadcast_repository.create_run(
+                session,
+                idempotency_key="waiting-run",
+                segment="all",
+                source_chat_id=900,
+                source_message_id=901,
+                created_by_chat_id=42,
+                scheduled_for=datetime.now(timezone.utc) - timedelta(minutes=5),
+                recipient_tg_ids=[101],
+                preselection_skipped_count=0,
+            )
+            waiting.status = "running"
+            waiting_delivery = await session.scalar(
+                select(BroadcastDelivery).where(BroadcastDelivery.run_id == waiting.id)
+            )
+            waiting_delivery.status = "retry_wait"
+            waiting_delivery.next_attempt_at = datetime.now(timezone.utc) + timedelta(
+                minutes=10
+            )
+            fresh, _ = await broadcast_repository.create_run(
+                session,
+                idempotency_key="fresh-run",
+                segment="all",
+                source_chat_id=900,
+                source_message_id=902,
+                created_by_chat_id=42,
+                scheduled_for=datetime.now(timezone.utc),
+                recipient_tg_ids=[202],
+                preselection_skipped_count=0,
+            )
+            fresh.status = "queued"
+            await session.commit()
+
+            assert await broadcast_repository.get_due_run_ids(session, limit=1) == [
+                fresh.id
+            ]
+            waiting_delivery.next_attempt_at = datetime.now(timezone.utc) - timedelta(
+                seconds=1
+            )
+            await session.commit()
+            due = await broadcast_repository.get_due_run_ids(session, limit=10)
+            assert waiting.id in due
+            assert fresh.id in due
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_worker_persists_delivered_failed_and_uncertain_without_unsafe_retry(
     tmp_path,
 ) -> None:

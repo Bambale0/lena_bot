@@ -2761,6 +2761,11 @@ Steps: [x] root-cause and production preflight; [x] RED/green operator control;
   backoff and are reconciled by the scheduler until sent. New regressions cover
   persisted rate-limit deferral, due retry, report failure/backoff/recovery and
   all added migration indexes.
+- Final review follow-up prevents scheduler starvation: future `retry_wait`
+  rows no longer consume the due-run limit. Running jobs are selected only for
+  pending/due retry work or terminalization, while a fresh queued run remains
+  immediately actionable. The limit-one regression covers this ordering and
+  later due-retry eligibility.
 - Steps: [x] production read-only logs/DB/runtime/selection investigation;
   [x] RED regression; [x] minimal durable queue/activity implementation;
   [x] full relevant suite and migration validation; [ ] independent open code
