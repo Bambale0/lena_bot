@@ -695,21 +695,41 @@ async def _reconcile_neironych_image_generation(
     """
     expected_task_id = gen.task_id
     age = datetime.now(timezone.utc) - (getattr(gen, "created_at", None) or datetime.now(timezone.utc))
+    from api import neironych_image_fallback_adapter as fallback_adapter
+    from core.image_fallback_policy import EXACT_MODELS
+    from db.repeat_lookup import parse_input_params
+    marker = parse_input_params(gen.input_params).get("nexus_neironych_image_fallback")
+    is_fallback = (gen.model in EXACT_MODELS and isinstance(marker, dict)
+                   and marker.get("fallback_task_id") == expected_task_id)
+    if is_fallback:
+        try:
+            started = datetime.fromisoformat(str(marker["started_at"]))
+            age = max(datetime.now(timezone.utc) - started, timedelta(0))
+        except (ValueError, TypeError, KeyError):
+            pass
 
     async def refund_if_overdue(reason: str, current=None):
         policy = await get_image_recovery_policy(session, "neironych")
         if age.total_seconds() < policy.auto_refund_seconds:
             return current or gen
         logger.warning("Image customer SLA expired gen=%s provider=neironych state=%s", gen.id, reason)
-        await repo.fail_generation_and_refund(
+        failed, refunded = await repo.fail_generation_and_refund(
             session, gen.id, "Изображение не пришло вовремя. Кредиты возвращены.",
             refund_note=f"image:auto_timeout:neironych:{reason}",
             expected_task_id=expected_task_id,
         )
+        if failed and is_fallback:
+            from api.nexus_neironych_image_fallback import _notify_failed_fallback
+            await _notify_failed_fallback(session, gen.id, refunded)
         return await repo.get_generation_by_id(session, gen.id)
 
     try:
-        state = await neironych_image_adapter.fetch_nano_banana21_status(request_id)
+        if is_fallback:
+            state = await fallback_adapter.fetch_fallback_status(
+                request_id, model_key=gen.model,
+            )
+        else:
+            state = await neironych_image_adapter.fetch_nano_banana21_status(request_id)
     except Exception as exc:
         logger.warning("Neironych image reconciliation delayed gen=%s request_id=%s error=%s",
                        gen.id, request_id, type(exc).__name__)
@@ -717,11 +737,14 @@ async def _reconcile_neironych_image_generation(
 
     provider_state = state["status"]
     if provider_state in {"failed", "timeout", "cancelled"}:
-        await repo.fail_generation_and_refund(
+        failed, refunded = await repo.fail_generation_and_refund(
             session, gen.id, f"Neironych definitively failed ({provider_state})",
             refund_note="neironych_image_provider_failed",
             expected_task_id=expected_task_id,
         )
+        if failed and is_fallback:
+            from api.nexus_neironych_image_fallback import _notify_failed_fallback
+            await _notify_failed_fallback(session, gen.id, refunded)
         return await repo.get_generation_by_id(session, gen.id)
 
     if provider_state == "completed":
@@ -733,7 +756,11 @@ async def _reconcile_neironych_image_generation(
             )
             return await refund_if_overdue("completed_no_media")
         try:
-            durable_url = await neironych_image_adapter.mirror_verified_nano_banana21_result(url)
+            durable_url = (
+                await fallback_adapter.mirror_fallback_result(url, model_key=gen.model)
+                if is_fallback
+                else await neironych_image_adapter.mirror_verified_nano_banana21_result(url)
+            )
             finished = await repo.finish_generation(
                 session, gen.id, durable_url, result_urls=[durable_url],
                 expected_task_id=expected_task_id,
@@ -1000,6 +1027,10 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
         confirmed_wan_failure = strict_wan_video and isinstance(
             exc, video_service.KieVideoTaskFailed,
         )
+        if strict_nexus_image and isinstance(exc, nexus_image_adapter.NexusImageTaskFailed):
+            from api.nexus_neironych_image_fallback import maybe_start_image_fallback
+            if await maybe_start_image_fallback(session, gen, exc.payload):
+                return await repo.get_generation_by_id(session, gen.id)
         terminal, _ = await repo.fail_generation_and_refund(
             session,
             gen.id,

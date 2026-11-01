@@ -88,3 +88,25 @@ Audit follow-up: [verified fixes and explicitly open blockers](docs/audits/2026-
 ## Seedance admission incident
 
 For the verified native 503 contract, durable Neironych-to-KIE fallback and verification boundaries, see [Seedance admission recovery](docs/seedance-admission-recovery.md). Generic provider failures still require reconciliation; HTTP health is not a live generation test.
+
+## Image fallback: Nexus → Neironych
+
+A canonical Nexus image task with a confirmed terminal `E-294` overload failure can be
+recovered through Neironych using the **same** model and **same** original image
+references. Supported exact-model routes are Nano Banana Pro, Nano Banana 2,
+and GPT Image 2 (text-to-image and image-to-image). VIP and other models are
+excluded to avoid changing product or quality. Content-policy rejections,
+ambiguous Nexus timeouts/5xx, and unknown submission outcomes never trigger
+a second paid request.
+
+Per-model fallback is enabled by default and can be disabled without deploy:
+`GET /api/web/admin/provider-routing/image-fallbacks` and
+`PUT /api/web/admin/provider-routing/image-fallbacks/{model_key}`
+with `{"enabled": false}`. Changes require admin authorization and are audited.
+
+A generation-level PostgreSQL claim and deterministic Neironych request ID
+prevent duplicate submissions from concurrent webhooks/pollers. The customer
+is charged **once** and receives either the recovered image or the normal
+idempotent refund. If the Neironych submission outcome is uncertain, the
+system only polls the existing request by ID; it never blindly resubmits.
+See `docs/agents/EXECUTION/nexus-neironych-image-fallback-20261031.md`.
