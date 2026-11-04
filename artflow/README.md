@@ -88,3 +88,5 @@ Audit follow-up: [verified fixes and explicitly open blockers](docs/audits/2026-
 ## Seedance admission incident
 
 For the verified native 503 contract, durable Neironych-to-KIE fallback and verification boundaries, see [Seedance admission recovery](docs/seedance-admission-recovery.md). Generic provider failures still require reconciliation; HTTP health is not a live generation test.
+
+Nano Banana 2 primary-provider contract and recovery: [routing guide](docs/nano-banana-2-routing.md).

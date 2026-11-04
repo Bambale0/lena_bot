@@ -505,6 +505,7 @@ async def test_handle_session_prompt_does_not_reuse_stale_feed_source_for_own_re
     with (
         patch("bot.handlers.image_gen._resolve_image_session", AsyncMock(return_value=(image_session, 99))),
         patch("bot.handlers.image_gen._launch_session_generation", launch),
+        patch("bot.handlers.image_gen.get_nano2_route", AsyncMock(return_value=SimpleNamespace(primary_provider="nexus"))),
         patch("bot.handlers.image_gen.repo", new=repo_stub),
     ):
         await image_gen.handle_session_prompt(
@@ -548,6 +549,7 @@ async def test_session_remix_keeps_user_reference_ids_for_later_variants() -> No
 
     with (
         patch("bot.handlers.image_gen._resolve_image_session", AsyncMock(return_value=(image_session, 99))),
+        patch("bot.handlers.image_gen.get_nano2_route", AsyncMock(return_value=SimpleNamespace(primary_provider="nexus"))),
         patch("bot.handlers.image_gen.repo", new=repo_stub),
         patch("bot.handlers.image_gen.safe_edit_message", AsyncMock()),
     ):
@@ -598,6 +600,7 @@ async def test_style_edit_keeps_user_reference_ids_for_later_variants() -> None:
 
     with (
         patch("bot.handlers.image_gen._resolve_image_session", AsyncMock(return_value=(image_session, 99))),
+        patch("bot.handlers.image_gen.get_nano2_route", AsyncMock(return_value=SimpleNamespace(primary_provider="nexus"))),
         patch("bot.handlers.image_gen.repo", new=repo_stub),
         patch("bot.handlers.image_gen.safe_edit_message", AsyncMock()),
     ):
@@ -653,6 +656,7 @@ async def test_repeat_variant_uses_saved_user_references_not_last_result() -> No
         patch("bot.handlers.image_gen._resolve_image_session", AsyncMock(return_value=(image_session, 101))),
         patch("bot.handlers.image_gen.safe_edit_message", AsyncMock()) as edit_message,
         patch("bot.handlers.image_gen._launch_session_generation", launch),
+        patch("bot.handlers.image_gen.get_nano2_route", AsyncMock(return_value=SimpleNamespace(primary_provider="nexus"))),
         patch("bot.handlers.image_gen.repo", new=repo_stub),
     ):
         await image_gen.cb_image_session_repeat(
@@ -840,6 +844,7 @@ async def test_handle_session_photo_switches_active_session_to_image_mode(monkey
 
     with (
         patch("bot.handlers.image_gen._resolve_image_session", AsyncMock(return_value=(image_session, None))),
+        patch("bot.handlers.image_gen.get_nano2_route", AsyncMock(return_value=SimpleNamespace(primary_provider="nexus"))),
         patch("bot.handlers.image_gen.repo", new=repo_stub),
     ):
         await image_gen.handle_session_photo(
@@ -897,6 +902,7 @@ async def test_handle_session_photo_uses_last_generation_source_not_stale_state(
 
     with (
         patch("bot.handlers.image_gen._resolve_image_session", AsyncMock(return_value=(image_session, None))),
+        patch("bot.handlers.image_gen.get_nano2_route", AsyncMock(return_value=SimpleNamespace(primary_provider="nexus"))),
         patch("bot.handlers.image_gen.repo", new=repo_stub),
     ):
         await image_gen.handle_session_photo(
@@ -944,6 +950,7 @@ async def test_handle_session_photo_appends_reference_for_multiref_model(monkeyp
 
     with (
         patch("bot.handlers.image_gen._resolve_image_session", AsyncMock(return_value=(image_session, None))),
+        patch("bot.handlers.image_gen.get_nano2_route", AsyncMock(return_value=SimpleNamespace(primary_provider="nexus"))),
         patch("bot.handlers.image_gen.repo", new=repo_stub),
     ):
         await image_gen.handle_session_photo(
@@ -1004,6 +1011,7 @@ async def test_handle_session_photo_keeps_single_reference_for_single_ref_model(
 
     with (
         patch("bot.handlers.image_gen._resolve_image_session", AsyncMock(return_value=(image_session, None))),
+        patch("bot.handlers.image_gen.get_nano2_route", AsyncMock(return_value=SimpleNamespace(primary_provider="nexus"))),
         patch("bot.handlers.image_gen.repo", new=repo_stub),
     ):
         await image_gen.handle_session_photo(
@@ -1140,6 +1148,7 @@ async def test_launch_session_generation_unlimited_records_zero_credits() -> Non
     generate_image = AsyncMock(return_value=SimpleNamespace(task_id="task_1"))
 
     with (
+        patch("bot.handlers.image_gen.get_nano2_route", AsyncMock(return_value=SimpleNamespace(primary_provider="nexus"))),
         patch("bot.handlers.image_gen.repo", new=repo_stub),
         patch("bot.handlers.image_gen.image_service.generate_image", generate_image),
     ):
@@ -1198,6 +1207,7 @@ async def test_launch_session_generation_allows_dual_mode_model_without_referenc
     generate_image = AsyncMock(return_value=SimpleNamespace(task_id="task_1"))
 
     with (
+        patch("bot.handlers.image_gen.get_nano2_route", AsyncMock(return_value=SimpleNamespace(primary_provider="nexus"))),
         patch("bot.handlers.image_gen.repo", new=repo_stub),
         patch("bot.handlers.image_gen.image_service.generate_image", generate_image),
     ):
@@ -1261,6 +1271,7 @@ async def test_launch_session_generation_clears_self_feed_source() -> None:
     generate_image = AsyncMock(return_value=SimpleNamespace(task_id="task_1"))
 
     with (
+        patch("bot.handlers.image_gen.get_nano2_route", AsyncMock(return_value=SimpleNamespace(primary_provider="nexus"))),
         patch("bot.handlers.image_gen.repo", new=repo_stub),
         patch("bot.handlers.image_gen.image_service.generate_image", generate_image),
     ):
@@ -1319,6 +1330,7 @@ async def test_launch_session_generation_hides_prompt_but_keeps_publish_for_repe
     generate_image = AsyncMock(return_value=SimpleNamespace(task_id="task_1"))
 
     with (
+        patch("bot.handlers.image_gen.get_nano2_route", AsyncMock(return_value=SimpleNamespace(primary_provider="nexus"))),
         patch("bot.handlers.image_gen.repo", new=repo_stub),
         patch("bot.handlers.image_gen.image_service.generate_image", generate_image),
     ):
@@ -1366,6 +1378,7 @@ async def test_session_repeat_uses_last_generation_source_not_stale_state() -> N
     with (
         patch("bot.handlers.image_gen._resolve_image_session", AsyncMock(return_value=(image_session, None))),
         patch("bot.handlers.image_gen.safe_edit_message", AsyncMock()),
+        patch("bot.handlers.image_gen.get_nano2_route", AsyncMock(return_value=SimpleNamespace(primary_provider="nexus"))),
         patch("bot.handlers.image_gen.repo", new=repo_stub),
     ):
         await image_gen.cb_image_session_repeat(
@@ -1402,6 +1415,7 @@ async def test_session_remix_uses_parent_source_not_stale_state() -> None:
 
     with (
         patch("bot.handlers.image_gen._resolve_image_session", AsyncMock(return_value=(image_session, 99))),
+        patch("bot.handlers.image_gen.get_nano2_route", AsyncMock(return_value=SimpleNamespace(primary_provider="nexus"))),
         patch("bot.handlers.image_gen.repo", new=repo_stub),
         patch("bot.handlers.image_gen.safe_edit_message", AsyncMock()) as edit_message,
     ):
@@ -1530,6 +1544,7 @@ async def test_reprompt_image_restores_session_and_clears_feed_source() -> None:
     repo_stub = SimpleNamespace(get_generation_by_id=AsyncMock(return_value=gen))
 
     with (
+        patch("bot.handlers.image_gen.get_nano2_route", AsyncMock(return_value=SimpleNamespace(primary_provider="nexus"))),
         patch("bot.handlers.image_gen.repo", new=repo_stub),
         patch("bot.handlers.image_gen._resolve_image_session", AsyncMock(return_value=(image_session, 777))),
         patch("bot.handlers.image_gen.safe_edit_message", AsyncMock()) as edit_message,
@@ -1578,6 +1593,7 @@ async def test_reparams_image_opens_session_settings() -> None:
     repo_stub = SimpleNamespace(get_generation_by_id=AsyncMock(return_value=gen))
 
     with (
+        patch("bot.handlers.image_gen.get_nano2_route", AsyncMock(return_value=SimpleNamespace(primary_provider="nexus"))),
         patch("bot.handlers.image_gen.repo", new=repo_stub),
         patch("bot.handlers.image_gen._resolve_image_session", AsyncMock(return_value=(image_session, 777))),
         patch("bot.handlers.image_gen.safe_edit_message", AsyncMock()) as edit_message,

@@ -16,7 +16,7 @@ from main import app
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("model", ["nano-banana-2.1", "seedream/5-pro-text-to-image", "seedream/5-pro-image-to-image"])
+@pytest.mark.parametrize("model", ["nano-banana-2", "nano-banana-2.1", "seedream/5-pro-text-to-image", "seedream/5-pro-image-to-image"])
 @pytest.mark.parametrize("http_status", [None, 502, 503])
 async def test_miniapp_neironych_submit_settles_explicit_5xx_only(monkeypatch, http_status, model):
     gen = SimpleNamespace(
@@ -60,6 +60,7 @@ async def test_miniapp_neironych_submit_settles_explicit_5xx_only(monkeypatch, h
         events.append("atomic_refund")
         return True, 2.0
     settlement = AsyncMock(side_effect=settle_5xx)
+    monkeypatch.setattr(miniapp_routes, "get_nano2_route", AsyncMock(return_value=ProviderRoute("nano-banana-2", "neironych", "database")))
     monkeypatch.setattr(miniapp_routes, "get_seedream5_route", AsyncMock(return_value=ProviderRoute(model, "neironych", "database")))
     monkeypatch.setattr(miniapp_routes, "get_nano21_route",
                         AsyncMock(return_value=ProviderRoute("nano-banana-2.1", "neironych", "database")))
@@ -107,12 +108,13 @@ async def test_miniapp_neironych_submit_settles_explicit_5xx_only(monkeypatch, h
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("model", ["nano-banana-2", "nano-banana-2.1"])
 @pytest.mark.parametrize("http_status", [None, 502, 503])
-async def test_miniapp_nexus_submit_settles_explicit_5xx_only(monkeypatch, http_status):
+async def test_miniapp_nexus_submit_settles_explicit_5xx_only(monkeypatch, http_status, model):
     from api import nexus_image_adapter
 
     gen = SimpleNamespace(
-        id=8201, user_id=10, model="nano-banana-2.1",
+        id=8201, user_id=10, model=model,
         gen_type=GenerationType.image, prompt="test photo",
         task_id=None, status=GenerationStatus.pending,
         result_url=None, result_urls=None, credits_spent=2,
@@ -151,6 +153,7 @@ async def test_miniapp_nexus_submit_settles_explicit_5xx_only(monkeypatch, http_
         events.append("atomic_refund")
         return True, 2.0
     settlement = AsyncMock(side_effect=settle_5xx)
+    monkeypatch.setattr(miniapp_routes, "get_nano2_route", AsyncMock(return_value=ProviderRoute(model, "nexus", "database")))
     monkeypatch.setattr(
         miniapp_routes,
         "get_nano21_route",
@@ -193,7 +196,7 @@ async def test_miniapp_nexus_submit_settles_explicit_5xx_only(monkeypatch, http_
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post("/api/v1/generate/image", json={
-                "model": "nano-banana-2.1", "prompt": "test photo", "quality": "2K",
+                "model": model, "prompt": "test photo", "quality": "2K",
             })
     finally:
         app.dependency_overrides.clear()

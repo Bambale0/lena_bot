@@ -120,3 +120,42 @@ async def set_seedream5_route(
         ))
     await session.commit()
     return ProviderRoute(SEEDREAM_5_MODEL, record.primary_provider, "database", record.updated_by_admin_tg_id)
+
+
+NANO_2_MODEL = "nano-banana-2"
+
+
+async def get_nano2_route(session: AsyncSession) -> ProviderRoute:
+    record = await session.get(ProviderRoutingSetting, NANO_2_MODEL)
+    if record is not None:
+        if record.primary_provider not in _ALLOWED:
+            raise ValueError("Unsupported Nano Banana 2 provider")
+        return ProviderRoute(NANO_2_MODEL, record.primary_provider, "database", record.updated_by_admin_tg_id)
+    return ProviderRoute(NANO_2_MODEL, settings.NANO_BANANA_2_PRIMARY_PROVIDER, "environment")
+
+
+async def set_nano2_route(
+    session: AsyncSession, primary_provider: Literal["neironych", "nexus"], *,
+    admin_tg_id: int, source: Literal["telegram", "web"],
+) -> ProviderRoute:
+    if primary_provider not in _ALLOWED or not int(admin_tg_id) or source not in {"telegram", "web"}:
+        raise ValueError("Valid provider, audit actor and source are required")
+    await session.execute(
+        pg_insert(ProviderRoutingSetting).values(
+            model_key=NANO_2_MODEL, primary_provider=settings.NANO_BANANA_2_PRIMARY_PROVIDER,
+            updated_by_admin_tg_id=None,
+        ).on_conflict_do_nothing(index_elements=["model_key"])
+    )
+    record = (await session.execute(
+        select(ProviderRoutingSetting).where(ProviderRoutingSetting.model_key == NANO_2_MODEL).with_for_update()
+    )).scalar_one()
+    previous = record.primary_provider
+    if previous != primary_provider:
+        record.primary_provider = primary_provider
+        record.updated_by_admin_tg_id = int(admin_tg_id)
+        session.add(ProviderRoutingAudit(
+            model_key=NANO_2_MODEL, previous_provider=previous, new_provider=primary_provider,
+            changed_by_admin_tg_id=int(admin_tg_id), source=source,
+        ))
+    await session.commit()
+    return ProviderRoute(NANO_2_MODEL, record.primary_provider, "database", record.updated_by_admin_tg_id)

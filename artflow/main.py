@@ -1662,7 +1662,7 @@ async def _recover_nexus_submission(session, request_id: str, task_id: str):
     if not gen:
         return None
     snapshot = parse_input_params(getattr(gen, "input_params", None)).get("nexus_submission", {})
-    if (gen.model != "nano-banana-2.1" or gen.gen_type != GenerationType.image
+    if (gen.model not in {"nano-banana-2.1", "nano-banana-2"} or gen.gen_type != GenerationType.image
             or snapshot.get("request_id") != request_id or not snapshot.get("has_webhook")):
         raise HTTPException(status_code=409, detail="Nexus submission correlation mismatch")
     if not nexus_image_adapter.submission_scope_matches(gen.input_params):
@@ -1701,7 +1701,20 @@ async def kie_webhook(
     apix_generation_id: int | None = None,
     apix_generation_sig: str | None = None,
 ) -> dict:
-    _verify_kie_webhook_secret(secret, x_kie_webhook_secret)
+    verified_nexus_correlation = False
+    if provider == "nexus" and nexus_request_id:
+        signing_key = settings.KIE_WEBHOOK_SECRET or settings.KIE_WEBHOOK_HMAC_KEY
+        try:
+            expected_signature = nexus_image_adapter.submission_signature(nexus_request_id, signing_key)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid Nexus correlation") from exc
+        if not signing_key or not hmac.compare_digest(expected_signature, nexus_signature or ""):
+            raise HTTPException(status_code=403, detail="Invalid Nexus correlation signature")
+        verified_nexus_correlation = True
+    # The dedicated per-submission MAC authenticates only correlated Nexus
+    # callbacks. Every other callback retains the outer shared-secret gate.
+    if settings.KIE_WEBHOOK_SECRET or not verified_nexus_correlation:
+        _verify_kie_webhook_secret(secret, x_kie_webhook_secret)
     if apix_generation_id is not None or apix_generation_sig is not None:
         if not verify_generation_signature(apix_generation_id, apix_generation_sig):
             raise HTTPException(status_code=403, detail="Invalid video generation correlation")
@@ -1714,15 +1727,6 @@ async def kie_webhook(
 
     lookup_task_id = task_id
     if provider == "nexus":
-        if nexus_request_id:
-            try:
-                expected_signature = nexus_image_adapter.submission_signature(
-                    nexus_request_id, settings.KIE_WEBHOOK_SECRET
-                )
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail="Invalid Nexus correlation") from exc
-            if not settings.KIE_WEBHOOK_SECRET or not hmac.compare_digest(expected_signature, nexus_signature or ""):
-                raise HTTPException(status_code=403, detail="Invalid Nexus correlation signature")
         try:
             payload = await nexus_image_adapter.get_nexus_task_payload(task_id)
         except Exception as exc:
@@ -1813,7 +1817,7 @@ async def kie_webhook(
         strict_wan_video = gen.gen_type == GenerationType.video and gen.model in (WAN30_MODELS | KLING4_MODELS)
         strict_nexus_image = (
             provider == "nexus" and gen.gen_type == GenerationType.image
-            and gen.model == "nano-banana-2.1"
+            and gen.model in {"nano-banana-2.1", "nano-banana-2"}
         )
         if strict_nexus_image and not nexus_image_adapter.submission_scope_matches(getattr(gen, "input_params", None)):
             raise HTTPException(status_code=503, detail="Nexus credential scope requires manual reconciliation")

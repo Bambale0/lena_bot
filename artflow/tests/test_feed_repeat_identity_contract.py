@@ -978,6 +978,8 @@ async def test_fresh_web_result_repeated_in_telegram_rebuilds_current_reference_
         "Keep the creator's scene while retaining the reader's distinctive facial features."
     )
     image_gen.get_feed_recipe_identity_instruction.return_value = updated_policy
+    # A fresh repeat has a new persisted generation ID in production.
+    repo.create_generation.return_value = SimpleNamespace(**{**vars(launch.generation), "id": 100})
     await image_gen.cb_image_repeat_launch(
         SimpleNamespace(message=AsyncMock(), answer=AsyncMock()),
         launch.session, state, launch.user, AsyncMock(),

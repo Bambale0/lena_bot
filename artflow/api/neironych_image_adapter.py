@@ -280,7 +280,7 @@ async def fetch_nano_banana21_status(request_id: str, *, expected_model: str | N
         body = response.json()
         if not isinstance(body, dict):
             raise ValueError("status response must be an object")
-        if body.get("model_slug") not in ({expected_model} if expected_model else {MODEL_NAME, "seedream-5.0-pro"}):
+        if body.get("model_slug") not in ({expected_model} if expected_model else {MODEL_NAME, "seedream-5.0-pro", "nano-banana-2"}):
             raise ValueError("reconciled generation model mismatch")
         state = str(body.get("status") or "").lower()
         if state not in {

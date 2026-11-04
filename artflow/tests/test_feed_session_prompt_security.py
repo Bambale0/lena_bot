@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
+from api import miniapp_routes
 from api.web import sessions as web_sessions
 from bot.handlers import (
     feed,
@@ -78,6 +79,9 @@ def local_session():
 
 @pytest.fixture
 def feed_launch(local_session, monkeypatch):
+    monkeypatch.setattr(image_gen, "get_nano2_route", AsyncMock(return_value=SimpleNamespace(primary_provider="nexus")))
+    monkeypatch.setattr(miniapp_routes, "get_nano2_route", AsyncMock(return_value=SimpleNamespace(primary_provider="nexus")))
+
     monkeypatch.setattr(image_gen, "get_feed_recipe_identity_instruction", AsyncMock(
         return_value="Photo 1 is the sole source of the person's face; later user photos only clarify the same person and the creator prompt defines the scene."
     ))

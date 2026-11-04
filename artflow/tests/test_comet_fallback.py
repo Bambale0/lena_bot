@@ -310,12 +310,13 @@ async def test_image_service_routes_nano_banana_models_to_nexus(
         aspect_ratio="16:9",
         n=1,
         quality="4K",
+        primary_provider="nexus",
         callback_url="https://example.test/webhook/kie?secret=abc",
     )
 
     assert result.is_async is True
     assert result.task_id == "nexus:task_1"
-    assert calls == [
+    expected = [
         {
             "model_key": model.value,
             "prompt": "new editorial look",
@@ -326,6 +327,9 @@ async def test_image_service_routes_nano_banana_models_to_nexus(
             "output_format": None,
         }
     ]
+    if model == ImageModel.NANO_BANANA_2:
+        expected[0].update(idempotency_key=None, before_submit=None)
+    assert calls == expected
     assert expected_model_name == model.value
 
 

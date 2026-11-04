@@ -254,6 +254,7 @@
       "billing": true,
       "contract_id": "image.nano2",
       "contract_tests": [
+        "tests/test_nano_banana2_neironych.py",
         "tests/test_nexus_image_migration.py"
       ],
       "contract_valid": true,
@@ -268,11 +269,11 @@
       ],
       "notes": "",
       "official_docs": [
-        "https://nexusapi.dev/openapi.json",
-        "https://github.com/mat12121212/nexusapi-examples"
+        "https://api.xn--e1aikcel5c5a.online/guide",
+        "https://nexusapi.dev/openapi.json"
       ],
       "product_ready": true,
-      "provider": "nexus",
+      "provider": "neironych",
       "public_api": true,
       "telegram": true
     },
