@@ -270,6 +270,7 @@ def test_scheduler_includes_nano2_and_timeout_stays_below_ingress():
 @pytest.mark.parametrize("model", ["nano-banana-2", "nano-banana-2.1"])
 async def test_dedicated_hmac_authenticates_nexus_without_legacy_shared_secret(monkeypatch, model):
     import main
+    monkeypatch.setattr(main.settings, "ENV", "production")
     monkeypatch.setattr(main.settings, "KIE_WEBHOOK_SECRET", "")
     monkeypatch.setattr(main.settings, "KIE_WEBHOOK_HMAC_KEY", "dedicated-callback-key")
     create = AsyncMock(return_value=SimpleNamespace(task_id="accepted"))
@@ -294,6 +295,26 @@ async def test_dedicated_hmac_authenticates_nexus_without_legacy_shared_secret(m
         bad = url.copy_set_param("nexus_signature", "f" * 64)
         assert (await http.post(str(bad), json={"task_id": "accepted"})).status_code == 403
         fetch.assert_not_awaited()
+        # Unsigned/unrelated callbacks retain production's outer verifier.
+        unsigned = str(url.copy_remove_param("nexus_request_id").copy_remove_param("nexus_signature"))
+        assert (await http.post(unsigned, json={"task_id": "accepted"})).status_code == 503
+        unrelated = str(url.copy_set_param("provider", "kie"))
+        assert (await http.post(unrelated, json={"task_id": "accepted"})).status_code == 503
+        fetch.assert_not_awaited()
+
+
+async def test_unregistered_legacy_provider_gateway_cannot_bypass_durable_launch(monkeypatch):
+    from fastapi.routing import APIRoute
+
+    import main
+    assert not any(isinstance(route, APIRoute) and "/provider-operations" in route.path for route in main.app.routes)
+    paid = AsyncMock(side_effect=AssertionError("unregistered gateway must not submit"))
+    monkeypatch.setattr(image_service, "generate_image", paid)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url="http://test") as http:
+        response = await http.post("/api/web/provider-operations/image.nano2", json={"params": {"prompt": "Cup"}})
+    # The root static mount rejects POST with405; no API handler is mounted.
+    assert response.status_code == 405
+    paid.assert_not_awaited()
 
 
 @pytest.mark.parametrize("entry", ["web", "miniapp", "web_feed", "miniapp_feed", "bot"])

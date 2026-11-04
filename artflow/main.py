@@ -1701,7 +1701,20 @@ async def kie_webhook(
     apix_generation_id: int | None = None,
     apix_generation_sig: str | None = None,
 ) -> dict:
-    _verify_kie_webhook_secret(secret, x_kie_webhook_secret)
+    verified_nexus_correlation = False
+    if provider == "nexus" and nexus_request_id:
+        signing_key = settings.KIE_WEBHOOK_SECRET or settings.KIE_WEBHOOK_HMAC_KEY
+        try:
+            expected_signature = nexus_image_adapter.submission_signature(nexus_request_id, signing_key)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid Nexus correlation") from exc
+        if not signing_key or not hmac.compare_digest(expected_signature, nexus_signature or ""):
+            raise HTTPException(status_code=403, detail="Invalid Nexus correlation signature")
+        verified_nexus_correlation = True
+    # The dedicated per-submission MAC authenticates only correlated Nexus
+    # callbacks. Every other callback retains the outer shared-secret gate.
+    if settings.KIE_WEBHOOK_SECRET or not verified_nexus_correlation:
+        _verify_kie_webhook_secret(secret, x_kie_webhook_secret)
     if apix_generation_id is not None or apix_generation_sig is not None:
         if not verify_generation_signature(apix_generation_id, apix_generation_sig):
             raise HTTPException(status_code=403, detail="Invalid video generation correlation")
@@ -1714,15 +1727,6 @@ async def kie_webhook(
 
     lookup_task_id = task_id
     if provider == "nexus":
-        if nexus_request_id:
-            try:
-                expected_signature = nexus_image_adapter.submission_signature(
-                    nexus_request_id, settings.KIE_WEBHOOK_SECRET or settings.KIE_WEBHOOK_HMAC_KEY
-                )
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail="Invalid Nexus correlation") from exc
-            if not (settings.KIE_WEBHOOK_SECRET or settings.KIE_WEBHOOK_HMAC_KEY) or not hmac.compare_digest(expected_signature, nexus_signature or ""):
-                raise HTTPException(status_code=403, detail="Invalid Nexus correlation signature")
         try:
             payload = await nexus_image_adapter.get_nexus_task_payload(task_id)
         except Exception as exc:
