@@ -37,6 +37,12 @@
 
 **Acceptance:** no proposed API presented as existing; no secret values or user media; all #232 acceptance rows trace to ADR and test plan; no runtime source/migration diff.
 
+## Review gate before executable implementation
+
+The original Tasks B–F below are a sequencing roadmap, not executable implementation plans. PR #233 review identified missing exact interfaces, fixtures and RED/GREEN commands. Do not treat these checklists as satisfying the repository writing-plans gate. Before each code slice, produce and independently review its complete plan against the then-current schema/code; no worker may fill architectural gaps by guessing.
+
+For Task B, the reviewed plan must include actual repository signatures, database constraints (including UNIQUE(storage_backend, storage_key)), transaction and CAS behavior, duplicate-request semantics, real Postgres fixtures, and exact failing/passing test commands. Production Alembic head, backup/restore and migration command are still unverified, so an executable production migration instruction is intentionally not supplied here.
+
 ## Task B — Expand schema and owner-scoped repository (separate, gated)
 
 **Planned files:** `db/models.py`, new `db/migrations/versions/<next>_media_assets.py` (number/version must be selected against current head), new `db/media_assets.py` repository module, `tests/test_media_assets_repository.py`.
@@ -45,16 +51,20 @@
 - [ ] Obtain explicit migration authorization and confirm Alembic heads, Postgres version, backup/restore plan.
 - [ ] Write RED integration tests: owner/foreign/unknown IDs, duplicate bytes, missing rows, revocation and version race. On baseline missing module/field tests must fail for the stated reason.
 - [ ] Implement additive table constraints/indexes and repository owner predicate in a transaction; never accept caller-selected owner.
-- [ ] Build separate physical storage key policy; do NOT change or delete legacy files.
+- [ ] Enforce UNIQUE(storage_backend, storage_key) in the database; same bytes may have different independently owned keys. Exercise concurrent duplicate-key writes. Do NOT change or delete legacy files.
 - [ ] Add optimistic revision CAS, tombstones and idempotent state mutation; test concurrent commits/retries.
 - [ ] Migration up/down against snapshot and rollback dry-run; ensure old production code is compatible with expanded DB.
 - [ ] CI+review before toggling any feature.
 
 **Gate:** 0 cross-tenant disclosures; 0 legacy upload changes; no production migration without exact approval.
 
+## Control-plane prerequisite for issuance (separate reviewed slice)
+
+Before C/D can enable issuance, define a database-backed typed media policy and authenticated admin API with effective-policy read, revision/CAS writes, validation and durable actor/time/old/new audit. Cover retention, link TTL, rate limits, storage backend and cohort controls; keep secret values outside this surface. Reuse existing admin/settings conventions after source audit rather than inventing a parallel settings framework. Authorization, invalid bounds, conflicting concurrent writes, persistence across restart and audit tests are required. Exact interfaces and fixture code belong in its independently reviewed executable plan, which is not delivered by this documentation correction.
+
 ## Task C — Controlled dual-write upload with reconciliation
 
-**Planned files:** `api/web/generations.py` upload service extraction, `api/public_files.py` new opt-in private writer or adapter, `core/config.py` typed feature policy, `tests/test_ux2_upload_policy.py` and new upload transaction tests.
+**Planned files:** `api/web/generations.py` upload service extraction, `api/public_files.py` new opt-in private writer or adapter, reviewed database-backed typed media policy/admin service, `tests/test_ux2_upload_policy.py` and new upload transaction tests.
 **Consumes:** B's registry. **Produces:** admin-cohort `asset_id` and legacy URL acknowledgement with recoverable failures.
 
 - [ ] RED authenticated upload returns no owner asset identity today.
@@ -74,7 +84,10 @@
 
 - [ ] RED `GET /api/web/media-assets/{id}` and `POST .../{id}/resolve` missing today.
 - [ ] Add auth + owner-scoped lookup; test same-shape 404 for unknown/foreign and 401 for unauthenticated. No admin-preview bypass.
+- [ ] Public resolve is preview-only; reject caller-selected generation purpose before issuance. Internal generation links require a server-authorized task/use and bounded lease in F.
+- [ ] Define refreshable as current ability to mint a preview link, not inferred expiry of a client link.
 - [ ] Resolve only ready/owned/physically present, unrevoked objects; return state with finite link after a dedicated key and delivery policy are configured.
+- [ ] Before enabling private issuance, obtain architecture approval for dereference-time state/revision enforcement or verified invalidation; otherwise explicitly accept delayed revocation until expiry. Cover cache/range requests and any narrowly scoped existing-provider-lease exception; DB revoke alone is insufficient.
 - [ ] Duplicate same request ID produces same authorization outcome; conflicting request body=409; version CAS defeats revoke/replace race.
 - [ ] Disk unavailable ≠ deleted; rate/timeout configured and bounded; no billing or automatic generation.
 - [ ] Reject arbitrary URL/filepath in resolve; no server-side external network on this API.
