@@ -2788,3 +2788,8 @@ Review-fix validation: migration057 passed against a fresh isolated PostgreSQL16
 End-to-end signed callback test now exercises real SQLite generation/ledger rows through the HTTP webhook: invalid signature403/no bind; canonical provider GET (matching task+Seedream model) overrides an untrusted failure body and completes the task; duplicate leaves credits/delivery unchanged. Provider read occurs outside row lock with a second ownership CAS before binding. Focused55 tests passed. Separate migration057 PostgreSQL test passed. Final full suite and exact-head CI rerun pending.
 
 Final regression adjustments: legacy Seedream refund fixture now supplies canonical KIE GET fail envelope (HTTP envelope code200/state fail), keeping safe copyright/reference reasons and atomic refund assertions. An existing Genjutsu rejection test was reaching real KIE fallback HTTP after its mocked primary rejected; now both external paid boundaries are synthetic definite rejections, preserving its original refund/editable-draft assertions. No video production behavior changed.
+
+
+## 2026-11-04 — Nano Banana Pro Neironych admin lab
+
+Baseline c2094922dd076f3283507296d5cf97911a15f759; isolated Telegram Test menu addition. See [execution evidence](EXECUTION/neironych-nano-pro-lab-20261104.md). 96 focused tests passed; exact-head CI/release pending.
