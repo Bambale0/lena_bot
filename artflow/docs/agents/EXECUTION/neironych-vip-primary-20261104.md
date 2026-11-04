@@ -23,3 +23,10 @@ Map nano-banana-pro-vip -> nano-banana-pro and gpt-image-2-vip -> gpt-image-2 on
 Step 2 complete: both VIP keys use shared family routing on all surfaces; canonical model mapping only at the native boundary; public identity is frozen and required by admission/recovery; Nano Pro native contract now preserves 14 references and all 10 explicit ratios. Signed Nexus callbacks and strict canonical status include VIP aliases. Catalog/docs/admin family labels updated; names and price rows unchanged.
 
 Step 3: red regression failed against baseline as expected; focused tests passed. Full isolated Python suite: **4228 passed, 101 skipped, 4 existing warnings in 27.72s**. Full Ruff and provider inventory passed. Local skips need optional PostgreSQL/Nginx/integration services; required CI supplies its maintained environment. Initial test-container infrastructure failures (Docker/Node absent) were corrected by completing the isolated test image; no test gate was weakened. Independent review and live provider smokes pending.
+
+
+## Independent review and live acceptance
+
+Both independent reviews (Standards and Spec) found no actionable introduced issues in baseline...9042f2d9. Two real provider requests through the proposed VIP dispatch completed successfully, with Nexus fallback disabled in the smoke process: Nano Banana Pro VIP -> nano-banana-pro, 14 distinct synthetic reference images, 1K, 23.7s; GPT Image 2 VIP -> gpt-image-2, text, basic/2K, 22.2s. Authenticated canonical GET confirmed both completed; request IDs da0ab33a-e3c1-4947-9d43-dc3e3cd69e4e and 8acd68a5-ebfe-4b81-91b1-b45dfd3bfa15. Images were decoded/verified and saved to public APIX output storage. Receipt: local data/vip-live-smoke.json (not committed).
+
+Step 3 complete. PR #336 opened; exact-head CI, native auto-merge, production autodeploy and post-deploy acceptance remain. HTTPS Git push credentials were unavailable; existing authorized SSH Git authentication successfully published the feature branch. No credentials or remote configuration were changed.
