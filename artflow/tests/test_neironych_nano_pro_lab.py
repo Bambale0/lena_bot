@@ -138,3 +138,32 @@ async def test_claim_outage_prevents_paid_post(monkeypatch):
     await lab.run(call, state)
     generate.assert_not_awaited()
 
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("callback", ["npro:ratio:1:1", "npro:quality:2K", "npro:clear"])
+async def test_unchanged_setting_keeps_paid_request_identity(monkeypatch, callback):
+    from types import SimpleNamespace
+
+    from bot.handlers import neironych_nano_pro_test as lab
+
+    data = {**lab.initial_data(), "npro_prompt": "cup"}
+    state = AsyncMock()
+    state.get_data.return_value = data
+    monkeypatch.setattr(lab, "safe_answer_callback", AsyncMock())
+    monkeypatch.setattr(lab, "show", AsyncMock())
+    await lab.change_settings(SimpleNamespace(data=callback, message=object()), state)
+    state.update_data.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_reentering_same_prompt_keeps_request_identity(monkeypatch):
+    from types import SimpleNamespace
+
+    from bot.handlers import neironych_nano_pro_test as lab
+
+    state = AsyncMock()
+    state.get_data.return_value = {**lab.initial_data(), "npro_prompt": "cup"}
+    monkeypatch.setattr(lab, "show", AsyncMock())
+    await lab.save_prompt(SimpleNamespace(text=" cup "), state)
+    state.update_data.assert_not_awaited()
+

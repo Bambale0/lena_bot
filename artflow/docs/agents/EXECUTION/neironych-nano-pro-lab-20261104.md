@@ -14,3 +14,5 @@ Verification: 96 focused tests passed (13 new lab tests, existing Seedance admin
 Matrix: unit/contract/authorization/idempotency/bot handler delivery covered; database/migrations and site/mini_app N/A (isolated admin lab, no persistence schema or public behavior changes). Existing transport supplies timeout, image decoding, and persistence. Redis claim is atomic NX and fails closed. Logs include request/admin IDs, no prompts/references/keys. Rollback: revert PR; no data migration.
 Guidance reviewed: primary TDD; project-local TDD/FSM conventions; claw FSM_USER_FLOWS; wondelai clean-architecture adapter separation; Anthropic webapp-testing inspected, browser checks not applicable to Telegram-only lab.
 
+
+Review finding fixed: no-op ratio/quality/clear, duplicate reference, and unchanged prompt preserve the existing UUID. Four new regressions failed before the fix; 100 focused regressions now pass (17 lab tests). All original head CI jobs passed; updated exact-head CI pending.

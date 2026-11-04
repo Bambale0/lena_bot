@@ -42,6 +42,12 @@ def params(data: dict[str, Any]) -> dict[str, Any]:
             "aspect_ratio": data.get("npro_ratio", "1:1"), "quality": data.get("npro_quality", "2K")}
 
 
+async def update_request(state: FSMContext, **changes: Any) -> None:
+    data = await state.get_data()
+    if params(data) != params({**data, **changes}):
+        await state.update_data(**changes, npro_request_id=str(uuid.uuid4()))
+
+
 def keyboard(data: dict[str, Any]):
     kb = InlineKeyboardBuilder()
     for label, action in (("✍️ Промпт", "prompt"), ("🖼 Референс", "reference"),
@@ -106,7 +112,7 @@ async def save_prompt(message: Message, state: FSMContext) -> None:
     if not prompt:
         await message.answer("Введите непустой промпт.")
         return
-    await state.update_data(npro_prompt=prompt, npro_request_id=str(uuid.uuid4()))
+    await update_request(state, npro_prompt=prompt)
     await show(message, state, edit=False)
 
 
@@ -132,7 +138,7 @@ async def save_reference(message: Message, state: FSMContext) -> None:
         logger.warning("neironych_nano_pro_lab_reference_failed")
         await message.answer("Не удалось добавить референс. Пришлите фото или публичную HTTPS-ссылку.")
         return
-    await state.update_data(npro_refs=refs, npro_request_id=str(uuid.uuid4()))
+    await update_request(state, npro_refs=refs)
     await show(message, state, edit=False)
 
 
@@ -152,7 +158,7 @@ async def change_settings(call: CallbackQuery, state: FSMContext) -> None:
     except ValueError as exc:
         await safe_answer_callback(call, str(exc), show_alert=True)
         return
-    await state.update_data(**changes, npro_request_id=str(uuid.uuid4()))
+    await update_request(state, **changes)
     await safe_answer_callback(call)
     await show(call.message, state)
 
