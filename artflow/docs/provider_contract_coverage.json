@@ -371,6 +371,7 @@
       "billing": true,
       "contract_id": "image.nano.pro.vip",
       "contract_tests": [
+        "tests/test_vip_neironych.py",
         "tests/test_nexus_image_migration.py"
       ],
       "contract_valid": true,
@@ -383,13 +384,14 @@
         "text",
         "image"
       ],
-      "notes": "",
+      "notes": "Unified Neironych family model; shared audited family route; Nexus reserve",
       "official_docs": [
+        "https://api.xn--e1aikcel5c5a.online/guide",
         "https://nexusapi.dev/openapi.json",
         "https://github.com/mat12121212/nexusapi-examples"
       ],
       "product_ready": true,
-      "provider": "nexus",
+      "provider": "neironych",
       "public_api": true,
       "telegram": true
     },
@@ -623,6 +625,7 @@
       "billing": true,
       "contract_id": "image.gpt2.vip",
       "contract_tests": [
+        "tests/test_vip_neironych.py",
         "tests/test_nexus_image_migration.py"
       ],
       "contract_valid": true,
@@ -635,13 +638,14 @@
         "text",
         "image"
       ],
-      "notes": "",
+      "notes": "Unified Neironych family model; shared audited family route; Nexus reserve",
       "official_docs": [
+        "https://api.xn--e1aikcel5c5a.online/guide",
         "https://nexusapi.dev/openapi.json",
         "https://github.com/mat12121212/nexusapi-examples"
       ],
       "product_ready": true,
-      "provider": "nexus",
+      "provider": "neironych",
       "public_api": true,
       "telegram": true
     },

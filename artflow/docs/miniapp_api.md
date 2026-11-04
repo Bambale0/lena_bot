@@ -106,8 +106,8 @@ X-Telegram-Init-Data: <Telegram WebApp initData>
 | seedream/4.5-text-to-image | `basic` (2K), `high` (4K) | KIE.AI primary, CometAPI fallback при ошибке старта |
 | nano-banana-pro | `2K`, `4K` | NexusAPI |
 | nano-banana-2 | `2K`, `4K` | NexusAPI |
-| nano-banana-pro-vip | `1K`, `2K` | NexusAPI |
-| gpt-image-2-vip | provider-managed | NexusAPI |
+| nano-banana-pro-vip | `1K`, `2K` | Neironych (`nano-banana-pro`), NexusAPI reserve |
+| gpt-image-2-vip | default 2K, no quality selector | Neironych (`gpt-image-2`), NexusAPI reserve |
 | nano-banana-2-lite | `1K`, `2K` | KIE/KIE Market |
 | остальные | `basic` | по backend model routing |
 
@@ -273,3 +273,5 @@ X-Telegram-Init-Data: <Telegram WebApp initData>
 |------|-----------|
 | `api/miniapp_routes.py` | Все FastAPI-роуты `/api/v1/*` |
 | `api/miniapp_auth.py` | Верификация Telegram initData |
+
+VIP commercial keys retain their separate prices and public names. They share the existing authenticated, audited `nano-banana-pro` / `gpt-image-2` family provider controls on web, Mini App and Telegram. Nano Banana Pro VIP preserves all 14 reference images; explicit native ratios follow the Neironych contract. Auto/unverified formats retain the same-key Nexus reserve. Ambiguous paid outcomes never start a reserve generation. Original request snapshots retain the public VIP identity for guarded recovery.

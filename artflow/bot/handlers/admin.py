@@ -139,8 +139,8 @@ def admin_menu_kb():
     builder.button(text="🧩 Nexus модели", callback_data="adm:nexus_models")
     builder.button(text="🔀 Banana 2.1 провайдер", callback_data="adm:nano21_route")
     builder.button(text="🔀 Banana 2 провайдер", callback_data="adm:nano2_route")
-    builder.button(text="🔀 Banana Pro провайдер", callback_data="adm:nano_pro_route")
-    builder.button(text="🔀 GPT Image 2 провайдер", callback_data="adm:gpt2_route")
+    builder.button(text="🔀 Banana Pro / VIP провайдер", callback_data="adm:nano_pro_route")
+    builder.button(text="🔀 GPT Image 2 / VIP провайдер", callback_data="adm:gpt2_route")
     builder.button(text="🔀 Seedream 5 Pro провайдер", callback_data="adm:seedream5_route")
     builder.button(text="🥷 Genjutsu цены", callback_data="adm:genjutsu_prices")
     builder.button(text="⚙️ Стоимость моделей", callback_data="adm:models")
@@ -2663,9 +2663,9 @@ def _nano_pro_provider_kb(primary: str) -> InlineKeyboardMarkup:
 async def cb_nano_pro_route(call: CallbackQuery, session: AsyncSession) -> None:
     route = await get_nano_pro_route(session)
     await call.message.edit_text(
-        f"🔀 <b>Nano Banana Pro</b>\nОсновной провайдер: <b>{route.primary_provider}</b>\n"
+        f"🔀 <b>Nano Banana Pro / VIP</b>\nОсновной провайдер: <b>{route.primary_provider}</b>\n"
         "Общий маршрут сайта, Mini App и бота. Резерв: Nexus при подтверждённом отказе "
-        "или несовместимых параметрах (автоформат, дополнительные пропорции).",
+        "или автоформате. Поддерживается до 14 фото для VIP.",
         reply_markup=_nano_pro_provider_kb(route.primary_provider),
     )
     await call.answer()
@@ -2679,7 +2679,7 @@ async def cb_nano_pro_primary(call: CallbackQuery, session: AsyncSession) -> Non
         return
     route = await set_nano_pro_route(session, provider, admin_tg_id=call.from_user.id, source="telegram")
     await call.message.edit_text(
-        f"✅ <b>Nano Banana Pro</b>\nОсновной провайдер: <b>{route.primary_provider}</b>\n"
+        f"✅ <b>Nano Banana Pro / VIP</b>\nОсновной провайдер: <b>{route.primary_provider}</b>\n"
         "Изменение применено для новых задач и записано в журнал.",
         reply_markup=_nano_pro_provider_kb(route.primary_provider),
     )
@@ -2699,7 +2699,7 @@ def _gpt2_provider_kb(primary: str) -> InlineKeyboardMarkup:
 async def cb_gpt2_route(call: CallbackQuery, session: AsyncSession) -> None:
     route = await get_gpt2_route(session)
     await call.message.edit_text(
-        f"🔀 <b>GPT Image 2</b>\nОсновной провайдер: <b>{route.primary_provider}</b>\n"
+        f"🔀 <b>GPT Image 2 / VIP</b>\nОсновной провайдер: <b>{route.primary_provider}</b>\n"
         "Общий маршрут сайта, Mini App и бота. Резерв: Nexus при подтверждённом отказе "
         "или несовместимых параметрах (автоформат, дополнительные пропорции).",
         reply_markup=_gpt2_provider_kb(route.primary_provider),
@@ -2715,7 +2715,7 @@ async def cb_gpt2_primary(call: CallbackQuery, session: AsyncSession) -> None:
         return
     route = await set_gpt2_route(session, provider, admin_tg_id=call.from_user.id, source="telegram")
     await call.message.edit_text(
-        f"✅ <b>GPT Image 2</b>\nОсновной провайдер: <b>{route.primary_provider}</b>\n"
+        f"✅ <b>GPT Image 2 / VIP</b>\nОсновной провайдер: <b>{route.primary_provider}</b>\n"
         "Изменение применено для новых задач и записано в журнал.",
         reply_markup=_gpt2_provider_kb(route.primary_provider),
     )

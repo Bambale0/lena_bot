@@ -2819,3 +2819,8 @@ Baseline 851e27f4a35ffd85a77285ed50e50f58aed0cce9; Nano 2 already neironych/data
 ## 2026-11-04 — GPT Image 2 and 2.5 primary
 
 Scope expanded by user: both GPT image models through Neironych. User approved GPT 2.5 initial prices equal to current GPT 2. See [execution evidence](EXECUTION/gpt-image-primary-20261104.md). Native live checks pass for both; all-surface and catalog tests pass. CI/release pending.
+
+
+## 2026-11-04 — VIP image aliases use Neironych primary
+
+Baseline 2b957b4569c5273bb876ad4ad2298bba4ca108bf. User authorizes unified Neironych models for Nano Banana Pro VIP/GPT Image 2 VIP. Audit and acceptance: `docs/agents/EXECUTION/neironych-vip-primary-20261104.md`. Reuse family DB admin routing and exact request snapshots; preserve public keys/prices/parameters, all three surfaces, guarded recovery and Nexus reserve. No migration. Step 1 complete; implementation/verification/release pending.

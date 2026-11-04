@@ -41,6 +41,7 @@ from api.image_errors import ImageReferenceUnavailable
 from api.kie_model_specs import IMAGE_SPECS, build_kie_input, resolve_model_for_reference
 from api.public_files import ensure_provider_safe_png_url, local_upload_path_from_url
 from core.config import settings
+from core.provider_routing import NANO_PRO_MODELS
 
 logger = logging.getLogger(__name__)
 
@@ -602,7 +603,7 @@ async def generate_image(
         )
         return ImageResult(is_async=True, task_id=task_id, provider="nexus")
 
-    if model == ImageModel.NANO_BANANA_PRO:
+    if model.value in NANO_PRO_MODELS:
         refs = _reference_list(image_url)
         chosen_primary = primary_provider or settings.NANO_BANANA_PRO_PRIMARY_PROVIDER
         if chosen_primary not in {"neironych", "nexus"}:
@@ -611,7 +612,7 @@ async def generate_image(
         if chosen_primary == "neironych" and compatible:
             try:
                 result_url = await neironych_nano_pro_runtime.generate(
-                    prompt=prompt, image_urls=refs, aspect_ratio=aspect_ratio, quality=quality,
+                    model_key=model.value, prompt=prompt, image_urls=refs, aspect_ratio=aspect_ratio, quality=quality,
                     request_id=request_id, before_submit=before_neironych_submit,
                 )
             except neironych_image_adapter.NeironychImageRejected as exc:

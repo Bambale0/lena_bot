@@ -16,6 +16,7 @@ from core.config import settings
 MODELS = {
     "gpt-image-2-text-to-image": "gpt-image-2",
     "gpt-image-2-image-to-image": "gpt-image-2",
+    "gpt-image-2-vip": "gpt-image-2",
     "gpt-image-2.5-sunburst": "gpt-image-2.5-sunburst",
 }
 SNAPSHOT_KEY = "neironych_gpt_image_submission"

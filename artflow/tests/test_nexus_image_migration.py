@@ -236,7 +236,7 @@ def test_provider_inventory_matches_active_image_transports() -> None:
     }
     for key in migrated:
         contract = by_model[key]
-        assert contract.provider == "nexus"
+        assert contract.provider == "neironych"
         assert "https://nexusapi.dev/openapi.json" in contract.official_docs
 
     for key in ("seedream/5-pro-text-to-image", "seedream/5-pro-image-to-image"):

@@ -12,10 +12,11 @@ from urllib.parse import urlparse
 from api import neironych_image_adapter as transport
 from api.public_files import local_upload_path_from_url
 from core.config import settings
+from core.provider_routing import NANO_PRO_MODELS
 
 MODEL = "nano-banana-pro"
 SNAPSHOT_KEY = "neironych_nano_pro_submission"
-RATIOS = frozenset({"1:1", "16:9", "9:16", "4:3", "3:4", "21:9"})
+RATIOS = frozenset({"1:1", "16:9", "9:16", "4:3", "3:4", "21:9", "3:2", "2:3", "5:4", "4:5"})
 QUALITIES = frozenset({"1K", "2K", "4K"})
 
 
@@ -24,7 +25,7 @@ def normalized_quality(value: str) -> str:
 
 
 def supports(*, image_urls: list[str], aspect_ratio: str | None, quality: str, n: int) -> bool:
-    if n != 1 or len(image_urls) > 4 or aspect_ratio not in RATIOS or normalized_quality(quality) not in QUALITIES:
+    if n != 1 or len(image_urls) > 14 or aspect_ratio not in RATIOS or normalized_quality(quality) not in QUALITIES:
         return False
     return all(_https_reference(ref) for ref in image_urls)
 
@@ -58,10 +59,12 @@ def credential_scope() -> str:
     return hashlib.sha256((transport._https_base_url() + "\0" + settings.NEIRONYCH_API_KEY).encode()).hexdigest()
 
 
-def snapshot(payload: dict, request_id: str) -> dict:
+def snapshot(payload: dict, request_id: str, *, model_key: str = MODEL) -> dict:
+    if model_key not in NANO_PRO_MODELS:
+        raise ValueError("Unsupported Nano Banana Pro identity")
     body = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return {
-        "version": 1, "request_id": str(uuid.UUID(request_id)), "model_key": MODEL,
+        "version": 1, "request_id": str(uuid.UUID(request_id)), "model_key": model_key,
         "endpoint": "edits" if payload.get("images") else "generations",
         "body_json": body, "body_sha256": hashlib.sha256(body.encode()).hexdigest(),
         "credential_scope": credential_scope(), "submitted_at": datetime.now(timezone.utc).isoformat(),
@@ -71,8 +74,11 @@ def snapshot(payload: dict, request_id: str) -> dict:
 async def generate(
     *, prompt: str, image_urls: list[str], aspect_ratio: str | None, quality: str,
     request_id: str | None, before_submit: Callable[[str, dict], Awaitable[None]] | None,
+    model_key: str = MODEL,
 ) -> str:
     from api.image_errors import ImageReferenceUnavailable
+    if model_key not in NANO_PRO_MODELS:
+        raise ValueError("Unsupported Nano Banana Pro identity")
     for ref in image_urls:
         local = local_upload_path_from_url(ref)
         if local is not None and not local.is_file():
@@ -80,18 +86,18 @@ async def generate(
     payload = build_payload(prompt=prompt, image_urls=image_urls, aspect_ratio=aspect_ratio, quality=quality)
     rid = str(uuid.UUID(request_id)) if request_id else str(uuid.uuid4())
     if before_submit:
-        await before_submit(rid, snapshot(payload, rid))
+        await before_submit(rid, snapshot(payload, rid, model_key=model_key))
     return await transport._generate_image(payload, request_id=rid, subdir=MODEL, timeout_seconds=settings.NANO_BANANA_PRO_IMAGE_TIMEOUT_SECONDS)
 
 
-async def recover_completed(saved: dict, request_id: str) -> str:
+async def recover_completed(saved: dict, request_id: str, *, model_key: str = MODEL) -> str:
     """Only called after authenticated GET confirms this original task completed.
 
     Neironych permanently fences its tenant-scoped key and body hash. This exact
     replay reads retained bytes; it never starts another provider generation.
     """
     rid = str(uuid.UUID(request_id))
-    if not isinstance(saved, dict) or saved.get("version") != 1 or saved.get("model_key") != MODEL or saved.get("request_id") != rid:
+    if not isinstance(saved, dict) or saved.get("version") != 1 or (model_key not in NANO_PRO_MODELS or saved.get("model_key") != model_key) or saved.get("request_id") != rid:
         raise ValueError("Missing original Nano Banana Pro request snapshot")
     body = saved.get("body_json")
     if not isinstance(body, str) or len(body) > 131072:
