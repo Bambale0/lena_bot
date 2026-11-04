@@ -59,6 +59,7 @@ class LocalSession:
 
 @pytest.fixture
 async def published_work(monkeypatch, tmp_path):
+    monkeypatch.setattr(miniapp_routes, "get_nano_pro_route", AsyncMock(return_value=SimpleNamespace(primary_provider="nexus")))
     monkeypatch.setattr(miniapp_routes, "get_feed_recipe_identity_instruction", AsyncMock(
         return_value="Photo 1 is the sole source of the person's face; later user photos only clarify the same person and the creator prompt defines the scene."
     ))

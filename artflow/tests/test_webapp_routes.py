@@ -54,7 +54,9 @@ def stub_image_quality_prices(monkeypatch) -> None:
 
 
 @pytest.fixture
-async def client():
+async def client(monkeypatch):
+    from api import miniapp_routes
+    monkeypatch.setattr(miniapp_routes, "get_nano_pro_route", AsyncMock(return_value=SimpleNamespace(primary_provider="nexus")))
     app.dependency_overrides[get_session] = fake_session
     app.dependency_overrides[get_miniapp_user] = fake_user
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:

@@ -90,3 +90,7 @@ Audit follow-up: [verified fixes and explicitly open blockers](docs/audits/2026-
 For the verified native 503 contract, durable Neironych-to-KIE fallback and verification boundaries, see [Seedance admission recovery](docs/seedance-admission-recovery.md). Generic provider failures still require reconciliation; HTTP health is not a live generation test.
 
 Nano Banana 2 primary-provider contract and recovery: [routing guide](docs/nano-banana-2-routing.md).
+
+## Nano Banana provider routing
+
+Nano Banana 2 and Nano Banana Pro default to Neironych. Their independently audited DB routes are managed in the Telegram admin panel and authenticated web admin provider-routing endpoints. Nexus remains the reserve for a definitive rejection or unsupported native parameters (including auto aspect ratio). Ambiguous network outcomes do not start another provider request. Pro supports the reviewed fixed formats and up to four HTTPS references; the native timeout is bounded below ingress timeout.

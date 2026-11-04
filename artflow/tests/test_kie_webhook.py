@@ -237,6 +237,8 @@ async def test_provider_webhook_canonicalizes_nexus_task_before_existing_deliver
             gen_type=main.GenerationType.image,
             image_session_id=None,
             model="nano-banana-pro",
+            input_params=None,
+            task_id="nexus:nexus_task_1",
             prompt="portrait",
             credits_spent=2,
             source_feed_gen_id=None,
@@ -256,7 +258,7 @@ async def test_provider_webhook_canonicalizes_nexus_task_before_existing_deliver
     monkeypatch.setattr(main.repo, "get_generation_by_task_id", get_generation_by_task_id)
     monkeypatch.setattr(main.repo, "get_user_by_id", AsyncMock(return_value=SimpleNamespace(id=42, tg_id=555111)))
     monkeypatch.setattr(main.repo, "finish_generation", finish_generation)
-    monkeypatch.setattr(main, "mirror_url", AsyncMock(side_effect=lambda url: url))
+    monkeypatch.setattr(main.nexus_image_adapter, "mirror_verified_nano_banana21_result", AsyncMock(side_effect=lambda url: url))
     monkeypatch.setattr(main, "bot", None)
 
     async with AsyncClient(transport=ASGITransport(app=main.app), base_url="http://test") as client:
@@ -270,6 +272,8 @@ async def test_provider_webhook_canonicalizes_nexus_task_before_existing_deliver
     finish_generation.assert_awaited_once()
     assert finish_generation.await_args.args[1:] == (88, "https://cdn.test/nexus-result.png")
 
+
+    assert finish_generation.await_args.kwargs["expected_task_id"] == "nexus:nexus_task_1"
 
 @pytest.mark.asyncio
 async def test_wan_kie_success_without_media_keeps_paid_task_recoverable(monkeypatch) -> None:

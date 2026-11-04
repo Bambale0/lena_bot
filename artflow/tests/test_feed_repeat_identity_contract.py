@@ -103,11 +103,11 @@ async def test_feed_recipe_nexus_pro_502_uses_atomic_refund(
     launch.generation.model = "nano-banana-pro"
     launch.source.input_params = {"hidden_prompt": False}
     async def provider_error(*args, **kwargs):
-        assert kwargs["request_id"] is None
-        raise nexus_image_adapter.NexusApiError("HTTP 502", status_code=502)
+        assert kwargs["request_id"] == neironych_image_adapter.client_request_id_for_generation(launch.generation.id)
+        raise nexus_image_adapter.NexusImageSubmissionUnknown("HTTP 502", status_code=502, idempotency_key=kwargs["request_id"])
     monkeypatch.setattr(miniapp_routes.image_service, "generate_image", provider_error)
     async def refund(session, gen_id, error, **kwargs):
-        assert kwargs["require_missing_task_id"] is True
+        assert kwargs["expected_task_id"] == miniapp_routes.task_id_for_surface(nexus_image_adapter.encode_submission_id(neironych_image_adapter.client_request_id_for_generation(launch.generation.id)), surface)
         launch.generation.status = GenerationStatus.failed
         return True, 4.0
     settlement = AsyncMock(side_effect=refund)

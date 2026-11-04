@@ -60,9 +60,11 @@ from core.model_pricing import pricing_variant_key
 from core.provider_routing import (
     get_nano2_route,
     get_nano21_route,
+    get_nano_pro_route,
     get_seedream5_route,
     set_nano2_route,
     set_nano21_route,
+    set_nano_pro_route,
     set_seedream5_route,
 )
 from db import broadcast_repository
@@ -135,6 +137,7 @@ def admin_menu_kb():
     builder.button(text="🧩 Nexus модели", callback_data="adm:nexus_models")
     builder.button(text="🔀 Banana 2.1 провайдер", callback_data="adm:nano21_route")
     builder.button(text="🔀 Banana 2 провайдер", callback_data="adm:nano2_route")
+    builder.button(text="🔀 Banana Pro провайдер", callback_data="adm:nano_pro_route")
     builder.button(text="🔀 Seedream 5 Pro провайдер", callback_data="adm:seedream5_route")
     builder.button(text="🥷 Genjutsu цены", callback_data="adm:genjutsu_prices")
     builder.button(text="⚙️ Стоимость моделей", callback_data="adm:models")
@@ -2640,5 +2643,41 @@ async def cb_nano2_primary(call: CallbackQuery, session: AsyncSession) -> None:
         f"✅ <b>Nano Banana 2</b>\nОсновной провайдер: <b>{route.primary_provider}</b>\n"
         "Изменение применено для новых задач и записано в журнал.",
         reply_markup=_nano2_provider_kb(route.primary_provider),
+    )
+    await call.answer()
+
+
+def _nano_pro_provider_kb(primary: str) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for provider, label in (("neironych", "Нейроныч"), ("nexus", "Nexus")):
+        builder.button(text=f"{'✅ ' if primary == provider else ''}{label}", callback_data=f"adm:nano_pro_primary:{provider}")
+    builder.button(text="← Админ-панель", callback_data="adm:back")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+@router.callback_query(F.data == "adm:nano_pro_route")
+async def cb_nano_pro_route(call: CallbackQuery, session: AsyncSession) -> None:
+    route = await get_nano_pro_route(session)
+    await call.message.edit_text(
+        f"🔀 <b>Nano Banana Pro</b>\nОсновной провайдер: <b>{route.primary_provider}</b>\n"
+        "Общий маршрут сайта, Mini App и бота. Резерв: Nexus при подтверждённом отказе "
+        "или несовместимых параметрах (автоформат, дополнительные пропорции).",
+        reply_markup=_nano_pro_provider_kb(route.primary_provider),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("adm:nano_pro_primary:"))
+async def cb_nano_pro_primary(call: CallbackQuery, session: AsyncSession) -> None:
+    provider = (call.data or "").rsplit(":", 1)[-1]
+    if provider not in {"neironych", "nexus"}:
+        await call.answer("Недопустимый провайдер", show_alert=True)
+        return
+    route = await set_nano_pro_route(session, provider, admin_tg_id=call.from_user.id, source="telegram")
+    await call.message.edit_text(
+        f"✅ <b>Nano Banana Pro</b>\nОсновной провайдер: <b>{route.primary_provider}</b>\n"
+        "Изменение применено для новых задач и записано в журнал.",
+        reply_markup=_nano_pro_provider_kb(route.primary_provider),
     )
     await call.answer()

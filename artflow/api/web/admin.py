@@ -23,9 +23,11 @@ from core.image_recovery_policy import get_image_recovery_policy, set_image_reco
 from core.provider_routing import (
     get_nano2_route,
     get_nano21_route,
+    get_nano_pro_route,
     get_seedream5_route,
     set_nano2_route,
     set_nano21_route,
+    set_nano_pro_route,
     set_seedream5_route,
 )
 from core.qwen_routing import get_qwen_route, set_qwen_route
@@ -1266,4 +1268,26 @@ async def admin_set_nano2_provider(
         return admin_error
     from dataclasses import asdict
     route = await set_nano2_route(session, body.primary_provider, admin_tg_id=int(user.tg_id), source="web")
+    return ok(asdict(route))
+
+
+@router.get("/admin/provider-routing/nano-banana-pro")
+async def admin_get_nano_pro_provider(
+    session: AsyncSession = Depends(get_session), user=Depends(get_web_user_or_none),
+):
+    if admin_error := _admin_error(user):
+        return admin_error
+    from dataclasses import asdict
+    return ok(asdict(await get_nano_pro_route(session)))
+
+
+@router.put("/admin/provider-routing/nano-banana-pro")
+async def admin_set_nano_pro_provider(
+    body: Nano21ProviderRoutingUpdate,
+    session: AsyncSession = Depends(get_session), user=Depends(get_web_user_or_none),
+):
+    if admin_error := _admin_error(user):
+        return admin_error
+    from dataclasses import asdict
+    route = await set_nano_pro_route(session, body.primary_provider, admin_tg_id=int(user.tg_id), source="web")
     return ok(asdict(route))

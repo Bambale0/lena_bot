@@ -327,7 +327,7 @@ async def test_image_service_routes_nano_banana_models_to_nexus(
             "output_format": None,
         }
     ]
-    if model == ImageModel.NANO_BANANA_2:
+    if model in {ImageModel.NANO_BANANA_2, ImageModel.NANO_BANANA_PRO}:
         expected[0].update(idempotency_key=None, before_submit=None)
     assert calls == expected
     assert expected_model_name == model.value
