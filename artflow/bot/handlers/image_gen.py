@@ -1670,6 +1670,21 @@ async def _launch_session_generation(
             ),
         )
         return False
+    except neironych_image_adapter.NeironychImageRejected as exc:
+        won, refunded = await repo.fail_generation_and_refund(
+            session, gen.id, "Генератор не принял запрос.",
+            refund_note="bot_image:neironych_not_accepted",
+            **({"expected_task_id": neironych_image_adapter.encode_task_id(image_request_id)}
+               if image_request_id else {"require_missing_task_id": True}),
+        )
+        logger.warning("Telegram image definitively rejected gen=%s request_id=%s status=%s",
+                       gen.id, exc.request_id, exc.status_code)
+        if won:
+            await status_msg.edit_text(
+                "❌ Не удалось запустить генерацию." + (" Кредиты возвращены." if refunded > 0 else ""),
+                reply_markup=image_session_kb(parent_generation_id, allow_publish=not bool(source_feed_gen_id)),
+            )
+        return not won
     except neironych_image_adapter.NeironychImageError as exc:
         settlement = await settle_image_http_5xx(
             session, gen.id, exc, provider="neironych",

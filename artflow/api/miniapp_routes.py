@@ -3275,6 +3275,18 @@ async def create_image_generation(
             session, gen.id, str(exc), refund_note="image:nexus_error",
         )
         raise HTTPException(status_code=502, detail=image_generation_user_error(exc))
+    except neironych_image_adapter.NeironychImageRejected as exc:
+        await repo.fail_generation_and_refund(
+            session, gen.id, "Генератор не принял запрос. Кредиты возвращены.",
+            refund_note="image:neironych_not_accepted",
+            **({"expected_task_id": task_id_for_surface(
+                neironych_image_adapter.encode_task_id(image_request_id), surface,
+            )} if image_request_id else {"require_missing_task_id": True}),
+        )
+        logger.warning("Neironych image definitively rejected gen=%s request_id=%s status=%s",
+                       gen.id, exc.request_id, exc.status_code)
+        await session.refresh(gen)
+        return _gen_out(gen)
     except neironych_image_adapter.NeironychImageError as exc:
         settlement = await settle_image_http_5xx(
             session, gen.id, exc, provider="neironych",
@@ -5177,6 +5189,18 @@ async def remix_feed_post(
             session, gen.id, str(exc), refund_note="feed_image_nexus_error",
         )
         raise HTTPException(status_code=502, detail="Generation service error")
+    except neironych_image_adapter.NeironychImageRejected as exc:
+        await repo.fail_generation_and_refund(
+            session, gen.id, "Генератор не принял запрос. Кредиты возвращены.",
+            refund_note="image:neironych_not_accepted",
+            **({"expected_task_id": task_id_for_surface(
+                neironych_image_adapter.encode_task_id(image_request_id), surface,
+            )} if image_request_id else {"require_missing_task_id": True}),
+        )
+        logger.warning("Neironych image definitively rejected gen=%s request_id=%s status=%s",
+                       gen.id, exc.request_id, exc.status_code)
+        await session.refresh(gen)
+        return _gen_out(gen)
     except neironych_image_adapter.NeironychImageError as exc:
         settlement = await settle_image_http_5xx(
             session, gen.id, exc, provider="neironych",

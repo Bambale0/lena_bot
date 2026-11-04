@@ -11,3 +11,5 @@ Progress: 51 GPT-focused tests pass, including all 15 surface/model launch combi
 Final local suite after all GPT tests: {'.': 4180, 's': 101}. Ruff passed. All 101 contracts valid. No known high-severity review finding; exact-head CI and deployed runtime verification pending.
 
 Live edit checks also passed: GPT 2 32.2s (3bc3664c-19e4-41e7-9413-3a241d27c031), GPT 2.5 28.6s (d3d89162-0ad7-43f2-a863-525b8038952f), both decoded 2048x1152 images. No customer credit changes.
+
+Final rejection-path review: GPT 2.5 has no same-model reserve; confirmed native not-accepted responses now settle immediately with task-guarded atomic refund across site/Mini App/bot/feed, rather than waiting for the unknown-outcome SLA. Five regressions reproduced pending-state behavior before the correction. Full local suite passes after correction (4185 passed, 101 skipped), Ruff clean. Ambiguous NeironychImageError still only reconciles; no speculative refund/fallback added.

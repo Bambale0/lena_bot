@@ -257,3 +257,45 @@ def test_native_gpt_models_are_in_reconciliation_scheduler():
     for model in native.MODELS:
         assert "'" + model + "'" in sql
 
+
+@pytest.mark.parametrize("entry", ["web", "miniapp", "web_feed", "miniapp_feed", "bot"])
+async def test_gpt25_definite_rejection_refunds_immediately(monkeypatch, entry):
+    from api import miniapp_routes
+    from db.models import ImageGenerationAction
+    from tests.test_nano_banana_pro_reference_transport import local_launch
+    model = "gpt-image-2.5-sunburst"
+    launch = local_launch.__wrapped__(monkeypatch)
+    gen = launch.generation
+    gen.model, gen.task_id, gen.input_params = model, None, None
+    for module in (miniapp_routes, image_gen):
+        monkeypatch.setattr(module, "get_gpt25_route", AsyncMock(return_value=SimpleNamespace(primary_provider="neironych")))
+    async def mark(db, gid, task_id, **kwargs):
+        gen.task_id = task_id
+        return True
+    async def refund(db, gid, error, **kwargs):
+        assert kwargs["expected_task_id"] == gen.task_id
+        gen.status = GenerationStatus.failed
+        return True, 4.0
+    settlement = AsyncMock(side_effect=refund)
+    monkeypatch.setattr(repo, "update_generation_task", mark)
+    monkeypatch.setattr(repo, "persist_neironych_gpt_submission", AsyncMock(return_value=True))
+    monkeypatch.setattr(repo, "fail_generation_and_refund", settlement)
+    monkeypatch.setattr(neironych_image_adapter, "_generate_image", AsyncMock(
+        side_effect=neironych_image_adapter.NeironychImageRejected("rejected", status_code=402)))
+    if entry.endswith("_feed"):
+        await miniapp_routes.remix_feed_post(77, miniapp_routes.FeedRemixRequest(
+            model=model, image_url="https://example.test/ref.png", mode="image", aspect_ratio="16:9", quality="2K"),
+            session=launch.session, user=launch.user, surface=entry.removesuffix("_feed"))
+    elif entry == "bot":
+        current = await repo.create_image_session(launch.session, launch.user.id, model, "text", "16:9", "2K", 1, "Cup")
+        assert not await image_gen._launch_session_generation(source_message=AsyncMock(), state=AsyncMock(),
+            session=launch.session, db_user=launch.user, image_session=current, prompt="Cup",
+            action_type=ImageGenerationAction.initial, reference_url=None, parent_generation_id=None,
+            launching_text="Starting", queued_text="Queued")
+    else:
+        await miniapp_routes.create_image_generation(miniapp_routes.ImageGenRequest(
+            model=model, prompt="Cup", aspect_ratio="16:9", quality="2K"),
+            session=launch.session, user=launch.user, surface=entry)
+    assert gen.status == GenerationStatus.failed
+    settlement.assert_awaited_once()
+
