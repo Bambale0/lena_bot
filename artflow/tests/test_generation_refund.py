@@ -339,6 +339,10 @@ async def test_kie_image_rejection_notice_keeps_safe_reason_and_guarded_refund(m
     monkeypatch.setattr(main.repo, "get_generation_by_task_id", AsyncMock(return_value=generation))
     payload = _failed_payload()
     payload["data"]["failMsg"] = raw + " private-recipe-must-not-leak"
+    payload["data"]["model"] = generation.model
+    payload["data"]["state"] = "fail"
+    from api import kieai_client
+    monkeypatch.setattr(kieai_client, "get_task_status", AsyncMock(return_value={**payload, "code": 200}))
     async with AsyncClient(transport=ASGITransport(app=main.app), base_url="http://test") as client:
         response = await client.post("/webhook/kie", json=payload)
     assert response.status_code == 200

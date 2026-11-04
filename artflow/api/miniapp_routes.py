@@ -890,7 +890,9 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
             return gen
     task_id = provider_task_id(stored_task_id)
     if gen.gen_type == GenerationType.image and task_id.startswith("kie-submit:"):
-        task_id = ""  # Unknown KIE admission; never resubmit, existing stale-task SLA applies.
+        # A signed callback can bind a lost KIE submit response. Do not refund
+        # or resubmit an image whose paid acceptance is unknown.
+        return gen
     if gen.gen_type == GenerationType.video and task_id.startswith("kie-submit:"):
         # A submission journal marker is not a provider task ID. A delayed
         # signed webhook may still bind it; never poll KIE with this marker
@@ -3144,7 +3146,7 @@ async def create_image_generation(
 
     image_request_id = (
         neironych_image_adapter.client_request_id_for_generation(gen.id)
-        if model == ImageModel.NANO_BANANA_21 or (model.value in SEEDREAM_5_MODELS and image_primary == "neironych") else None
+        if model == ImageModel.NANO_BANANA_21 or model.value in SEEDREAM_5_MODELS else None
     )
 
     async def persist_kie_handoff() -> None:
@@ -3172,7 +3174,7 @@ async def create_image_generation(
             # Commit a provider-specific recovery identity before every paid POST.
             initial_identity = (
                 neironych_image_adapter.encode_task_id(image_request_id)
-                if image_primary == "neironych"
+                if image_primary == "neironych" or model.value in SEEDREAM_5_MODELS
                 else nexus_image_adapter.encode_submission_id(image_request_id)
             )
             await repo.update_generation_task(
@@ -3185,12 +3187,17 @@ async def create_image_generation(
             aspect_ratio=normalized_ratio,
             n=body.count,
             quality=normalized_quality,
-            callback_url=_kie_callback_url(),
+            callback_url=callback_url_for_generation(_kie_callback_url(), gen.id) if model.value in SEEDREAM_5_MODELS else _kie_callback_url(),
             request_id=image_request_id,
             primary_provider=image_primary,
             before_nexus_submit=persist_nexus_submission,
             before_kie_submit=persist_kie_handoff,
         )
+    except KieSubmissionOutcomeUnknown:
+        logger.warning("Seedream KIE acceptance unknown gen=%s; awaiting signed callback", gen.id)
+        await session.rollback()
+        await session.refresh(gen)
+        return _gen_out(gen)
     except ImageReferenceUnavailable as exc:
         await repo.fail_generation_and_refund(
             session, gen.id, str(exc), refund_note="image:reference_admission_failed",
@@ -4975,7 +4982,7 @@ async def remix_feed_post(
     image_request_id = (
         neironych_image_adapter.client_request_id_for_generation(gen.id)
         if gen_type == "image" and (body.model == ImageModel.NANO_BANANA_21.value
-            or (body.model in SEEDREAM_5_MODELS and image_primary == "neironych")) else None
+            or body.model in SEEDREAM_5_MODELS) else None
     )
 
     submission_context = (
@@ -5013,7 +5020,7 @@ async def remix_feed_post(
         if image_request_id:
             initial_identity = (
                 neironych_image_adapter.encode_task_id(image_request_id)
-                if image_primary == "neironych"
+                if image_primary == "neironych" or body.model in SEEDREAM_5_MODELS
                 else nexus_image_adapter.encode_submission_id(image_request_id)
             )
             await repo.update_generation_task(
@@ -5049,7 +5056,7 @@ async def remix_feed_post(
                 aspect_ratio=normalized_ratio,
                 n=body.count,
                 quality=normalized_quality,
-                callback_url=_kie_callback_url(),
+                callback_url=callback_url_for_generation(_kie_callback_url(), gen.id) if body.model in SEEDREAM_5_MODELS else _kie_callback_url(),
                 request_id=image_request_id,
                 primary_provider=image_primary,
                 before_nexus_submit=persist_remix_nexus_submission,
@@ -5067,7 +5074,8 @@ async def remix_feed_post(
         return _gen_out(gen)
     except KieSubmissionOutcomeUnknown:
         await session.rollback()
-        await repo.mark_kie_video_submission_unknown(session, failed_generation_id)
+        if gen_type != "image":
+            await repo.mark_kie_video_submission_unknown(session, failed_generation_id)
         await repo.increment_feed_share(session, gen_id)
         await session.refresh(gen)
         return _gen_out(gen)

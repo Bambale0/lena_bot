@@ -659,6 +659,8 @@ async def generate_image(
         await before_kie_submit()
     try:
         return await _create_kie_image_task(resolved_model, inp, callback_url=callback_url)
+    except kieai_client.KieSubmissionOutcomeUnknown:
+        raise
     except Exception as exc:
         raise RuntimeError(
             f"{resolved_model} fallback disabled to prevent model substitution; "

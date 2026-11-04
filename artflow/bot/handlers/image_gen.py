@@ -92,6 +92,7 @@ from core.feed_remix_prompt import (
     trusted_feed_image_recipe_prompt,
     trusted_feed_image_scene,
 )
+from core.kie_seedance_callback import callback_url_for_generation
 from core.model_pricing import pricing_variant_key
 from core.provider_routing import SEEDREAM_5_MODELS, get_nano21_route, get_seedream5_route
 from db import repository as repo
@@ -1532,7 +1533,7 @@ async def _launch_session_generation(
     status_msg = await source_message.answer(launching_text)
     image_request_id = (
         neironych_image_adapter.client_request_id_for_generation(gen.id)
-        if model == ImageModel.NANO_BANANA_21 or (model.value in SEEDREAM_5_MODELS and image_primary == "neironych") else None
+        if model == ImageModel.NANO_BANANA_21 or model.value in SEEDREAM_5_MODELS else None
     )
 
     async def persist_kie_handoff() -> None:
@@ -1588,7 +1589,7 @@ async def _launch_session_generation(
         if image_request_id:
             initial_identity = (
                 neironych_image_adapter.encode_task_id(image_request_id)
-                if image_primary == "neironych"
+                if image_primary == "neironych" or model.value in SEEDREAM_5_MODELS
                 else nexus_image_adapter.encode_submission_id(image_request_id)
             )
             await repo.update_generation_task(session, gen.id, initial_identity)
@@ -1599,12 +1600,16 @@ async def _launch_session_generation(
             aspect_ratio=image_session.aspect_ratio,
             n=normalized_count,
             quality=normalized_quality,
-            callback_url=_kie_callback_url(),
+            callback_url=callback_url_for_generation(_kie_callback_url(), gen.id) if model.value in SEEDREAM_5_MODELS else _kie_callback_url(),
             request_id=image_request_id,
             primary_provider=image_primary,
             before_nexus_submit=persist_nexus_submission,
             before_kie_submit=persist_kie_handoff,
         )
+    except image_service.kieai_client.KieSubmissionOutcomeUnknown:
+        logger.warning("Seedream KIE acceptance unknown gen=%s; awaiting signed callback", gen.id)
+        await status_msg.edit_text("⏳ Уточняем результат у генератора. Не запускай запрос повторно.")
+        return True
     except nexus_image_adapter.NexusImageSubmissionUnknown as exc:
         settlement = await settle_image_http_5xx(
             session, gen.id, exc, provider="nexus",

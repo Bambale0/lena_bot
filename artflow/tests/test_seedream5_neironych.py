@@ -193,3 +193,56 @@ async def test_kie_handoff_occurs_before_paid_post_and_can_fail_closed(monkeypat
     with pytest.raises(RuntimeError, match="finalized"):
         await image_service.generate_image(MODELS[0], "A cup", primary_provider="neironych", before_kie_submit=lost_ownership)
     assert events == []
+
+
+
+@pytest.mark.parametrize("model", MODELS)
+@pytest.mark.parametrize("outcome", ["timeout", "503", "invalid"])
+async def test_kie_paid_submission_is_one_shot(monkeypatch, model, outcome):
+    from api import kieai_client
+    requests = []
+    monkeypatch.setattr(image_service, "_prepare_reference_urls_for_model", AsyncMock(side_effect=lambda model, refs: refs))
+    def respond(request):
+        requests.append(request)
+        if outcome == "timeout":
+            raise httpx.ReadTimeout("lost response", request=request)
+        if outcome == "503":
+            return httpx.Response(503, json={"error": "unknown acceptance"})
+        return httpx.Response(200, json={"code": 200, "data": {}})
+    monkeypatch.setattr(kieai_client, "_maybe_alert_credit_issue", AsyncMock())
+    async with httpx.AsyncClient(base_url="https://kie.test", transport=httpx.MockTransport(respond)) as client:
+        monkeypatch.setattr(kieai_client, "get_client", lambda: client)
+        with pytest.raises(kieai_client.KieSubmissionOutcomeUnknown):
+            await image_service.generate_image(
+                model, "A cup", image_url="https://example.test/ref.png" if model == MODELS[1] else None,
+                primary_provider="kie",
+            )
+    assert len(requests) == 1
+
+
+@pytest.mark.parametrize("surface", ["miniapp", "web"])
+async def test_signed_kie_callback_binds_only_exact_seedream_handoff(surface, monkeypatch):
+    from core.seedream5_recovery import bind_kie_callback
+    monkeypatch.setattr("core.seedream5_recovery.canonical_kie_status", AsyncMock(return_value={}))
+    from db.models import GenerationStatus, GenerationType
+    rid = adapter.client_request_id_for_generation(87)
+    prefix = "web:" if surface == "web" else ""
+    gen = SimpleNamespace(
+        id=87, model=MODELS[1].value, gen_type=GenerationType.image,
+        status=GenerationStatus.processing, task_id=prefix + adapter.encode_kie_handoff_id(rid),
+    )
+    db = SimpleNamespace(
+        execute=AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: gen)),
+        commit=AsyncMock(), rollback=AsyncMock(),
+    )
+    assert await bind_kie_callback(db, 87, "kie-recovered") is gen
+    assert gen.task_id == prefix + "kie-recovered"
+    assert await bind_kie_callback(db, 87, "kie-other") is None
+    assert gen.task_id == prefix + "kie-recovered"
+
+
+def test_seedream_budget_cannot_exceed_proxy_deadline():
+    from core.config import Settings
+    with pytest.raises(ValidationError):
+        Settings(BOT_TOKEN="123456:test", COMET_API_KEY="test", SEEDREAM_5_IMAGE_TIMEOUT_SECONDS=120)
+    assert adapter.settings.SEEDREAM_5_IMAGE_TIMEOUT_SECONDS <= 110
