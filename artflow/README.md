@@ -94,3 +94,7 @@ Nano Banana 2 primary-provider contract and recovery: [routing guide](docs/nano-
 ## Nano Banana provider routing
 
 Nano Banana 2 and Nano Banana Pro default to Neironych. Their independently audited DB routes are managed in the Telegram admin panel and authenticated web admin provider-routing endpoints. Nexus remains the reserve for a definitive rejection or unsupported native parameters (including auto aspect ratio). Ambiguous network outcomes do not start another provider request. Pro supports the reviewed fixed formats and up to four HTTPS references; the native timeout is bounded below ingress timeout.
+
+## GPT Image providers
+
+GPT Image 2 uses Neironych primary with independently audited admin routing and same-model Nexus reserve on confirmed rejection or unsupported native parameters. GPT Image 2.5 is a separate Neironych model with text and image modes. Its initial base/quality prices copy current GPT Image 2 settings once; later admin edits are preserved. VIP GPT Image 2 retains its existing separate contract. Native submissions persist immutable input/key evidence before the paid call and never speculate on uncertain acceptance.

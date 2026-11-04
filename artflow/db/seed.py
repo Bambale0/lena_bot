@@ -319,12 +319,36 @@ async def _seed_nano_banana_21_prices(session: AsyncSession) -> None:
     logger.info("Seed: initialized %s Nano Banana 2.1 price entries from live pricing", len(additions))
 
 
+def derive_gpt25_prices(rows: Iterable[ModelCost]) -> list[dict[str, Any]]:
+    by_key = {row.model_key: row for row in rows}
+    source_prefix = "gpt-image-2-text-to-image"
+    additions = []
+    for key, source in by_key.items():
+        if key != source_prefix and not key.startswith(source_prefix + "__"):
+            continue
+        target = key.replace(source_prefix, "gpt-image-2.5-sunburst", 1)
+        if target not in by_key:
+            additions.append({
+                "model_key": target, "display_name": source.display_name.replace("GPT Image 2", "GPT Image 2.5"),
+                "gen_type": source.gen_type, "credits": source.credits, "is_active": source.is_active,
+            })
+    return additions
+
+
+async def _seed_gpt25_prices(session: AsyncSession) -> None:
+    rows = (await session.execute(select(ModelCost))).scalars().all()
+    for values in derive_gpt25_prices(rows):
+        session.add(ModelCost(**values))
+    await session.commit()
+
+
 async def run_seed() -> None:
     """Вставляет данные только если таблицы пустые."""
     async with AsyncSessionLocal() as session:
         await _seed_price_plans(session)
         await _seed_model_costs(session)
         await _seed_nano_banana_21_prices(session)
+        await _seed_gpt25_prices(session)
         await _disable_legacy_model_aliases(session)
 
 

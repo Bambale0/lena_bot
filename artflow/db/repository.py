@@ -4139,3 +4139,27 @@ async def persist_neironych_nano_pro_submission(
     await session.commit()
     await _publish_generation_update(gen)
     return True
+
+
+async def persist_neironych_gpt_submission(
+    session: AsyncSession, gen_id: int, task_id: str, snapshot: dict,
+) -> bool:
+    """Single-use durable admission; no paid POST may precede this commit."""
+    from api.neironych_gpt_image import MODELS, SNAPSHOT_KEY
+
+    gen = (await session.execute(
+        select(Generation).where(Generation.id == gen_id)
+        .with_for_update().execution_options(populate_existing=True)
+    )).scalar_one_or_none()
+    params = parse_input_params(gen.input_params) if gen is not None else {}
+    if (gen is None or gen.model not in MODELS or gen.gen_type != GenerationType.image
+            or gen.status not in (GenerationStatus.pending, GenerationStatus.processing)
+            or gen.task_id != task_id or params.get(SNAPSHOT_KEY) or params.get("nexus_submission")
+            or snapshot.get("model_key") != gen.model):
+        await session.commit()
+        return False
+    params[SNAPSHOT_KEY] = snapshot
+    gen.input_params = json.dumps(params, ensure_ascii=False)
+    await session.commit()
+    await _publish_generation_update(gen)
+    return True

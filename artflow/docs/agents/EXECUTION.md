@@ -2814,3 +2814,8 @@ Review-fix verification: production auth regression red→green;105 focused tran
 ## 2026-11-04 — Nano Banana Pro primary
 
 Baseline 851e27f4a35ffd85a77285ed50e50f58aed0cce9; Nano 2 already neironych/database. Pro production integration follows the durable Nano 2 path across site, Mini App, bot and feed repeats. [Evidence and rollout](EXECUTION/nano-pro-primary-20261104.md). Full local tests/Ruff/contract inventory green; exact-head CI pending.
+
+
+## 2026-11-04 — GPT Image 2 and 2.5 primary
+
+Scope expanded by user: both GPT image models through Neironych. User approved GPT 2.5 initial prices equal to current GPT 2. See [execution evidence](EXECUTION/gpt-image-primary-20261104.md). Native live checks pass for both; all-surface and catalog tests pass. CI/release pending.

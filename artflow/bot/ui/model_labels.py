@@ -25,6 +25,7 @@ _MODEL_LABELS: dict[str, str] = {
     "qwen2/image-edit": "🟣 Qwen 2 Image",
     "gpt-image-2-text-to-image": "🤖 GPT Image 2",
     "gpt-image-2-image-to-image": "🤖 GPT Image 2",
+    "gpt-image-2.5-sunburst": "🤖 GPT Image 2.5",
     "gpt-image-2-vip": "🤖 ГПТ 2 ВИП",
     "kling-2.6/text-to-video": "🎬 Kling 2.6",
     "kling-2.6/image-to-video": "🎬 Kling 2.6",

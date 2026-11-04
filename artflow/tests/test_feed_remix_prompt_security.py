@@ -38,6 +38,8 @@ def bound_preview(url=SOURCE_IMAGE, *, index=0, display=False):
 def image_launch(monkeypatch):
     monkeypatch.setattr(image_gen, "get_nano2_route", AsyncMock(return_value=SimpleNamespace(primary_provider="nexus")))
     monkeypatch.setattr(image_gen, "get_nano_pro_route", AsyncMock(return_value=SimpleNamespace(primary_provider="nexus")))
+    monkeypatch.setattr(image_gen, "get_gpt2_route", AsyncMock(return_value=SimpleNamespace(primary_provider="nexus")))
+    monkeypatch.setattr(image_gen, "get_gpt25_route", AsyncMock(return_value=SimpleNamespace(primary_provider="neironych")))
 
     monkeypatch.setattr(image_gen, "get_seedream5_route", AsyncMock(return_value=SimpleNamespace(primary_provider="neironych")))
     monkeypatch.setattr(
@@ -454,6 +456,8 @@ def api_launch(monkeypatch):
     from api import miniapp_routes
     monkeypatch.setattr(miniapp_routes, "get_nano2_route", AsyncMock(return_value=SimpleNamespace(primary_provider="nexus")))
     monkeypatch.setattr(miniapp_routes, "get_nano_pro_route", AsyncMock(return_value=SimpleNamespace(primary_provider="nexus")))
+    monkeypatch.setattr(miniapp_routes, "get_gpt2_route", AsyncMock(return_value=SimpleNamespace(primary_provider="nexus")))
+    monkeypatch.setattr(miniapp_routes, "get_gpt25_route", AsyncMock(return_value=SimpleNamespace(primary_provider="neironych")))
     monkeypatch.setattr(miniapp_routes, "get_seedream5_route", AsyncMock(return_value=SimpleNamespace(primary_provider="neironych")))
     from db.models import GenerationStatus
 

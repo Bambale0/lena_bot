@@ -39,7 +39,7 @@ def _base_case(contract_id: str) -> dict[str, Any]:
             "image.gpt2.i2i",
         }:
             params["image_url"] = IMAGE_URL
-        if contract_id in {"image.nano2", "image.nano.pro"}:
+        if contract_id in {"image.nano2", "image.nano.pro", "image.gpt2.t2i", "image.gpt2.i2i", "image.gpt25"}:
             params.update(aspect_ratio="1:1", quality="2K")
         return params
 
