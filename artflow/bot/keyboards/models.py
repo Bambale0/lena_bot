@@ -441,6 +441,13 @@ IMAGE_CAPS: dict[str, dict] = {
     },
 }
 
+IMAGE_CAPS[ImageModel.GPT_IMAGE_25] = {
+    "modes": ["text", "image"], "aspect_ratios": MODEL_ASPECT_RATIOS[ImageModel.GPT_IMAGE_25],
+    "aspect_ratio_modes": ["text", "image"], "counts": [1], "max_refs": 4,
+    "quality_options": [("2K", "🔷 2K (стандарт)"), ("4K", "💎 4K (высокое)")],
+    "has_quality": True,
+}
+
 # ── Model descriptions ────────────────────────────────────────────────────────
 
 IMAGE_MODEL_DESC: dict[str, str] = {
@@ -463,6 +470,7 @@ IMAGE_MODEL_DESC: dict[str, str] = {
     ImageModel.QWEN2_EDIT: "🟣 Qwen 2 Edit · аккуратное редактирование по фото",
     ImageModel.GROK_T2I: "⚡ Grok Imagine · выразительные сцены",
     ImageModel.GROK_I2I: "⚡ Grok Imagine Edit · переработка по фото",
+    ImageModel.GPT_IMAGE_25: "🤖 GPT Image 2.5 · текст и фото",
     ImageModel.GPT_IMAGE_2_T2I: "🤖 GPT Image 2 · точные сцены",
     ImageModel.GPT_IMAGE_2_I2I: "🤖 GPT Image 2 Edit · переработка по фото",
     ImageModel.GPT_IMAGE_2_VIP: "🤖 ГПТ 2 ВИП",
@@ -505,6 +513,7 @@ _IMAGE_MODEL_ORDER: list[str] = [
     ImageModel.SEEDREAM_5_PRO_I2I,
     ImageModel.SEEDREAM_45,
     ImageModel.GPT_IMAGE_2_T2I,
+    ImageModel.GPT_IMAGE_25,
     ImageModel.GPT_IMAGE_2_VIP,
     ImageModel.WAN_27_PRO,
     ImageModel.WAN_27,

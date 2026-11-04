@@ -535,6 +535,7 @@
       "billing": true,
       "contract_id": "image.gpt2.t2i",
       "contract_tests": [
+        "tests/test_gpt_neironych.py",
         "tests/test_nexus_image_migration.py"
       ],
       "contract_valid": true,
@@ -546,13 +547,14 @@
       "modes": [
         "text"
       ],
-      "notes": "Nexus model_name=gpt-image-2",
+      "notes": "Neironych primary, Nexus reserve",
       "official_docs": [
+        "https://api.xn--e1aikcel5c5a.online/guide",
         "https://nexusapi.dev/openapi.json",
         "https://github.com/mat12121212/nexusapi-examples"
       ],
       "product_ready": true,
-      "provider": "nexus",
+      "provider": "neironych",
       "public_api": true,
       "telegram": true
     },
@@ -563,6 +565,7 @@
       "billing": true,
       "contract_id": "image.gpt2.i2i",
       "contract_tests": [
+        "tests/test_gpt_neironych.py",
         "tests/test_nexus_image_migration.py"
       ],
       "contract_valid": true,
@@ -574,13 +577,42 @@
       "modes": [
         "image"
       ],
-      "notes": "Nexus model_name=gpt-image-2",
+      "notes": "Neironych primary, Nexus reserve",
       "official_docs": [
+        "https://api.xn--e1aikcel5c5a.online/guide",
         "https://nexusapi.dev/openapi.json",
         "https://github.com/mat12121212/nexusapi-examples"
       ],
       "product_ready": true,
-      "provider": "nexus",
+      "provider": "neironych",
+      "public_api": true,
+      "telegram": true
+    },
+    {
+      "backend_entrypoints": [
+        "api.image_service:generate_image"
+      ],
+      "billing": true,
+      "contract_id": "image.gpt25",
+      "contract_tests": [
+        "tests/test_gpt_neironych.py"
+      ],
+      "contract_valid": true,
+      "docs_verified_on": "2026-07-26",
+      "has_user_surface": true,
+      "live_smoke_id": "image.gpt25",
+      "miniapp": true,
+      "model": "gpt-image-2.5-sunburst",
+      "modes": [
+        "text",
+        "image"
+      ],
+      "notes": "",
+      "official_docs": [
+        "https://api.xn--e1aikcel5c5a.online/guide"
+      ],
+      "product_ready": true,
+      "provider": "neironych",
       "public_api": true,
       "telegram": true
     },

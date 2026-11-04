@@ -198,3 +198,84 @@ async def set_nano_pro_route(
         ))
     await session.commit()
     return ProviderRoute(NANO_PRO_MODEL, record.primary_provider, "database", record.updated_by_admin_tg_id)
+
+
+GPT2_MODEL = "gpt-image-2"
+
+
+async def get_gpt2_route(session: AsyncSession) -> ProviderRoute:
+    record = await session.get(ProviderRoutingSetting, GPT2_MODEL)
+    if record is not None:
+        if record.primary_provider not in _ALLOWED:
+            raise ValueError("Unsupported GPT Image 2 provider")
+        return ProviderRoute(GPT2_MODEL, record.primary_provider, "database", record.updated_by_admin_tg_id)
+    return ProviderRoute(GPT2_MODEL, settings.GPT_IMAGE_2_PRIMARY_PROVIDER, "environment")
+
+
+async def set_gpt2_route(
+    session: AsyncSession, primary_provider: Literal["neironych", "nexus"], *,
+    admin_tg_id: int, source: Literal["telegram", "web"],
+) -> ProviderRoute:
+    if primary_provider not in _ALLOWED or not int(admin_tg_id) or source not in {"telegram", "web"}:
+        raise ValueError("Valid provider, audit actor and source are required")
+    await session.execute(
+        pg_insert(ProviderRoutingSetting).values(
+            model_key=GPT2_MODEL, primary_provider=settings.GPT_IMAGE_2_PRIMARY_PROVIDER,
+            updated_by_admin_tg_id=None,
+        ).on_conflict_do_nothing(index_elements=["model_key"])
+    )
+    record = (await session.execute(
+        select(ProviderRoutingSetting).where(ProviderRoutingSetting.model_key == GPT2_MODEL).with_for_update()
+    )).scalar_one()
+    previous = record.primary_provider
+    if previous != primary_provider:
+        record.primary_provider = primary_provider
+        record.updated_by_admin_tg_id = int(admin_tg_id)
+        session.add(ProviderRoutingAudit(
+            model_key=GPT2_MODEL, previous_provider=previous, new_provider=primary_provider,
+            changed_by_admin_tg_id=int(admin_tg_id), source=source,
+        ))
+    await session.commit()
+    return ProviderRoute(GPT2_MODEL, record.primary_provider, "database", record.updated_by_admin_tg_id)
+
+
+GPT25_MODEL = "gpt-image-2.5-sunburst"
+
+
+async def get_gpt25_route(session: AsyncSession) -> ProviderRoute:
+    record = await session.get(ProviderRoutingSetting, GPT25_MODEL)
+    if record is not None:
+        if record.primary_provider not in {"neironych"}:
+            raise ValueError("Unsupported GPT Image 2.5 provider")
+        return ProviderRoute(GPT25_MODEL, record.primary_provider, "database", record.updated_by_admin_tg_id)
+    return ProviderRoute(GPT25_MODEL, settings.GPT_IMAGE_25_PRIMARY_PROVIDER, "environment")
+
+
+async def set_gpt25_route(
+    session: AsyncSession, primary_provider: Literal["neironych", "nexus"], *,
+    admin_tg_id: int, source: Literal["telegram", "web"],
+) -> ProviderRoute:
+    if primary_provider not in {"neironych"} or not int(admin_tg_id) or source not in {"telegram", "web"}:
+        raise ValueError("Valid provider, audit actor and source are required")
+    await session.execute(
+        pg_insert(ProviderRoutingSetting).values(
+            model_key=GPT25_MODEL, primary_provider=settings.GPT_IMAGE_25_PRIMARY_PROVIDER,
+            updated_by_admin_tg_id=None,
+        ).on_conflict_do_nothing(index_elements=["model_key"])
+    )
+    record = (await session.execute(
+        select(ProviderRoutingSetting).where(ProviderRoutingSetting.model_key == GPT25_MODEL).with_for_update()
+    )).scalar_one()
+    previous = record.primary_provider
+    if previous != primary_provider:
+        record.primary_provider = primary_provider
+        record.updated_by_admin_tg_id = int(admin_tg_id)
+        session.add(ProviderRoutingAudit(
+            model_key=GPT25_MODEL, previous_provider=previous, new_provider=primary_provider,
+            changed_by_admin_tg_id=int(admin_tg_id), source=source,
+        ))
+    await session.commit()
+    return ProviderRoute(GPT25_MODEL, record.primary_provider, "database", record.updated_by_admin_tg_id)
+
+
+GPT_IMAGE_MODELS = frozenset({"gpt-image-2-text-to-image", "gpt-image-2-image-to-image", "gpt-image-2.5-sunburst"})

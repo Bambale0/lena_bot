@@ -304,7 +304,7 @@ async def create_nexus_image_task(
     idempotency_key: str | None = None,
     before_submit: Callable[[str, dict[str, Any]], Awaitable[None]] | None = None,
 ) -> str:
-    if model_key in {"nano-banana-2.1", "nano-banana-2", "nano-banana-pro"} and idempotency_key:
+    if model_key in {"nano-banana-2.1", "nano-banana-2", "nano-banana-pro", "gpt-image-2-text-to-image", "gpt-image-2-image-to-image", "gpt-image-2.5-sunburst"} and idempotency_key:
         if before_submit and not callback_url:
             query = urlencode({"secret": settings.KIE_WEBHOOK_SECRET})
             callback_url = f"{settings.WEBHOOK_URL.rstrip('/')}{settings.KIE_WEBHOOK_PATH}?{query}"

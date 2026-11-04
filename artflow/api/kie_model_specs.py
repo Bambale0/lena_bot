@@ -473,6 +473,15 @@ IMAGE_SPECS: dict[str, KieModelSpec] = {
 }
 
 
+# Shared request-normalization metadata; this model is executed only by Neironych.
+IMAGE_SPECS["gpt-image-2.5-sunburst"] = KieModelSpec(
+    model="gpt-image-2.5-sunburst", media_type=KieMediaType.IMAGE,
+    supported_modes=("text", "image"), reference_field="input_urls",
+    reference_type=KieReferenceType.LIST,
+    optional_params={"aspect_ratio": "aspect_ratio", "resolution": "resolution"},
+)
+
+
 VIDEO_SPECS: dict[str, KieModelSpec] = {
     "kling-2.6/text-to-video": KieModelSpec(
         model="kling-2.6/text-to-video",

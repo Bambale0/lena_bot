@@ -1662,7 +1662,7 @@ async def _recover_nexus_submission(session, request_id: str, task_id: str):
     if not gen:
         return None
     snapshot = parse_input_params(getattr(gen, "input_params", None)).get("nexus_submission", {})
-    if (gen.model not in {"nano-banana-2.1", "nano-banana-2", "nano-banana-pro"} or gen.gen_type != GenerationType.image
+    if (gen.model not in {"nano-banana-2.1", "nano-banana-2", "nano-banana-pro", "gpt-image-2-text-to-image", "gpt-image-2-image-to-image", "gpt-image-2.5-sunburst"} or gen.gen_type != GenerationType.image
             or snapshot.get("request_id") != request_id or not snapshot.get("has_webhook")):
         raise HTTPException(status_code=409, detail="Nexus submission correlation mismatch")
     if not nexus_image_adapter.submission_scope_matches(gen.input_params):
@@ -1817,7 +1817,7 @@ async def kie_webhook(
         strict_wan_video = gen.gen_type == GenerationType.video and gen.model in (WAN30_MODELS | KLING4_MODELS)
         strict_nexus_image = (
             provider == "nexus" and gen.gen_type == GenerationType.image
-            and gen.model in {"nano-banana-2.1", "nano-banana-2", "nano-banana-pro"}
+            and gen.model in {"nano-banana-2.1", "nano-banana-2", "nano-banana-pro", "gpt-image-2-text-to-image", "gpt-image-2-image-to-image", "gpt-image-2.5-sunburst"}
         )
         if strict_nexus_image and not nexus_image_adapter.submission_scope_matches(getattr(gen, "input_params", None)):
             raise HTTPException(status_code=503, detail="Nexus credential scope requires manual reconciliation")

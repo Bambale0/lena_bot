@@ -31,6 +31,7 @@ except ImportError:
 from api import (
     comet_fallback,
     kieai_client,
+    neironych_gpt_image,
     neironych_image_adapter,
     neironych_nano2,
     neironych_nano_pro_runtime,
@@ -72,6 +73,7 @@ class ImageModel(StrEnum):
     # GPT Image 2
     GPT_IMAGE_2_T2I = "gpt-image-2-text-to-image"
     GPT_IMAGE_2_I2I = "gpt-image-2-image-to-image"
+    GPT_IMAGE_25 = "gpt-image-2.5-sunburst"
     GPT_IMAGE_2_VIP = "gpt-image-2-vip"
 
 
@@ -92,6 +94,7 @@ _QUALITY_MODELS: set[ImageModel] = {
     ImageModel.SEEDREAM_45_EDIT,
     ImageModel.GPT_IMAGE_2_T2I,
     ImageModel.GPT_IMAGE_2_I2I,
+    ImageModel.GPT_IMAGE_25,
     ImageModel.NANO_BANANA_PRO_VIP,
     ImageModel.GPT_IMAGE_2_VIP,
 }
@@ -112,6 +115,7 @@ _SQUARE_4K_UNSUPPORTED_MODELS: set[ImageModel] = {
 _GPT_IMAGE_2_MODELS = {
     ImageModel.GPT_IMAGE_2_T2I,
     ImageModel.GPT_IMAGE_2_I2I,
+    ImageModel.GPT_IMAGE_25,
     ImageModel.GPT_IMAGE_2_VIP,
 }
 _MAX_GPT_IMAGE_2_REFERENCES = 4
@@ -150,6 +154,7 @@ _REFERENCE_LIMITS: dict[str, int] = {
     ImageModel.QWEN_EDIT.value: 1,
     ImageModel.QWEN2_EDIT.value: 1,
     ImageModel.GPT_IMAGE_2_I2I.value: 4,
+    ImageModel.GPT_IMAGE_25.value: 4,
     ImageModel.GPT_IMAGE_2_VIP.value: 4,
 }
 _GROK_MAX_REFERENCE_BYTES = 10 * 1024 * 1024
@@ -174,6 +179,7 @@ MODEL_ASPECT_RATIOS: dict[ImageModel, list[str]] = {
     ImageModel.QWEN_EDIT: ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
     ImageModel.QWEN2_T2I: ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
     ImageModel.QWEN2_EDIT: ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"],
+    ImageModel.GPT_IMAGE_25: list(neironych_gpt_image.SIZES),
     ImageModel.GPT_IMAGE_2_T2I: [
         "auto",
         "1:1",
@@ -622,6 +628,41 @@ async def generate_image(
         )
         return ImageResult(is_async=True, task_id=task_id, provider="nexus")
 
+    if model.value in neironych_gpt_image.MODELS:
+        refs = _reference_list(image_url)
+        is_25 = model == ImageModel.GPT_IMAGE_25
+        chosen_primary = primary_provider or (
+            settings.GPT_IMAGE_25_PRIMARY_PROVIDER if is_25 else settings.GPT_IMAGE_2_PRIMARY_PROVIDER
+        )
+        if chosen_primary not in ({"neironych"} if is_25 else {"neironych", "nexus"}):
+            raise ValueError("Unsupported GPT Image primary provider")
+        compatible = neironych_gpt_image.supports(
+            image_urls=refs, aspect_ratio=aspect_ratio, quality=quality, n=n,
+        )
+        if chosen_primary == "neironych" and compatible:
+            try:
+                result_url = await neironych_gpt_image.generate(
+                    model_key=model.value, prompt=prompt, image_urls=refs, aspect_ratio=aspect_ratio,
+                    quality=quality, request_id=request_id, before_submit=before_neironych_submit,
+                )
+            except neironych_image_adapter.NeironychImageRejected:
+                if is_25:
+                    raise
+                logger.warning("GPT Image 2 definitively rejected; using Nexus")
+            else:
+                return ImageResult(
+                    is_async=False, url=result_url, result_urls=[result_url], provider="neironych",
+                    task_id=neironych_image_adapter.encode_task_id(request_id) if request_id else None,
+                )
+        if is_25:
+            raise ValueError("Unsupported GPT Image 2.5 request parameters")
+        task_id = await nexus_image_adapter.create_nexus_image_task(
+            model_key=model.value, prompt=prompt, image_urls=refs, aspect_ratio=aspect_ratio,
+            quality=quality, callback_url=callback_url, output_format=output_format,
+            idempotency_key=request_id, before_submit=before_nexus_submit,
+        )
+        return ImageResult(is_async=True, task_id=task_id, provider="nexus")
+
     if nexus_image_adapter.is_nexus_image_model(model.value):
         task_id = await nexus_image_adapter.create_nexus_image_task(
             model_key=model.value,
@@ -869,6 +910,7 @@ def _build_input(
         ImageModel.NANO_BANANA_PRO,
         ImageModel.GPT_IMAGE_2_T2I,
         ImageModel.GPT_IMAGE_2_I2I,
+        ImageModel.GPT_IMAGE_25,
     }:
         resolution_value = quality_value if quality_value in {"1K", "2K", "4K"} else None
 
@@ -881,6 +923,7 @@ def _build_input(
     elif effective_model not in {
         ImageModel.GPT_IMAGE_2_T2I,
         ImageModel.GPT_IMAGE_2_I2I,
+        ImageModel.GPT_IMAGE_25,
         ImageModel.WAN_27,
         ImageModel.WAN_27_PRO,
     } and quality_value in {"1K", "2K", "4K"}:

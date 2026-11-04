@@ -156,6 +156,7 @@ async def test_gpt_image_2_routes_references_to_nexus_without_kie_upload(tmp_pat
     result = await image_service.generate_image(
         ImageModel.GPT_IMAGE_2_T2I,
         "Combine both references",
+        primary_provider="nexus",
         image_url=refs,
         aspect_ratio="16:9",
         quality="2K",
@@ -173,6 +174,8 @@ async def test_gpt_image_2_routes_references_to_nexus_without_kie_upload(tmp_pat
             "quality": "2K",
             "callback_url": "https://example.test/webhook/kie?secret=abc",
             "output_format": None,
+            "idempotency_key": None,
+            "before_submit": None,
         }
     ]
 

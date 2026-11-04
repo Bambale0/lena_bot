@@ -30,6 +30,7 @@ from api import (
     image_service,
     kieai_client,
     midjourney_service,
+    neironych_gpt_image,
     neironych_image_adapter,
     neironych_nano2,
     neironych_nano_pro_runtime,
@@ -158,7 +159,10 @@ from core.neironych_video_poll_gate import (
     protect_neironych_video_poll_settlement,
 )
 from core.provider_routing import (
+    GPT_IMAGE_MODELS,
     SEEDREAM_5_MODELS,
+    get_gpt2_route,
+    get_gpt25_route,
     get_nano2_route,
     get_nano21_route,
     get_nano_pro_route,
@@ -718,7 +722,8 @@ async def _reconcile_neironych_image_generation(
 
     try:
         state = await neironych_image_adapter.fetch_nano_banana21_status(
-            request_id, **({"expected_model": str(gen.model)} if str(getattr(gen, "model", "")) in {"nano-banana-2", "nano-banana-pro"} else
+            request_id, **({"expected_model": neironych_gpt_image.MODELS[gen.model]} if str(getattr(gen, "model", "")) in GPT_IMAGE_MODELS else
+                {"expected_model": str(gen.model)} if str(getattr(gen, "model", "")) in {"nano-banana-2", "nano-banana-pro"} else
                 {"expected_model": "seedream-5.0-pro"} if str(getattr(gen, "model", "")) in SEEDREAM_5_MODELS else {}),
         )
     except Exception as exc:
@@ -738,12 +743,13 @@ async def _reconcile_neironych_image_generation(
     if provider_state == "completed":
         url = state.get("result_url")
         recovered_url = None
-        if not url and str(getattr(gen, "model", "")) in {"nano-banana-2", "nano-banana-pro"}:
+        if not url and str(getattr(gen, "model", "")) in ({"nano-banana-2", "nano-banana-pro"} | GPT_IMAGE_MODELS):
             try:
                 params = repo.parse_input_params(getattr(gen, "input_params", None))
-                adapter = neironych_nano_pro_runtime if gen.model == "nano-banana-pro" else neironych_nano2
+                adapter = neironych_gpt_image if gen.model in GPT_IMAGE_MODELS else neironych_nano_pro_runtime if gen.model == "nano-banana-pro" else neironych_nano2
                 recovered_url = await adapter.recover_completed(
                     params.get(adapter.SNAPSHOT_KEY), request_id,
+                    **({"model_key": gen.model} if gen.model in GPT_IMAGE_MODELS else {}),
                 )
                 url = recovered_url
             except Exception as exc:
@@ -3107,6 +3113,8 @@ async def create_image_generation(
         if model == ImageModel.NANO_BANANA_21 else
         (await get_nano2_route(session)).primary_provider if model == ImageModel.NANO_BANANA_2 else
         (await get_nano_pro_route(session)).primary_provider if model == ImageModel.NANO_BANANA_PRO else
+        (await get_gpt25_route(session)).primary_provider if model == ImageModel.GPT_IMAGE_25 else
+        (await get_gpt2_route(session)).primary_provider if model.value in GPT_IMAGE_MODELS else
         (await get_seedream5_route(session)).primary_provider if model.value in SEEDREAM_5_MODELS else None
     )
 
@@ -3168,7 +3176,7 @@ async def create_image_generation(
 
     image_request_id = (
         neironych_image_adapter.client_request_id_for_generation(gen.id)
-        if model in {ImageModel.NANO_BANANA_21, ImageModel.NANO_BANANA_2, ImageModel.NANO_BANANA_PRO} or model.value in SEEDREAM_5_MODELS else None
+        if model in {ImageModel.NANO_BANANA_21, ImageModel.NANO_BANANA_2, ImageModel.NANO_BANANA_PRO} or model.value in (SEEDREAM_5_MODELS | GPT_IMAGE_MODELS) else None
     )
 
     async def persist_kie_handoff() -> None:
@@ -3182,7 +3190,7 @@ async def create_image_generation(
             raise RuntimeError("Seedream KIE handoff lost generation ownership")
 
     async def persist_neironych_submission(request_id: str, snapshot: dict) -> None:
-        saved = await (repo.persist_neironych_nano_pro_submission if body.model == ImageModel.NANO_BANANA_PRO.value
+        saved = await (repo.persist_neironych_gpt_submission if body.model in GPT_IMAGE_MODELS else repo.persist_neironych_nano_pro_submission if body.model == ImageModel.NANO_BANANA_PRO.value
             else repo.persist_neironych_nano2_submission)(
             session, gen.id, task_id_for_surface(neironych_image_adapter.encode_task_id(request_id), surface), snapshot,
         )
@@ -3235,7 +3243,7 @@ async def create_image_generation(
         await repo.fail_generation_and_refund(
             session, gen.id, str(exc), refund_note="image:reference_admission_failed",
             **({"expected_task_id": task_id_for_surface(neironych_image_adapter.encode_task_id(image_request_id), surface)}
-               if image_request_id and (model.value in SEEDREAM_5_MODELS or model in {ImageModel.NANO_BANANA_2, ImageModel.NANO_BANANA_PRO}) else {"require_missing_task_id": True}),
+               if image_request_id and (model.value in (SEEDREAM_5_MODELS | GPT_IMAGE_MODELS) or model in {ImageModel.NANO_BANANA_2, ImageModel.NANO_BANANA_PRO}) else {"require_missing_task_id": True}),
         )
         raise HTTPException(status_code=422, detail=image_generation_user_error(exc)) from exc
     except nexus_image_adapter.NexusImageSubmissionUnknown as exc:
@@ -3267,6 +3275,18 @@ async def create_image_generation(
             session, gen.id, str(exc), refund_note="image:nexus_error",
         )
         raise HTTPException(status_code=502, detail=image_generation_user_error(exc))
+    except neironych_image_adapter.NeironychImageRejected as exc:
+        await repo.fail_generation_and_refund(
+            session, gen.id, "Генератор не принял запрос. Кредиты возвращены.",
+            refund_note="image:neironych_not_accepted",
+            **({"expected_task_id": task_id_for_surface(
+                neironych_image_adapter.encode_task_id(image_request_id), surface,
+            )} if image_request_id else {"require_missing_task_id": True}),
+        )
+        logger.warning("Neironych image definitively rejected gen=%s request_id=%s status=%s",
+                       gen.id, exc.request_id, exc.status_code)
+        await session.refresh(gen)
+        return _gen_out(gen)
     except neironych_image_adapter.NeironychImageError as exc:
         settlement = await settle_image_http_5xx(
             session, gen.id, exc, provider="neironych",
@@ -4936,6 +4956,10 @@ async def remix_feed_post(
         if gen_type == "image" and body.model == ImageModel.NANO_BANANA_2.value
         else (await get_nano_pro_route(session)).primary_provider
         if gen_type == "image" and body.model == ImageModel.NANO_BANANA_PRO.value
+        else (await get_gpt25_route(session)).primary_provider
+        if gen_type == "image" and body.model == ImageModel.GPT_IMAGE_25.value
+        else (await get_gpt2_route(session)).primary_provider
+        if gen_type == "image" and body.model in GPT_IMAGE_MODELS
         else (await get_seedream5_route(session)).primary_provider
         if gen_type == "image" and body.model in SEEDREAM_5_MODELS else None
     )
@@ -5019,7 +5043,7 @@ async def remix_feed_post(
     image_request_id = (
         neironych_image_adapter.client_request_id_for_generation(gen.id)
         if gen_type == "image" and (body.model in {ImageModel.NANO_BANANA_21.value, ImageModel.NANO_BANANA_2.value, ImageModel.NANO_BANANA_PRO.value}
-            or body.model in SEEDREAM_5_MODELS) else None
+            or body.model in (SEEDREAM_5_MODELS | GPT_IMAGE_MODELS)) else None
     )
 
     submission_context = (
@@ -5044,7 +5068,7 @@ async def remix_feed_post(
             raise RuntimeError("Seedream KIE handoff lost generation ownership")
 
     async def persist_neironych_submission(request_id: str, snapshot: dict) -> None:
-        saved = await (repo.persist_neironych_nano_pro_submission if body.model == ImageModel.NANO_BANANA_PRO.value
+        saved = await (repo.persist_neironych_gpt_submission if body.model in GPT_IMAGE_MODELS else repo.persist_neironych_nano_pro_submission if body.model == ImageModel.NANO_BANANA_PRO.value
             else repo.persist_neironych_nano2_submission)(
             session, gen.id, task_id_for_surface(neironych_image_adapter.encode_task_id(request_id), surface), snapshot,
         )
@@ -5165,6 +5189,18 @@ async def remix_feed_post(
             session, gen.id, str(exc), refund_note="feed_image_nexus_error",
         )
         raise HTTPException(status_code=502, detail="Generation service error")
+    except neironych_image_adapter.NeironychImageRejected as exc:
+        await repo.fail_generation_and_refund(
+            session, gen.id, "Генератор не принял запрос. Кредиты возвращены.",
+            refund_note="image:neironych_not_accepted",
+            **({"expected_task_id": task_id_for_surface(
+                neironych_image_adapter.encode_task_id(image_request_id), surface,
+            )} if image_request_id else {"require_missing_task_id": True}),
+        )
+        logger.warning("Neironych image definitively rejected gen=%s request_id=%s status=%s",
+                       gen.id, exc.request_id, exc.status_code)
+        await session.refresh(gen)
+        return _gen_out(gen)
     except neironych_image_adapter.NeironychImageError as exc:
         settlement = await settle_image_http_5xx(
             session, gen.id, exc, provider="neironych",

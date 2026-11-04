@@ -21,10 +21,12 @@ from core.feed_recipe_identity_policy import (
 )
 from core.image_recovery_policy import get_image_recovery_policy, set_image_recovery_policy
 from core.provider_routing import (
+    get_gpt2_route,
     get_nano2_route,
     get_nano21_route,
     get_nano_pro_route,
     get_seedream5_route,
+    set_gpt2_route,
     set_nano2_route,
     set_nano21_route,
     set_nano_pro_route,
@@ -1290,4 +1292,26 @@ async def admin_set_nano_pro_provider(
         return admin_error
     from dataclasses import asdict
     route = await set_nano_pro_route(session, body.primary_provider, admin_tg_id=int(user.tg_id), source="web")
+    return ok(asdict(route))
+
+
+@router.get("/admin/provider-routing/gpt-image-2")
+async def admin_get_gpt2_provider(
+    session: AsyncSession = Depends(get_session), user=Depends(get_web_user_or_none),
+):
+    if admin_error := _admin_error(user):
+        return admin_error
+    from dataclasses import asdict
+    return ok(asdict(await get_gpt2_route(session)))
+
+
+@router.put("/admin/provider-routing/gpt-image-2")
+async def admin_set_gpt2_provider(
+    body: Nano21ProviderRoutingUpdate,
+    session: AsyncSession = Depends(get_session), user=Depends(get_web_user_or_none),
+):
+    if admin_error := _admin_error(user):
+        return admin_error
+    from dataclasses import asdict
+    route = await set_gpt2_route(session, body.primary_provider, admin_tg_id=int(user.tg_id), source="web")
     return ok(asdict(route))
