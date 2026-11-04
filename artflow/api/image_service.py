@@ -33,6 +33,7 @@ from api import (
     kieai_client,
     neironych_image_adapter,
     neironych_nano2,
+    neironych_nano_pro_runtime,
     nexus_image_adapter,
 )
 from api.image_errors import ImageReferenceUnavailable
@@ -583,6 +584,32 @@ async def generate_image(
                 )
             except neironych_image_adapter.NeironychImageRejected as exc:
                 logger.warning("Nano Banana 2 definitively rejected status=%s; using Nexus", exc.status_code)
+            else:
+                return ImageResult(
+                    is_async=False, url=result_url, result_urls=[result_url], provider="neironych",
+                    task_id=neironych_image_adapter.encode_task_id(request_id) if request_id else None,
+                )
+        task_id = await nexus_image_adapter.create_nexus_image_task(
+            model_key=model.value, prompt=prompt, image_urls=refs, aspect_ratio=aspect_ratio,
+            quality=quality, callback_url=callback_url, output_format=output_format,
+            idempotency_key=request_id, before_submit=before_nexus_submit,
+        )
+        return ImageResult(is_async=True, task_id=task_id, provider="nexus")
+
+    if model == ImageModel.NANO_BANANA_PRO:
+        refs = _reference_list(image_url)
+        chosen_primary = primary_provider or settings.NANO_BANANA_PRO_PRIMARY_PROVIDER
+        if chosen_primary not in {"neironych", "nexus"}:
+            raise ValueError("Unsupported Nano Banana Pro primary provider")
+        compatible = neironych_nano_pro_runtime.supports(image_urls=refs, aspect_ratio=aspect_ratio, quality=quality, n=n)
+        if chosen_primary == "neironych" and compatible:
+            try:
+                result_url = await neironych_nano_pro_runtime.generate(
+                    prompt=prompt, image_urls=refs, aspect_ratio=aspect_ratio, quality=quality,
+                    request_id=request_id, before_submit=before_neironych_submit,
+                )
+            except neironych_image_adapter.NeironychImageRejected as exc:
+                logger.warning("Nano Banana Pro definitively rejected status=%s; using Nexus", exc.status_code)
             else:
                 return ImageResult(
                     is_async=False, url=result_url, result_urls=[result_url], provider="neironych",

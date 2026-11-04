@@ -460,7 +460,7 @@ async def execute_operation(
     before_neironych_submit: Callable[[str, dict[str, Any]], Awaitable[None]] | None = None,
 ) -> OperationStart:
     validated = validate_operation_params(spec, params)
-    if spec.model in {"nano-banana-2", "nano-banana-2.1", "seedream/5-pro-text-to-image", "seedream/5-pro-image-to-image"}:
+    if spec.model in {"nano-banana-2", "nano-banana-2.1", "nano-banana-pro", "seedream/5-pro-text-to-image", "seedream/5-pro-image-to-image"}:
         if request_id:
             validated["request_id"] = request_id
         if primary_provider:

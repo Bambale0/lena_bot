@@ -98,6 +98,7 @@ from core.provider_routing import (
     SEEDREAM_5_MODELS,
     get_nano2_route,
     get_nano21_route,
+    get_nano_pro_route,
     get_seedream5_route,
 )
 from db import repository as repo
@@ -1486,6 +1487,7 @@ async def _launch_session_generation(
         (await get_nano21_route(session)).primary_provider
         if model == ImageModel.NANO_BANANA_21 else
         (await get_nano2_route(session)).primary_provider if model == ImageModel.NANO_BANANA_2 else
+        (await get_nano_pro_route(session)).primary_provider if model == ImageModel.NANO_BANANA_PRO else
         (await get_seedream5_route(session)).primary_provider if model.value in SEEDREAM_5_MODELS else None
     )
 
@@ -1539,7 +1541,7 @@ async def _launch_session_generation(
     status_msg = await source_message.answer(launching_text)
     image_request_id = (
         neironych_image_adapter.client_request_id_for_generation(gen.id)
-        if model in {ImageModel.NANO_BANANA_21, ImageModel.NANO_BANANA_2} or model.value in SEEDREAM_5_MODELS else None
+        if model in {ImageModel.NANO_BANANA_21, ImageModel.NANO_BANANA_2, ImageModel.NANO_BANANA_PRO} or model.value in SEEDREAM_5_MODELS else None
     )
 
     async def persist_kie_handoff() -> None:
@@ -1553,7 +1555,8 @@ async def _launch_session_generation(
             raise RuntimeError("Seedream KIE handoff lost generation ownership")
 
     async def persist_neironych_submission(request_id: str, snapshot: dict) -> None:
-        saved = await repo.persist_neironych_nano2_submission(
+        saved = await (repo.persist_neironych_nano_pro_submission if model == ImageModel.NANO_BANANA_PRO
+            else repo.persist_neironych_nano2_submission)(
             session, gen.id, neironych_image_adapter.encode_task_id(request_id), snapshot,
         )
         if not saved:

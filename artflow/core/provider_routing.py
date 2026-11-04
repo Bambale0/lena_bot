@@ -159,3 +159,42 @@ async def set_nano2_route(
         ))
     await session.commit()
     return ProviderRoute(NANO_2_MODEL, record.primary_provider, "database", record.updated_by_admin_tg_id)
+
+
+NANO_PRO_MODEL = "nano-banana-pro"
+
+
+async def get_nano_pro_route(session: AsyncSession) -> ProviderRoute:
+    record = await session.get(ProviderRoutingSetting, NANO_PRO_MODEL)
+    if record is not None:
+        if record.primary_provider not in _ALLOWED:
+            raise ValueError("Unsupported Nano Banana Pro provider")
+        return ProviderRoute(NANO_PRO_MODEL, record.primary_provider, "database", record.updated_by_admin_tg_id)
+    return ProviderRoute(NANO_PRO_MODEL, settings.NANO_BANANA_PRO_PRIMARY_PROVIDER, "environment")
+
+
+async def set_nano_pro_route(
+    session: AsyncSession, primary_provider: Literal["neironych", "nexus"], *,
+    admin_tg_id: int, source: Literal["telegram", "web"],
+) -> ProviderRoute:
+    if primary_provider not in _ALLOWED or not int(admin_tg_id) or source not in {"telegram", "web"}:
+        raise ValueError("Valid provider, audit actor and source are required")
+    await session.execute(
+        pg_insert(ProviderRoutingSetting).values(
+            model_key=NANO_PRO_MODEL, primary_provider=settings.NANO_BANANA_PRO_PRIMARY_PROVIDER,
+            updated_by_admin_tg_id=None,
+        ).on_conflict_do_nothing(index_elements=["model_key"])
+    )
+    record = (await session.execute(
+        select(ProviderRoutingSetting).where(ProviderRoutingSetting.model_key == NANO_PRO_MODEL).with_for_update()
+    )).scalar_one()
+    previous = record.primary_provider
+    if previous != primary_provider:
+        record.primary_provider = primary_provider
+        record.updated_by_admin_tg_id = int(admin_tg_id)
+        session.add(ProviderRoutingAudit(
+            model_key=NANO_PRO_MODEL, previous_provider=previous, new_provider=primary_provider,
+            changed_by_admin_tg_id=int(admin_tg_id), source=source,
+        ))
+    await session.commit()
+    return ProviderRoute(NANO_PRO_MODEL, record.primary_provider, "database", record.updated_by_admin_tg_id)

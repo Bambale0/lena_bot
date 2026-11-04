@@ -231,7 +231,6 @@ def test_vip_bootstrap_prices_are_added_without_repricing_existing_models() -> N
 def test_provider_inventory_matches_active_image_transports() -> None:
     by_model = {contract.model: contract for contract in IMAGE_CONTRACTS}
     migrated = {
-        "nano-banana-pro",
         "gpt-image-2-text-to-image",
         "gpt-image-2-image-to-image",
         "nano-banana-pro-vip",
@@ -246,6 +245,8 @@ def test_provider_inventory_matches_active_image_transports() -> None:
         contract = by_model[key]
         assert contract.provider == "neironych"
         assert any("docs.kie.ai/market/seedream/5-pro" in url for url in contract.official_docs)
+
+    assert by_model["nano-banana-pro"].provider == "neironych"
 
 @pytest.mark.asyncio
 async def test_miniapp_model_catalog_exposes_both_vip_models_with_exact_names(monkeypatch) -> None:

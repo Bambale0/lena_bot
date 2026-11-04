@@ -34,7 +34,7 @@ def _eligible_query():
         Generation.status.in_((GenerationStatus.pending, GenerationStatus.processing)),
         or_(
             (
-                Generation.model.in_(("nano-banana-2.1", "nano-banana-2", *sorted(SEEDREAM_5_MODELS)))
+                Generation.model.in_(("nano-banana-2.1", "nano-banana-2", "nano-banana-pro", *sorted(SEEDREAM_5_MODELS)))
                 & or_(Generation.task_id.like("%neironych-image:%"), Generation.task_id.like("%kie-submit:%"))
             ),
             (

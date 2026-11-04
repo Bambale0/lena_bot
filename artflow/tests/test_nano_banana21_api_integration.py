@@ -211,7 +211,13 @@ async def test_miniapp_nexus_submit_settles_explicit_5xx_only(monkeypatch, http_
 
 @pytest.mark.asyncio
 async def test_miniapp_nexus_pro_5xx_uses_atomic_refund(monkeypatch):
-    from api import nexus_image_adapter
+    from api import neironych_image_adapter, nexus_image_adapter
+    rid = neironych_image_adapter.client_request_id_for_generation(8202)
+    monkeypatch.setattr(miniapp_routes, "get_nano_pro_route", AsyncMock(return_value=ProviderRoute("nano-banana-pro", "nexus", "database")))
+    async def persist_task(session, gid, task_id, **kwargs):
+        gen.task_id = task_id
+        return True
+    monkeypatch.setattr(miniapp_routes.repo, "update_generation_task", persist_task)
 
     gen = SimpleNamespace(
         id=8202, user_id=10, model="nano-banana-pro",
@@ -222,11 +228,11 @@ async def test_miniapp_nexus_pro_5xx_uses_atomic_refund(monkeypatch):
         image_session_id=12, action_type=None,
     )
     async def provider_error(model, prompt, **kwargs):
-        assert kwargs["request_id"] is None
-        raise nexus_image_adapter.NexusApiError("HTTP 502", status_code=502)
+        assert kwargs["request_id"] == rid
+        raise nexus_image_adapter.NexusImageSubmissionUnknown("HTTP 502", status_code=502, idempotency_key=rid)
 
     async def settle(session, gen_id, error, **kwargs):
-        assert kwargs["require_missing_task_id"] is True
+        assert kwargs["expected_task_id"] == nexus_image_adapter.encode_submission_id(rid)
         assert kwargs["provider_review_key"] == miniapp_routes.repo.IMAGE_REFUND_PROVIDER_REVIEW_KEY
         gen.status = GenerationStatus.failed
         return True, 2.0

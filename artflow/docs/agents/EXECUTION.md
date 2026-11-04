@@ -2809,3 +2809,8 @@ Automated review follow-up: production-mode regression reproduced the dedicated 
 Follow-up outside this Nano2 change: the pre-existing signed Seedream KIE correlation also reaches the legacy outer503 when no shared secret is configured. Its narrow MAC-first handling and the previously reported Seedream b64 recovery remain separate work; no claim of fixing either in this release.
 
 Review-fix verification: production auth regression red→green;105 focused transport/callback/recovery tests passed; full pytest4084 passed/101 infrastructure skips, Ruff exit0. Both independent reviewers found no remaining Nano2 blocker in final authentication delta.
+
+
+## 2026-11-04 — Nano Banana Pro primary
+
+Baseline 851e27f4a35ffd85a77285ed50e50f58aed0cce9; Nano 2 already neironych/database. Pro production integration follows the durable Nano 2 path across site, Mini App, bot and feed repeats. [Evidence and rollout](EXECUTION/nano-pro-primary-20261104.md). Full local tests/Ruff/contract inventory green; exact-head CI pending.

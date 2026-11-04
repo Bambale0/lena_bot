@@ -27,6 +27,7 @@ PHOTO_ONE_POLICY = (
 
 @pytest.fixture
 async def nexus_posts(monkeypatch):
+    monkeypatch.setattr(image_service.settings, "NANO_BANANA_PRO_PRIMARY_PROVIDER", "nexus")
     posts = []
 
     def capture(request):
@@ -51,6 +52,8 @@ async def nexus_posts(monkeypatch):
 
 @pytest.fixture
 def local_launch(monkeypatch):
+    monkeypatch.setattr(miniapp_routes, "get_nano_pro_route", AsyncMock(return_value=SimpleNamespace(primary_provider="nexus")))
+    monkeypatch.setattr(image_gen, "get_nano_pro_route", AsyncMock(return_value=SimpleNamespace(primary_provider="nexus")))
     monkeypatch.setattr(miniapp_routes, "get_nano2_route", AsyncMock(return_value=SimpleNamespace(primary_provider="nexus")))
     monkeypatch.setattr(image_gen, "get_nano2_route", AsyncMock(return_value=SimpleNamespace(primary_provider="nexus")))
 
