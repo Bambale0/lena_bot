@@ -339,7 +339,8 @@ async def test_scheduler_rotates_forward_and_honors_stop_between_rows(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_nexus_submission_recovers_via_correlated_callback_without_replaying(monkeypatch):
+@pytest.mark.parametrize("model", ["nano-banana-2.1", "nano-banana-pro-vip", "gpt-image-2-vip"])
+async def test_nexus_submission_recovers_via_correlated_callback_without_replaying(monkeypatch, model):
     import main
     from api import nexus_image_adapter
 
@@ -347,7 +348,7 @@ async def test_nexus_submission_recovers_via_correlated_callback_without_replayi
     gen = SimpleNamespace(
         id=401, user_id=2, task_id=f"nexus-submit:{request_id}",
         image_session_id=31, status=GenerationStatus.processing,
-        gen_type=GenerationType.image, model="nano-banana-2.1",
+        gen_type=GenerationType.image, model=model,
         input_params={"nexus_submission": {"request_id": request_id, "has_webhook": True}},
         created_at=None,
     )

@@ -162,6 +162,7 @@ async def set_nano2_route(
 
 
 NANO_PRO_MODEL = "nano-banana-pro"
+NANO_PRO_MODELS = frozenset({NANO_PRO_MODEL, "nano-banana-pro-vip"})
 
 
 async def get_nano_pro_route(session: AsyncSession) -> ProviderRoute:
@@ -278,4 +279,4 @@ async def set_gpt25_route(
     return ProviderRoute(GPT25_MODEL, record.primary_provider, "database", record.updated_by_admin_tg_id)
 
 
-GPT_IMAGE_MODELS = frozenset({"gpt-image-2-text-to-image", "gpt-image-2-image-to-image", "gpt-image-2.5-sunburst"})
+GPT_IMAGE_MODELS = frozenset({"gpt-image-2-text-to-image", "gpt-image-2-image-to-image", "gpt-image-2.5-sunburst", "gpt-image-2-vip"})

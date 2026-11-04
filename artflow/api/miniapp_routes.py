@@ -160,6 +160,7 @@ from core.neironych_video_poll_gate import (
 )
 from core.provider_routing import (
     GPT_IMAGE_MODELS,
+    NANO_PRO_MODELS,
     SEEDREAM_5_MODELS,
     get_gpt2_route,
     get_gpt25_route,
@@ -723,7 +724,8 @@ async def _reconcile_neironych_image_generation(
     try:
         state = await neironych_image_adapter.fetch_nano_banana21_status(
             request_id, **({"expected_model": neironych_gpt_image.MODELS[gen.model]} if str(getattr(gen, "model", "")) in GPT_IMAGE_MODELS else
-                {"expected_model": str(gen.model)} if str(getattr(gen, "model", "")) in {"nano-banana-2", "nano-banana-pro"} else
+                {"expected_model": "nano-banana-pro"} if str(getattr(gen, "model", "")) in NANO_PRO_MODELS else
+                {"expected_model": "nano-banana-2"} if str(getattr(gen, "model", "")) == "nano-banana-2" else
                 {"expected_model": "seedream-5.0-pro"} if str(getattr(gen, "model", "")) in SEEDREAM_5_MODELS else {}),
         )
     except Exception as exc:
@@ -743,13 +745,13 @@ async def _reconcile_neironych_image_generation(
     if provider_state == "completed":
         url = state.get("result_url")
         recovered_url = None
-        if not url and str(getattr(gen, "model", "")) in ({"nano-banana-2", "nano-banana-pro"} | GPT_IMAGE_MODELS):
+        if not url and str(getattr(gen, "model", "")) in ({"nano-banana-2"} | NANO_PRO_MODELS | GPT_IMAGE_MODELS):
             try:
                 params = repo.parse_input_params(getattr(gen, "input_params", None))
-                adapter = neironych_gpt_image if gen.model in GPT_IMAGE_MODELS else neironych_nano_pro_runtime if gen.model == "nano-banana-pro" else neironych_nano2
+                adapter = neironych_gpt_image if gen.model in GPT_IMAGE_MODELS else neironych_nano_pro_runtime if gen.model in NANO_PRO_MODELS else neironych_nano2
                 recovered_url = await adapter.recover_completed(
                     params.get(adapter.SNAPSHOT_KEY), request_id,
-                    **({"model_key": gen.model} if gen.model in GPT_IMAGE_MODELS else {}),
+                    **({"model_key": gen.model} if gen.model in GPT_IMAGE_MODELS or gen.model == "nano-banana-pro-vip" else {}),
                 )
                 url = recovered_url
             except Exception as exc:
@@ -3112,7 +3114,7 @@ async def create_image_generation(
         (await get_nano21_route(session)).primary_provider
         if model == ImageModel.NANO_BANANA_21 else
         (await get_nano2_route(session)).primary_provider if model == ImageModel.NANO_BANANA_2 else
-        (await get_nano_pro_route(session)).primary_provider if model == ImageModel.NANO_BANANA_PRO else
+        (await get_nano_pro_route(session)).primary_provider if model.value in NANO_PRO_MODELS else
         (await get_gpt25_route(session)).primary_provider if model == ImageModel.GPT_IMAGE_25 else
         (await get_gpt2_route(session)).primary_provider if model.value in GPT_IMAGE_MODELS else
         (await get_seedream5_route(session)).primary_provider if model.value in SEEDREAM_5_MODELS else None
@@ -3176,7 +3178,7 @@ async def create_image_generation(
 
     image_request_id = (
         neironych_image_adapter.client_request_id_for_generation(gen.id)
-        if model in {ImageModel.NANO_BANANA_21, ImageModel.NANO_BANANA_2, ImageModel.NANO_BANANA_PRO} or model.value in (SEEDREAM_5_MODELS | GPT_IMAGE_MODELS) else None
+        if model in {ImageModel.NANO_BANANA_21, ImageModel.NANO_BANANA_2, ImageModel.NANO_BANANA_PRO, ImageModel.NANO_BANANA_PRO_VIP} or model.value in (SEEDREAM_5_MODELS | GPT_IMAGE_MODELS) else None
     )
 
     async def persist_kie_handoff() -> None:
@@ -3190,7 +3192,7 @@ async def create_image_generation(
             raise RuntimeError("Seedream KIE handoff lost generation ownership")
 
     async def persist_neironych_submission(request_id: str, snapshot: dict) -> None:
-        saved = await (repo.persist_neironych_gpt_submission if body.model in GPT_IMAGE_MODELS else repo.persist_neironych_nano_pro_submission if body.model == ImageModel.NANO_BANANA_PRO.value
+        saved = await (repo.persist_neironych_gpt_submission if body.model in GPT_IMAGE_MODELS else repo.persist_neironych_nano_pro_submission if body.model in NANO_PRO_MODELS
             else repo.persist_neironych_nano2_submission)(
             session, gen.id, task_id_for_surface(neironych_image_adapter.encode_task_id(request_id), surface), snapshot,
         )
@@ -3243,7 +3245,7 @@ async def create_image_generation(
         await repo.fail_generation_and_refund(
             session, gen.id, str(exc), refund_note="image:reference_admission_failed",
             **({"expected_task_id": task_id_for_surface(neironych_image_adapter.encode_task_id(image_request_id), surface)}
-               if image_request_id and (model.value in (SEEDREAM_5_MODELS | GPT_IMAGE_MODELS) or model in {ImageModel.NANO_BANANA_2, ImageModel.NANO_BANANA_PRO}) else {"require_missing_task_id": True}),
+               if image_request_id and (model.value in (SEEDREAM_5_MODELS | GPT_IMAGE_MODELS) or model in {ImageModel.NANO_BANANA_2, ImageModel.NANO_BANANA_PRO, ImageModel.NANO_BANANA_PRO_VIP}) else {"require_missing_task_id": True}),
         )
         raise HTTPException(status_code=422, detail=image_generation_user_error(exc)) from exc
     except nexus_image_adapter.NexusImageSubmissionUnknown as exc:
@@ -4955,7 +4957,7 @@ async def remix_feed_post(
         else (await get_nano2_route(session)).primary_provider
         if gen_type == "image" and body.model == ImageModel.NANO_BANANA_2.value
         else (await get_nano_pro_route(session)).primary_provider
-        if gen_type == "image" and body.model == ImageModel.NANO_BANANA_PRO.value
+        if gen_type == "image" and body.model in NANO_PRO_MODELS
         else (await get_gpt25_route(session)).primary_provider
         if gen_type == "image" and body.model == ImageModel.GPT_IMAGE_25.value
         else (await get_gpt2_route(session)).primary_provider
@@ -5042,7 +5044,7 @@ async def remix_feed_post(
     failed_user_id = user.id
     image_request_id = (
         neironych_image_adapter.client_request_id_for_generation(gen.id)
-        if gen_type == "image" and (body.model in {ImageModel.NANO_BANANA_21.value, ImageModel.NANO_BANANA_2.value, ImageModel.NANO_BANANA_PRO.value}
+        if gen_type == "image" and (body.model in {ImageModel.NANO_BANANA_21.value, ImageModel.NANO_BANANA_2.value, ImageModel.NANO_BANANA_PRO.value, ImageModel.NANO_BANANA_PRO_VIP.value}
             or body.model in (SEEDREAM_5_MODELS | GPT_IMAGE_MODELS)) else None
     )
 
@@ -5068,7 +5070,7 @@ async def remix_feed_post(
             raise RuntimeError("Seedream KIE handoff lost generation ownership")
 
     async def persist_neironych_submission(request_id: str, snapshot: dict) -> None:
-        saved = await (repo.persist_neironych_gpt_submission if body.model in GPT_IMAGE_MODELS else repo.persist_neironych_nano_pro_submission if body.model == ImageModel.NANO_BANANA_PRO.value
+        saved = await (repo.persist_neironych_gpt_submission if body.model in GPT_IMAGE_MODELS else repo.persist_neironych_nano_pro_submission if body.model in NANO_PRO_MODELS
             else repo.persist_neironych_nano2_submission)(
             session, gen.id, task_id_for_surface(neironych_image_adapter.encode_task_id(request_id), surface), snapshot,
         )

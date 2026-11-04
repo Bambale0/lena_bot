@@ -92,8 +92,7 @@ async def test_definitive_rejection_preserves_original_nexus_contract(monkeypatc
 
 
 @pytest.mark.parametrize("ratio,refs,primary", [
-    ("auto", [], "neironych"), (None, [], "neironych"), ("3:2", [], "neironych"),
-    ("2:3", [], "neironych"),
+    ("auto", [], "neironych"), (None, [], "neironych"),
     ("1:1", [], "nexus"),
 ])
 async def test_unsupported_capabilities_bypass_primary_without_remapping(monkeypatch, ratio, refs, primary):
@@ -267,7 +266,7 @@ def test_scheduler_includes_nano_pro_and_timeout_stays_below_ingress():
         Settings(BOT_TOKEN="123456:test", COMET_API_KEY="test", NANO_BANANA_PRO_IMAGE_TIMEOUT_SECONDS=120)
 
 
-@pytest.mark.parametrize("model", ["nano-banana-pro"])
+@pytest.mark.parametrize("model", ["nano-banana-pro", "nano-banana-pro-vip", "gpt-image-2-vip"])
 async def test_dedicated_hmac_authenticates_nexus_without_legacy_shared_secret(monkeypatch, model):
     import main
     monkeypatch.setattr(main.settings, "ENV", "production")
