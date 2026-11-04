@@ -491,6 +491,7 @@ async def test_default_callback_is_authenticated_before_persisted_submit(monkeyp
     assert callback.params["secret"] == SECRET
     create.reset_mock()
     monkeypatch.setattr(nexus_image_adapter.settings, "KIE_WEBHOOK_SECRET", "")
+    monkeypatch.setattr(nexus_image_adapter.settings, "KIE_WEBHOOK_HMAC_KEY", "")
     with pytest.raises(ValueError, match="authenticated webhook"):
         await nexus_image_adapter.create_nexus_image_task(
             model_key="nano-banana-2.1", prompt="photo", idempotency_key=RID, before_submit=before

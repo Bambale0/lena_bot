@@ -1662,7 +1662,7 @@ async def _recover_nexus_submission(session, request_id: str, task_id: str):
     if not gen:
         return None
     snapshot = parse_input_params(getattr(gen, "input_params", None)).get("nexus_submission", {})
-    if (gen.model != "nano-banana-2.1" or gen.gen_type != GenerationType.image
+    if (gen.model not in {"nano-banana-2.1", "nano-banana-2"} or gen.gen_type != GenerationType.image
             or snapshot.get("request_id") != request_id or not snapshot.get("has_webhook")):
         raise HTTPException(status_code=409, detail="Nexus submission correlation mismatch")
     if not nexus_image_adapter.submission_scope_matches(gen.input_params):
@@ -1717,11 +1717,11 @@ async def kie_webhook(
         if nexus_request_id:
             try:
                 expected_signature = nexus_image_adapter.submission_signature(
-                    nexus_request_id, settings.KIE_WEBHOOK_SECRET
+                    nexus_request_id, settings.KIE_WEBHOOK_SECRET or settings.KIE_WEBHOOK_HMAC_KEY
                 )
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail="Invalid Nexus correlation") from exc
-            if not settings.KIE_WEBHOOK_SECRET or not hmac.compare_digest(expected_signature, nexus_signature or ""):
+            if not (settings.KIE_WEBHOOK_SECRET or settings.KIE_WEBHOOK_HMAC_KEY) or not hmac.compare_digest(expected_signature, nexus_signature or ""):
                 raise HTTPException(status_code=403, detail="Invalid Nexus correlation signature")
         try:
             payload = await nexus_image_adapter.get_nexus_task_payload(task_id)
@@ -1813,7 +1813,7 @@ async def kie_webhook(
         strict_wan_video = gen.gen_type == GenerationType.video and gen.model in (WAN30_MODELS | KLING4_MODELS)
         strict_nexus_image = (
             provider == "nexus" and gen.gen_type == GenerationType.image
-            and gen.model == "nano-banana-2.1"
+            and gen.model in {"nano-banana-2.1", "nano-banana-2"}
         )
         if strict_nexus_image and not nexus_image_adapter.submission_scope_matches(getattr(gen, "input_params", None)):
             raise HTTPException(status_code=503, detail="Nexus credential scope requires manual reconciliation")

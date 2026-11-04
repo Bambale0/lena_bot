@@ -70,6 +70,8 @@ class Settings(BaseSettings):
     # Nano Banana 2.1: Neironych synchronous primary, Nexus async fallback.
     SEEDREAM_5_IMAGE_TIMEOUT_SECONDS: float = Field(default=110.0, ge=10.0, le=110.0)
     SEEDREAM_5_PRIMARY_PROVIDER: Literal["neironych", "kie"] = "neironych"
+    NANO_BANANA_2_IMAGE_TIMEOUT_SECONDS: float = Field(default=100.0, ge=10.0, le=110.0)
+    NANO_BANANA_2_PRIMARY_PROVIDER: Literal["neironych", "nexus"] = "neironych"
     NANO_BANANA_21_PRIMARY_PROVIDER: Literal["neironych", "nexus"] = "neironych"
     # Keep below APIX's current nginx proxy_read_timeout (120s); this is a paid synchronous POST.
     NEIRONYCH_IMAGE_TIMEOUT_SECONDS: float = Field(default=100.0, ge=10.0, le=600.0)

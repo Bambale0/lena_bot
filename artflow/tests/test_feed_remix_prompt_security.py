@@ -36,6 +36,8 @@ def bound_preview(url=SOURCE_IMAGE, *, index=0, display=False):
 
 @pytest.fixture
 def image_launch(monkeypatch):
+    monkeypatch.setattr(image_gen, "get_nano2_route", AsyncMock(return_value=SimpleNamespace(primary_provider="nexus")))
+
     monkeypatch.setattr(image_gen, "get_seedream5_route", AsyncMock(return_value=SimpleNamespace(primary_provider="neironych")))
     monkeypatch.setattr(
         image_gen, "get_feed_recipe_identity_instruction", AsyncMock(return_value=IDENTITY_RULE),
@@ -445,9 +447,11 @@ async def test_bot_legacy_video_regeneration_excludes_hidden_prompt(video_launch
 
 @pytest.fixture
 def api_launch(monkeypatch):
+
     from datetime import datetime, timezone
 
     from api import miniapp_routes
+    monkeypatch.setattr(miniapp_routes, "get_nano2_route", AsyncMock(return_value=SimpleNamespace(primary_provider="nexus")))
     monkeypatch.setattr(miniapp_routes, "get_seedream5_route", AsyncMock(return_value=SimpleNamespace(primary_provider="neironych")))
     from db.models import GenerationStatus
 

@@ -51,6 +51,9 @@ async def nexus_posts(monkeypatch):
 
 @pytest.fixture
 def local_launch(monkeypatch):
+    monkeypatch.setattr(miniapp_routes, "get_nano2_route", AsyncMock(return_value=SimpleNamespace(primary_provider="nexus")))
+    monkeypatch.setattr(image_gen, "get_nano2_route", AsyncMock(return_value=SimpleNamespace(primary_provider="nexus")))
+
     created_sessions = []
     generation = SimpleNamespace(
         id=99, user_id=42, gen_type=GenerationType.image, model="nano-banana-pro", prompt="own prompt",
@@ -74,6 +77,7 @@ def local_launch(monkeypatch):
         "create_generation": AsyncMock(return_value=generation),
         "update_image_session_last_prompt": AsyncMock(),
         "update_generation_task": AsyncMock(),
+        "persist_nexus_image_submission": AsyncMock(return_value=True),
         "increment_feed_share": AsyncMock(),
     }.items():
         monkeypatch.setattr(repo, name, value)

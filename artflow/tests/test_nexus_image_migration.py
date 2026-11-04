@@ -129,7 +129,7 @@ async def test_generate_image_routes_migrated_models_only_to_nexus(monkeypatch, 
     result = await image_service.generate_image(
         model,
         "test prompt",
-        primary_provider="kie",
+        primary_provider="nexus",
         image_url=refs,
         aspect_ratio="1:1",
         quality="2K",
@@ -232,7 +232,6 @@ def test_provider_inventory_matches_active_image_transports() -> None:
     by_model = {contract.model: contract for contract in IMAGE_CONTRACTS}
     migrated = {
         "nano-banana-pro",
-        "nano-banana-2",
         "gpt-image-2-text-to-image",
         "gpt-image-2-image-to-image",
         "nano-banana-pro-vip",

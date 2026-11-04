@@ -19086,6 +19086,208 @@
         ],
         "x-required-role": "admin"
       }
+    },
+    "/api/web/admin/provider-routing/nano-banana-2": {
+      "get": {
+        "operationId": "admin_get_nano2_provider_api_web_admin_provider_routing_nano_banana_2_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Dev-Tg-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-Tg-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Web-Auth-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Web-Auth-Token"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Telegram-Init-Data",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Telegram-Init-Data"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ],
+        "summary": "Admin Get Nano2 Provider",
+        "tags": [
+          "web-admin"
+        ],
+        "x-required-role": "admin"
+      },
+      "put": {
+        "operationId": "admin_set_nano2_provider_api_web_admin_provider_routing_nano_banana_2_put",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Dev-Tg-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-Tg-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Web-Auth-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Web-Auth-Token"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Telegram-Init-Data",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Telegram-Init-Data"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Nano21ProviderRoutingUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ],
+        "summary": "Admin Set Nano2 Provider",
+        "tags": [
+          "web-admin"
+        ],
+        "x-required-role": "admin"
+      }
     }
   },
   "components": {

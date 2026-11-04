@@ -457,13 +457,16 @@ async def execute_operation(
     primary_provider: str | None = None,
     before_nexus_submit: Callable[[str, dict[str, Any]], Awaitable[None]] | None = None,
     before_kie_submit: Callable[[], Awaitable[None]] | None = None,
+    before_neironych_submit: Callable[[str, dict[str, Any]], Awaitable[None]] | None = None,
 ) -> OperationStart:
     validated = validate_operation_params(spec, params)
-    if spec.model in {"nano-banana-2.1", "seedream/5-pro-text-to-image", "seedream/5-pro-image-to-image"}:
+    if spec.model in {"nano-banana-2", "nano-banana-2.1", "seedream/5-pro-text-to-image", "seedream/5-pro-image-to-image"}:
         if request_id:
             validated["request_id"] = request_id
         if primary_provider:
             validated["primary_provider"] = primary_provider
+        if before_neironych_submit:
+            validated["before_neironych_submit"] = before_neironych_submit
         if before_kie_submit:
             validated["before_kie_submit"] = before_kie_submit
         if before_nexus_submit:
