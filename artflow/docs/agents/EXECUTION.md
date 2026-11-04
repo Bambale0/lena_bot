@@ -2771,3 +2771,12 @@ Steps: [x] root-cause and production preflight; [x] RED/green operator control;
   [x] full relevant suite and migration validation; [ ] independent open code
   review; [ ] protected PR exact-head gates; [ ] merge/autodeploy and live
   migration/worker/health verification with zero broadcast replay.
+
+
+## 2026-11-04 — Seedream 5 Pro Neironych primary
+
+Baseline d5b7ffdbd790b47fdef1477375a1ab8768bbd263. User requests Neironych primary in APIX. Current Seedream routes are KIE only; reuse Nano adapter, correlation/reconciliation and audited routing table. Verified KSU PR #577 contract: seedream-5.0-pro, Images generations/edits, basic=1k/high=2k, eight refs. Keep APIX public keys, tariffs and KIE capability coverage. site/mini_app/telegram_bot share image_service. No migration. Add validated DB-backed control and deterministic durable identities. No fallback after ambiguous acceptance. Acceptance: contract/routing/admin auth/audit/recovery/surface tests, exact-head CI, auto-merge/deploy, live text/edit renders. Steps: 1 audit done; 2 implementation in progress; 3 tests/review pending; 4 CI/deploy/live verification pending.
+
+Review: fixed active scheduler eligibility, executor forwarding and all asynchronous KIE handoff guards. KIE ownership transfer is durable before POST; unknown handoff never repolls Neironych or causes another submit. Unregistered legacy api/web/provider_operations.py has pre-existing broken imports; left untouched (actual site delegates api/web/generations.py to miniapp_routes). Live text completed in 74.2s; live edit completed in 96.5s; both Images statuses completed and persisted public JPEGs downloadable. Seedream HTTP budget is a separate validated 180s setting, preserving Nano timeout.
+
+Verification before delivery: Ruff full application passed; full pytest exit 0 (local infrastructure-dependent DB/Nginx cases skipped; mandatory GitHub CI will exercise those). Focused transport/control/recovery tests and all four missing-reference route/surface combinations passed. Independent standards/spec reviews found no unresolved active-path blocker after fixes. Skills used: backend-integration, verification-before-completion, release-it bounded-timeout/release guidance, code-review two-axis review; searched all mandated sources, no applicable Anthropic-specific skill. No production migration or manual SQL. PR/CI/automatic deploy remain pending.

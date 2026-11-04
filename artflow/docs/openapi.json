@@ -18884,6 +18884,208 @@
           }
         }
       }
+    },
+    "/api/web/admin/provider-routing/seedream-5-pro": {
+      "get": {
+        "tags": [
+          "web-admin"
+        ],
+        "summary": "Admin Get Seedream5 Provider",
+        "operationId": "admin_get_seedream5_provider_api_web_admin_provider_routing_seedream_5_pro_get",
+        "parameters": [
+          {
+            "name": "X-Dev-Tg-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-Tg-Id"
+            }
+          },
+          {
+            "name": "X-Web-Auth-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Web-Auth-Token"
+            }
+          },
+          {
+            "name": "X-Telegram-Init-Data",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Telegram-Init-Data"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
+          }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ],
+        "x-required-role": "admin"
+      },
+      "put": {
+        "tags": [
+          "web-admin"
+        ],
+        "summary": "Admin Set Seedream5 Provider",
+        "operationId": "admin_set_seedream5_provider_api_web_admin_provider_routing_seedream_5_pro_put",
+        "parameters": [
+          {
+            "name": "X-Dev-Tg-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-Tg-Id"
+            }
+          },
+          {
+            "name": "X-Web-Auth-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Web-Auth-Token"
+            }
+          },
+          {
+            "name": "X-Telegram-Init-Data",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Telegram-Init-Data"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Seedream5ProviderRoutingUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated user is not an administrator"
+          },
+          "401": {
+            "description": "Missing, invalid or expired user credentials"
+          }
+        },
+        "security": [
+          {
+            "TelegramInitData": []
+          },
+          {
+            "WebAuthToken": []
+          },
+          {
+            "WebAuthCookie": []
+          }
+        ],
+        "x-required-role": "admin"
+      }
     }
   },
   "components": {
@@ -22532,6 +22734,23 @@
           "hash"
         ],
         "title": "TelegramLoginRequest"
+      },
+      "Seedream5ProviderRoutingUpdate": {
+        "properties": {
+          "primary_provider": {
+            "type": "string",
+            "enum": [
+              "neironych",
+              "kie"
+            ],
+            "title": "Primary Provider"
+          }
+        },
+        "type": "object",
+        "required": [
+          "primary_provider"
+        ],
+        "title": "Seedream5ProviderRoutingUpdate"
       }
     },
     "securitySchemes": {

@@ -4254,3 +4254,45 @@ Responses:
 - `401`: Missing, invalid or expired user credentials
 - `403`: Authenticated user is not an administrator
 - `422`: Validation Error (`application/json`)
+
+#### `GET /api/web/admin/provider-routing/seedream-5-pro`
+
+- Summary: Admin Get Seedream5 Provider
+- Operation ID: `admin_get_seedream5_provider_api_web_admin_provider_routing_seedream_5_pro_get`
+- Auth: yes
+- Request body: none
+
+Parameters:
+
+| Name | In | Required | Type |
+| --- | --- | --- | --- |
+| `X-Dev-Tg-Id` | `header` | no | `string | null` |
+| `X-Web-Auth-Token` | `header` | no | `string | null` |
+| `X-Telegram-Init-Data` | `header` | no | `string | null` |
+
+Responses:
+- `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
+- `422`: Validation Error (`application/json`)
+
+#### `PUT /api/web/admin/provider-routing/seedream-5-pro`
+
+- Summary: Admin Set Seedream5 Provider
+- Operation ID: `admin_set_seedream5_provider_api_web_admin_provider_routing_seedream_5_pro_put`
+- Auth: yes
+- Request body: `application/json`: `Seedream5ProviderRoutingUpdate`
+
+Parameters:
+
+| Name | In | Required | Type |
+| --- | --- | --- | --- |
+| `X-Dev-Tg-Id` | `header` | no | `string | null` |
+| `X-Web-Auth-Token` | `header` | no | `string | null` |
+| `X-Telegram-Init-Data` | `header` | no | `string | null` |
+
+Responses:
+- `200`: Successful Response (`application/json`)
+- `401`: Missing, invalid or expired user credentials
+- `403`: Authenticated user is not an administrator
+- `422`: Validation Error (`application/json`)

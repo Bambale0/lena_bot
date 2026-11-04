@@ -101,6 +101,6 @@ async def test_seedream_boundary_sends_full_prompt_unchanged(monkeypatch, model)
     monkeypatch.setattr(
         image_service, "_prepare_reference_urls_for_model", AsyncMock(return_value=None)
     )
-    result = await image_service.generate_image(model, prompt)
+    result = await image_service.generate_image(model, prompt, image_url="https://example.test/ref.png" if model == ImageModel.SEEDREAM_5_PRO_I2I else None, primary_provider="kie")
     assert result.task_id == "boundary-task"
     assert create.await_args.args[0]["input"]["prompt"] == prompt

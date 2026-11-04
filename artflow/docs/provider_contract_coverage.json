@@ -7,7 +7,7 @@
       "billing": true,
       "contract_id": "image.seedream5.t2i",
       "contract_tests": [
-        "tests/test_nexus_image_migration.py"
+        "tests/test_seedream5_neironych.py"
       ],
       "contract_valid": true,
       "docs_verified_on": "2026-07-26",
@@ -18,12 +18,13 @@
       "modes": [
         "text"
       ],
-      "notes": "KIE Market route restored after persistent Nexus task failures",
+      "notes": "Neironych primary (seedream-5.0-pro); audited DB switch; KIE on definite rejection or unsupported reference count",
       "official_docs": [
+        "https://api.xn--e1aikcel5c5a.online/guide",
         "https://docs.kie.ai/market/seedream/5-pro-text-to-image"
       ],
       "product_ready": true,
-      "provider": "kie",
+      "provider": "neironych",
       "public_api": true,
       "telegram": true
     },
@@ -34,7 +35,7 @@
       "billing": true,
       "contract_id": "image.seedream5.i2i",
       "contract_tests": [
-        "tests/test_nexus_image_migration.py"
+        "tests/test_seedream5_neironych.py"
       ],
       "contract_valid": true,
       "docs_verified_on": "2026-07-26",
@@ -45,12 +46,13 @@
       "modes": [
         "image"
       ],
-      "notes": "KIE Market route restored after persistent Nexus task failures",
+      "notes": "Neironych primary (seedream-5.0-pro); audited DB switch; KIE on definite rejection or unsupported reference count",
       "official_docs": [
+        "https://api.xn--e1aikcel5c5a.online/guide",
         "https://docs.kie.ai/market/seedream/5-pro-image-to-image"
       ],
       "product_ready": true,
-      "provider": "kie",
+      "provider": "neironych",
       "public_api": true,
       "telegram": true
     },

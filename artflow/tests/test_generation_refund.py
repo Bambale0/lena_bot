@@ -51,7 +51,8 @@ class _SessionStub:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("surface", ["web", "miniapp"])
-async def test_missing_reference_admission_refunds_atomically_once(monkeypatch, tmp_path, surface):
+@pytest.mark.parametrize("primary", ["neironych", "kie"])
+async def test_missing_reference_admission_refunds_atomically_once(monkeypatch, tmp_path, surface, primary):
     from fastapi import HTTPException
 
     from api import miniapp_routes, public_files
@@ -60,7 +61,13 @@ async def test_missing_reference_admission_refunds_atomically_once(monkeypatch, 
         id=88, user_id=42, status=GenerationStatus.pending, credits_spent=2,
         input_params="{}", error_msg=None, finished_at=None, task_id=None,
     )
+    monkeypatch.setattr(miniapp_routes, "get_seedream5_route", AsyncMock(return_value=SimpleNamespace(primary_provider=primary)))
     session = _SessionStub(generation, 53.0, generation)
+    async def save_identity(_session, gen_id, task_id, **kwargs):
+        generation.task_id = task_id
+        generation.status = GenerationStatus.processing
+        return True
+    monkeypatch.setattr(repo, "update_generation_task", save_identity)
     monkeypatch.setattr(public_files, "UPLOAD_ROOT", tmp_path)
     monkeypatch.setattr(repo, "_publish_generation_update", AsyncMock())
     monkeypatch.setattr(miniapp_routes, "_reconcile_user_active_generations", AsyncMock())

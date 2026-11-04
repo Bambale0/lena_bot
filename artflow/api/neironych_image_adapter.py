@@ -179,6 +179,10 @@ async def generate_nano_banana21_image(
     payload = build_nano_banana21_payload(
         prompt=prompt, image_urls=image_urls, aspect_ratio=aspect_ratio, quality=quality
     )
+    return await _generate_image(payload, request_id=request_id, subdir="nano-banana-2.1")
+
+
+async def _generate_image(payload: dict[str, Any], *, request_id: str | None, subdir: str, timeout_seconds: float | None = None) -> str:
     request_id = str(uuid.UUID(request_id)) if request_id else str(uuid.uuid4())
     base_url = _https_base_url()  # Fail closed before constructing bearer headers.
     api_key = str(settings.NEIRONYCH_API_KEY or "").strip()
@@ -196,7 +200,7 @@ async def generate_nano_banana21_image(
         "Content-Type": "application/json",
     }
     try:
-        async with httpx.AsyncClient(timeout=settings.NEIRONYCH_IMAGE_TIMEOUT_SECONDS) as client:
+        async with httpx.AsyncClient(timeout=timeout_seconds or settings.NEIRONYCH_IMAGE_TIMEOUT_SECONDS) as client:
             response = await client.post(url, json=payload, headers=headers)
     except httpx.RequestError as exc:
         logger.error("Neironych image outcome unknown request_id=%s reason=%s", request_id, type(exc).__name__)
@@ -240,17 +244,17 @@ async def generate_nano_banana21_image(
         if not image or len(image) > max_bytes:
             raise ValueError("invalid or oversized image")
         await asyncio.to_thread(_verified_image_bytes, image)
-        saved_url = save_public_file(image, subdir="generated/nano-banana-2.1")
+        saved_url = save_public_file(image, subdir=f"generated/{subdir}")
     except (ValueError, KeyError, TypeError, IndexError, binascii.Error, OSError) as exc:
         logger.exception("Neironych image response/persistence error request_id=%s", request_id)
         raise NeironychImageError(
             "Neironych image returned an unusable result; no automatic provider failover",
             request_id=request_id,
         ) from exc
-    logger.info("Neironych image completed model=%s request_id=%s", MODEL_NAME, request_id)
+    logger.info("Neironych image completed model=%s request_id=%s", payload["model"], request_id)
     return saved_url
 
-async def fetch_nano_banana21_status(request_id: str) -> dict[str, Any]:
+async def fetch_nano_banana21_status(request_id: str, *, expected_model: str | None = None) -> dict[str, Any]:
     """Read persisted provider status by correlation UUID. A missing record is not a failure."""
     rid = str(uuid.UUID(request_id))
     base = _https_base_url()
@@ -276,7 +280,7 @@ async def fetch_nano_banana21_status(request_id: str) -> dict[str, Any]:
         body = response.json()
         if not isinstance(body, dict):
             raise ValueError("status response must be an object")
-        if body.get("model_slug") != MODEL_NAME:
+        if body.get("model_slug") not in ({expected_model} if expected_model else {MODEL_NAME, "seedream-5.0-pro"}):
             raise ValueError("reconciled generation model mismatch")
         state = str(body.get("status") or "").lower()
         if state not in {
@@ -294,3 +298,50 @@ async def fetch_nano_banana21_status(request_id: str) -> dict[str, Any]:
         }
     except (ValueError, TypeError, IndexError) as exc:
         raise NeironychImageError("Invalid reconciliation response", request_id=rid) from exc
+
+
+
+def build_seedream5_payload(
+    *, prompt: str, image_urls: list[str] | None = None,
+    aspect_ratio: str | None = None, quality: str = "basic",
+) -> dict[str, Any]:
+    from api.image_prompt_limits import validate_image_prompt
+    prompt = str(prompt or "").strip()
+    validate_image_prompt("seedream/5-pro-text-to-image", prompt)
+    if not prompt:
+        raise ValueError("Image prompt is required")
+    ratio = str(aspect_ratio or "1:1").strip()
+    if ratio not in {"1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"}:
+        raise ValueError("Unsupported Seedream 5 Pro aspect ratio")
+    resolution = {"basic": "1k", "high": "2k", "1k": "1k", "2k": "2k"}.get(str(quality).lower())
+    if resolution is None:
+        raise ValueError("Unsupported Seedream 5 Pro quality")
+    refs = [str(url).strip() for url in image_urls or []]
+    if len(refs) > 8:
+        raise ValueError("Neironych Seedream 5 Pro supports at most eight references")
+    for ref in refs:
+        parsed = urlparse(ref)
+        if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+            raise ValueError("Seedream references must be public HTTPS URLs")
+    payload: dict[str, Any] = {
+        "model": "seedream-5.0-pro", "prompt": prompt, "n": 1,
+        "resolution": resolution, "aspect_ratio": ratio, "response_format": "b64_json",
+    }
+    if refs:
+        payload["images"] = [{"image_url": ref} for ref in refs]
+    return payload
+
+
+async def generate_seedream5_image(
+    *, prompt: str, image_urls: list[str] | None = None,
+    aspect_ratio: str | None = None, quality: str = "basic", request_id: str | None = None,
+) -> str:
+    payload = build_seedream5_payload(
+        prompt=prompt, image_urls=image_urls, aspect_ratio=aspect_ratio, quality=quality,
+    )
+    return await _generate_image(payload, request_id=request_id, subdir="seedream-5-pro", timeout_seconds=settings.SEEDREAM_5_IMAGE_TIMEOUT_SECONDS)
+
+
+
+def encode_kie_handoff_id(request_id: str) -> str:
+    return "kie-submit:" + str(uuid.UUID(request_id))

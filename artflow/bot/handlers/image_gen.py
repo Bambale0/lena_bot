@@ -93,7 +93,7 @@ from core.feed_remix_prompt import (
     trusted_feed_image_scene,
 )
 from core.model_pricing import pricing_variant_key
-from core.provider_routing import get_nano21_route
+from core.provider_routing import SEEDREAM_5_MODELS, get_nano21_route, get_seedream5_route
 from db import repository as repo
 from db.models import (
     Generation,
@@ -1478,7 +1478,8 @@ async def _launch_session_generation(
 
     image_primary = (
         (await get_nano21_route(session)).primary_provider
-        if model == ImageModel.NANO_BANANA_21 else None
+        if model == ImageModel.NANO_BANANA_21 else
+        (await get_seedream5_route(session)).primary_provider if model.value in SEEDREAM_5_MODELS else None
     )
 
     if _requires_reference_image(image_session.model) and not reference_url:
@@ -1531,8 +1532,18 @@ async def _launch_session_generation(
     status_msg = await source_message.answer(launching_text)
     image_request_id = (
         neironych_image_adapter.client_request_id_for_generation(gen.id)
-        if model == ImageModel.NANO_BANANA_21 else None
+        if model == ImageModel.NANO_BANANA_21 or (model.value in SEEDREAM_5_MODELS and image_primary == "neironych") else None
     )
+
+    async def persist_kie_handoff() -> None:
+        if not image_request_id:
+            return
+        saved = await repo.update_generation_task(
+            session, gen.id, neironych_image_adapter.encode_kie_handoff_id(image_request_id),
+            expected_task_id=neironych_image_adapter.encode_task_id(image_request_id),
+        )
+        if not saved:
+            raise RuntimeError("Seedream KIE handoff lost generation ownership")
 
     async def persist_nexus_submission(request_id: str, snapshot: dict) -> None:
         saved = await repo.persist_nexus_image_submission(
@@ -1592,6 +1603,7 @@ async def _launch_session_generation(
             request_id=image_request_id,
             primary_provider=image_primary,
             before_nexus_submit=persist_nexus_submission,
+            before_kie_submit=persist_kie_handoff,
         )
     except nexus_image_adapter.NexusImageSubmissionUnknown as exc:
         settlement = await settle_image_http_5xx(
@@ -1665,8 +1677,10 @@ async def _launch_session_generation(
     prompt_for_menu = prompt if prompt_actions_allowed else None
     expected_task_id = (
         nexus_image_adapter.encode_submission_id(image_request_id)
-        if image_request_id and getattr(result, "is_async", True)
-        else neironych_image_adapter.encode_task_id(image_request_id) if image_request_id else None
+        if image_request_id and getattr(result, "is_async", True) and model.value not in SEEDREAM_5_MODELS
+        else (neironych_image_adapter.encode_kie_handoff_id(image_request_id)
+              if model.value in SEEDREAM_5_MODELS and getattr(result, "is_async", True)
+              else neironych_image_adapter.encode_task_id(image_request_id)) if image_request_id else None
     )
     guard = {"expected_task_id": expected_task_id} if expected_task_id else {}
     await repo.update_generation_task(session, gen.id, result.task_id or "", **guard)

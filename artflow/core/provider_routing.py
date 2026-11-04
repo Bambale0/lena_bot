@@ -12,7 +12,7 @@ from core.config import settings
 from db.models import ProviderRoutingAudit, ProviderRoutingSetting
 
 NANO_21_MODEL = "nano-banana-2.1"
-PrimaryProvider = Literal["neironych", "nexus"]
+PrimaryProvider = Literal["neironych", "nexus", "kie"]
 _ALLOWED = frozenset({"neironych", "nexus"})
 
 
@@ -77,3 +77,46 @@ async def set_nano21_route(
         NANO_21_MODEL, record.primary_provider, "database",
         record.updated_by_admin_tg_id
     )
+
+
+SEEDREAM_5_MODEL = "seedream-5.0-pro"
+SEEDREAM_5_MODELS = frozenset({"seedream/5-pro-text-to-image", "seedream/5-pro-image-to-image"})
+SeedreamProvider = Literal["neironych", "kie"]
+
+
+async def get_seedream5_route(session: AsyncSession) -> ProviderRoute:
+    record = await session.get(ProviderRoutingSetting, SEEDREAM_5_MODEL)
+    if record is not None:
+        if record.primary_provider not in {"neironych", "kie"}:
+            raise ValueError("Unsupported Seedream 5 Pro provider")
+        return ProviderRoute(SEEDREAM_5_MODEL, record.primary_provider, "database", record.updated_by_admin_tg_id)
+    return ProviderRoute(SEEDREAM_5_MODEL, settings.SEEDREAM_5_PRIMARY_PROVIDER, "environment")
+
+
+async def set_seedream5_route(
+    session: AsyncSession, primary_provider: SeedreamProvider, *,
+    admin_tg_id: int, source: Literal["telegram", "web"],
+) -> ProviderRoute:
+    if primary_provider not in {"neironych", "kie"}:
+        raise ValueError("Unsupported Seedream 5 Pro provider")
+    if not int(admin_tg_id) or source not in {"telegram", "web"}:
+        raise ValueError("Valid audit actor and source are required")
+    await session.execute(
+        pg_insert(ProviderRoutingSetting).values(
+            model_key=SEEDREAM_5_MODEL, primary_provider=settings.SEEDREAM_5_PRIMARY_PROVIDER,
+            updated_by_admin_tg_id=None,
+        ).on_conflict_do_nothing(index_elements=["model_key"])
+    )
+    record = (await session.execute(
+        select(ProviderRoutingSetting).where(ProviderRoutingSetting.model_key == SEEDREAM_5_MODEL).with_for_update()
+    )).scalar_one()
+    previous = record.primary_provider
+    if previous != primary_provider:
+        record.primary_provider = primary_provider
+        record.updated_by_admin_tg_id = int(admin_tg_id)
+        session.add(ProviderRoutingAudit(
+            model_key=SEEDREAM_5_MODEL, previous_provider=previous, new_provider=primary_provider,
+            changed_by_admin_tg_id=int(admin_tg_id), source=source,
+        ))
+    await session.commit()
+    return ProviderRoute(SEEDREAM_5_MODEL, record.primary_provider, "database", record.updated_by_admin_tg_id)
