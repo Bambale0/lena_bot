@@ -299,6 +299,7 @@ def _model_selector_kb():
             callback_data="nxt:model:hf-seedance25-edit",
         )
     )
+    builder.row(InlineKeyboardButton(text="🖼 Нейроныч · Nano Banana Pro", callback_data="nxt:model:neur-nano-pro"))
     builder.row(InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:main"))
     return builder.as_markup()
 
