@@ -36,6 +36,7 @@ def _base_case(contract_id: str) -> dict[str, Any]:
             "image.nano2",
             "image.nano2.lite",
             "image.nano.pro",
+            "image.gpt25",
             "image.gpt2.i2i",
         }:
             params["image_url"] = IMAGE_URL

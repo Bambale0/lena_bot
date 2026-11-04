@@ -299,3 +299,17 @@ async def test_gpt25_definite_rejection_refunds_immediately(monkeypatch, entry):
     assert gen.status == GenerationStatus.failed
     settlement.assert_awaited_once()
 
+
+def test_gpt25_preserves_square_4k_alongside_existing_gpt2_support():
+    assert image_service.normalize_quality_for_aspect_ratio("gpt-image-2.5-sunburst", "1:1", "4K") == "4K"
+    assert image_service.normalize_quality_for_aspect_ratio("gpt-image-2-text-to-image", "1:1", "4K") == "4K"
+
+
+def test_gpt_contracts_link_primary_and_smoke_covers_edit():
+    from api.provider_contract_catalog import IMAGE_CONTRACTS
+    from api.provider_smoke_manifest import SMOKE_CASES
+    for item in IMAGE_CONTRACTS:
+        if item.contract_id in {"image.gpt2.t2i", "image.gpt2.i2i"}:
+            assert any("xn--e1aikcel5c5a.online" in url for url in item.official_docs)
+    assert SMOKE_CASES["image.gpt25"].params["image_url"]
+

@@ -109,7 +109,6 @@ _SQUARE_4K_UNSUPPORTED_MODELS: set[ImageModel] = {
     ImageModel.NANO_BANANA_PRO,
     ImageModel.GPT_IMAGE_2_T2I,
     ImageModel.GPT_IMAGE_2_I2I,
-    ImageModel.GPT_IMAGE_25,
     ImageModel.NANO_BANANA_PRO_VIP,
 }
 
