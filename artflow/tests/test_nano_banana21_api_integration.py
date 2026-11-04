@@ -16,10 +16,11 @@ from main import app
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("model", ["nano-banana-2.1", "seedream/5-pro-text-to-image", "seedream/5-pro-image-to-image"])
 @pytest.mark.parametrize("http_status", [None, 502, 503])
-async def test_miniapp_neironych_submit_settles_explicit_5xx_only(monkeypatch, http_status):
+async def test_miniapp_neironych_submit_settles_explicit_5xx_only(monkeypatch, http_status, model):
     gen = SimpleNamespace(
-        id=8101, user_id=10, model="nano-banana-2.1",
+        id=8101, user_id=10, model=model,
         gen_type=GenerationType.image, prompt="test photo",
         task_id=None, status=GenerationStatus.pending,
         result_url=None, result_urls=None, credits_spent=2,
@@ -59,6 +60,7 @@ async def test_miniapp_neironych_submit_settles_explicit_5xx_only(monkeypatch, h
         events.append("atomic_refund")
         return True, 2.0
     settlement = AsyncMock(side_effect=settle_5xx)
+    monkeypatch.setattr(miniapp_routes, "get_seedream5_route", AsyncMock(return_value=ProviderRoute(model, "neironych", "database")))
     monkeypatch.setattr(miniapp_routes, "get_nano21_route",
                         AsyncMock(return_value=ProviderRoute("nano-banana-2.1", "neironych", "database")))
     monkeypatch.setattr(miniapp_routes, "_reconcile_user_active_generations", AsyncMock())
@@ -90,7 +92,8 @@ async def test_miniapp_neironych_submit_settles_explicit_5xx_only(monkeypatch, h
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post("/api/v1/generate/image", json={
-                "model": "nano-banana-2.1", "prompt": "test photo", "quality": "2K",
+                "model": model, "prompt": "test photo", "quality": "2K" if model == "nano-banana-2.1" else "basic",
+                **({"reference_url": "https://example.test/ref.png"} if model.endswith("image-to-image") else {}),
             })
     finally:
         app.dependency_overrides.clear()

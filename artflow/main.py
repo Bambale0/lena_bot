@@ -1747,7 +1747,10 @@ async def kie_webhook(
         if not gen and apix_generation_id is not None and apix_generation_sig:
             # The signed URL was minted before Kie's paid POST; it survives
             # lost submit replies, process crashes and callback race ordering.
-            gen = await repo.bind_kie_video_callback(session, apix_generation_id, task_id)
+            from core.seedream5_recovery import bind_kie_callback
+            gen = await bind_kie_callback(session, apix_generation_id, task_id)
+            if gen is None:
+                gen = await repo.bind_kie_video_callback(session, apix_generation_id, task_id)
         if not gen:
             logger.warning("KIE webhook for unknown task_id=%s lookup_task_id=%s", safe_identifier(task_id), safe_identifier(lookup_task_id))
             return {"ok": True}
@@ -1799,6 +1802,12 @@ async def kie_webhook(
             # KIE HMAC does not bind the body. Always read authoritative state.
             from api.kling4_status import canonical_kling4_status
             payload = await canonical_kling4_status(task_id, expected_model=gen.model)
+            if is_processing(payload):
+                return {"ok": True}
+        from core.provider_routing import SEEDREAM_5_MODELS
+        if gen.gen_type == GenerationType.image and gen.model in SEEDREAM_5_MODELS:
+            from core.seedream5_recovery import canonical_kie_status
+            payload = await canonical_kie_status(task_id)
             if is_processing(payload):
                 return {"ok": True}
         strict_wan_video = gen.gen_type == GenerationType.video and gen.model in (WAN30_MODELS | KLING4_MODELS)

@@ -36,6 +36,7 @@ def bound_preview(url=SOURCE_IMAGE, *, index=0, display=False):
 
 @pytest.fixture
 def image_launch(monkeypatch):
+    monkeypatch.setattr(image_gen, "get_seedream5_route", AsyncMock(return_value=SimpleNamespace(primary_provider="neironych")))
     monkeypatch.setattr(
         image_gen, "get_feed_recipe_identity_instruction", AsyncMock(return_value=IDENTITY_RULE),
     )
@@ -447,6 +448,7 @@ def api_launch(monkeypatch):
     from datetime import datetime, timezone
 
     from api import miniapp_routes
+    monkeypatch.setattr(miniapp_routes, "get_seedream5_route", AsyncMock(return_value=SimpleNamespace(primary_provider="neironych")))
     from db.models import GenerationStatus
 
     monkeypatch.setattr(miniapp_routes.settings, "WEB_PUBLIC_URL", "https://apixbotai.com")
@@ -1331,3 +1333,52 @@ async def test_selected_result_quote_and_submission_match_on_both_surfaces(api_l
     assert api_launch.generate.await_args.kwargs["image_url"] == USER_IMAGE
     prompt = api_launch.generate.await_args.args[1]
     assert SECRET in prompt
+
+
+
+@pytest.mark.asyncio
+async def test_seedream_bot_kie_handoff_keeps_task_identity(image_launch):
+    from api.image_service import ImageResult
+    from api.neironych_image_adapter import encode_kie_handoff_id, encode_task_id
+    image_launch.kwargs["image_session"].model = "seedream/5-pro-image-to-image"
+    gen = image_launch.repo.create_generation.return_value
+    gen.task_id = None
+    async def save_task(session, gen_id, task_id, **kwargs):
+        if "expected_task_id" in kwargs:
+            assert gen.task_id == kwargs["expected_task_id"]
+        gen.task_id = task_id
+        return True
+    image_launch.repo.update_generation_task.side_effect = save_task
+    async def fallback(model, prompt, **kwargs):
+        rid = kwargs["request_id"]
+        assert gen.task_id == encode_task_id(rid)
+        await kwargs["before_kie_submit"]()
+        assert gen.task_id == encode_kie_handoff_id(rid)
+        return ImageResult(is_async=True, task_id="kie-seedream-fallback")
+    image_launch.generate.side_effect = fallback
+    assert await image_gen._launch_session_generation(**image_launch.kwargs) is True
+    assert gen.task_id == "kie-seedream-fallback"
+
+
+@pytest.mark.asyncio
+async def test_seedream_feed_kie_handoff_keeps_task_identity(api_launch):
+    from api.image_service import ImageResult
+    from api.neironych_image_adapter import encode_kie_handoff_id, encode_task_id
+    gen = api_launch.routes.repo.create_generation.return_value
+    gen.task_id = None
+    async def save_task(session, gen_id, task_id, **kwargs):
+        if "expected_task_id" in kwargs:
+            assert gen.task_id == kwargs["expected_task_id"]
+        gen.task_id = task_id
+        return True
+    api_launch.routes.repo.update_generation_task.side_effect = save_task
+    async def fallback(model, prompt, **kwargs):
+        rid = kwargs["request_id"]
+        assert gen.task_id == encode_task_id(rid)
+        await kwargs["before_kie_submit"]()
+        assert gen.task_id == encode_kie_handoff_id(rid)
+        return ImageResult(is_async=True, task_id="kie-seedream-fallback")
+    api_launch.generate.side_effect = fallback
+    body = api_launch.routes.FeedRemixRequest(model="seedream/5-pro-image-to-image", image_url=USER_IMAGE)
+    await api_launch.routes.remix_feed_post(77, body, api_launch.session, api_launch.user)
+    assert gen.task_id == "kie-seedream-fallback"

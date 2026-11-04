@@ -314,8 +314,9 @@ async def create_task(
     # must never cause the old three-POST retry path to charge multiple times.
     from api.kling4_contract import KLING4_MODELS
     from api.wan30_contract import WAN30_MODELS
+    from core.provider_routing import SEEDREAM_5_MODELS
     from core.seedance_reconciliation import PRODUCT_MODELS
-    if request_payload.get("model") in PRODUCT_MODELS | WAN30_MODELS | KLING4_MODELS:
+    if request_payload.get("model") in PRODUCT_MODELS | WAN30_MODELS | KLING4_MODELS | SEEDREAM_5_MODELS:
         return await _create_task_once(request_payload)
     return await _retry_post("/api/v1/jobs/createTask", request_payload)
 

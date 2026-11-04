@@ -492,6 +492,7 @@ async def generate_image(
     request_id: str | None = None,
     primary_provider: str | None = None,
     before_nexus_submit: Callable[[str, dict[str, Any]], Awaitable[None]] | None = None,
+    before_kie_submit: Callable[[], Awaitable[None]] | None = None,
 ) -> ImageResult:
     del image_bytes, image_mime, size
 
@@ -540,6 +541,31 @@ async def generate_image(
             before_submit=before_nexus_submit,
         )
         return ImageResult(is_async=True, task_id=task_id, provider="nexus")
+
+    if model in {ImageModel.SEEDREAM_5_PRO_T2I, ImageModel.SEEDREAM_5_PRO_I2I}:
+        refs = _reference_list(image_url)
+        chosen_primary = primary_provider or settings.SEEDREAM_5_PRIMARY_PROVIDER
+        if chosen_primary not in {"neironych", "kie"}:
+            raise ValueError("Unsupported Seedream 5 Pro primary provider")
+        for ref in refs:
+            local_path = local_upload_path_from_url(ref)
+            if local_path is not None and not local_path.is_file():
+                raise ImageReferenceUnavailable("Не удалось загрузить исходное изображение. Загрузи фото заново.")
+        if model == ImageModel.SEEDREAM_5_PRO_I2I and not refs:
+            raise ImageReferenceUnavailable("Загрузи исходное изображение и повтори запрос.")
+        if chosen_primary == "neironych" and n == 1 and len(refs) <= 8:
+            try:
+                result_url = await neironych_image_adapter.generate_seedream5_image(
+                    prompt=prompt, image_urls=refs, aspect_ratio=aspect_ratio,
+                    quality=quality, request_id=request_id,
+                )
+            except neironych_image_adapter.NeironychImageRejected as exc:
+                logger.warning("Seedream 5 Pro rejected before acceptance status=%s; using KIE", exc.status_code)
+            else:
+                return ImageResult(
+                    is_async=False, url=result_url, result_urls=[result_url], provider="neironych",
+                    task_id=neironych_image_adapter.encode_task_id(request_id) if request_id else None,
+                )
 
     if nexus_image_adapter.is_nexus_image_model(model.value):
         task_id = await nexus_image_adapter.create_nexus_image_task(
@@ -629,8 +655,12 @@ async def generate_image(
             result_urls=result.urls,
         )
 
+    if model in {ImageModel.SEEDREAM_5_PRO_T2I, ImageModel.SEEDREAM_5_PRO_I2I} and before_kie_submit:
+        await before_kie_submit()
     try:
         return await _create_kie_image_task(resolved_model, inp, callback_url=callback_url)
+    except kieai_client.KieSubmissionOutcomeUnknown:
+        raise
     except Exception as exc:
         raise RuntimeError(
             f"{resolved_model} fallback disabled to prevent model substitution; "

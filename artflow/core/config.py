@@ -68,6 +68,8 @@ class Settings(BaseSettings):
     NEIRONYCH_QWEN38_TIMEOUT_SECONDS: float = Field(default=90.0, ge=1.0, le=180.0)
     KIE_VIDEO_PROMPT_MODEL: str = "gemini-3.1-pro"
     # Nano Banana 2.1: Neironych synchronous primary, Nexus async fallback.
+    SEEDREAM_5_IMAGE_TIMEOUT_SECONDS: float = Field(default=110.0, ge=10.0, le=110.0)
+    SEEDREAM_5_PRIMARY_PROVIDER: Literal["neironych", "kie"] = "neironych"
     NANO_BANANA_21_PRIMARY_PROVIDER: Literal["neironych", "nexus"] = "neironych"
     # Keep below APIX's current nginx proxy_read_timeout (120s); this is a paid synchronous POST.
     NEIRONYCH_IMAGE_TIMEOUT_SECONDS: float = Field(default=100.0, ge=10.0, le=600.0)

@@ -57,7 +57,12 @@ from bot.services.maintenance_mode import is_maintenance_mode, set_maintenance_m
 from bot.states import AdminStates
 from bot.utils.telegram_ui import safe_answer_callback
 from core.model_pricing import pricing_variant_key
-from core.provider_routing import get_nano21_route, set_nano21_route
+from core.provider_routing import (
+    get_nano21_route,
+    get_seedream5_route,
+    set_nano21_route,
+    set_seedream5_route,
+)
 from db import broadcast_repository
 from db import repository as repo
 from db.models import (
@@ -127,6 +132,7 @@ def admin_menu_kb():
     builder.button(text="🎟 Промокоды", callback_data="adm:promos")
     builder.button(text="🧩 Nexus модели", callback_data="adm:nexus_models")
     builder.button(text="🔀 Banana 2.1 провайдер", callback_data="adm:nano21_route")
+    builder.button(text="🔀 Seedream 5 Pro провайдер", callback_data="adm:seedream5_route")
     builder.button(text="🥷 Genjutsu цены", callback_data="adm:genjutsu_prices")
     builder.button(text="⚙️ Стоимость моделей", callback_data="adm:models")
     builder.button(text="♾ Фото-безлимит", callback_data="adm:image_unlimited")
@@ -2559,3 +2565,40 @@ async def cb_broadcast_send(call: CallbackQuery, state: FSMContext, session: Asy
         "Статус и итоговые счётчики обновятся в сообщении выше.",
         reply_markup=admin_menu_kb(),
     )
+
+
+
+def _seedream5_provider_kb(primary: str) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for provider, label in (("neironych", "Нейроныч"), ("kie", "KIE")):
+        builder.button(text=f"{'✅ ' if primary == provider else ''}{label}", callback_data=f"adm:seedream5_primary:{provider}")
+    builder.button(text="← Админ-панель", callback_data="adm:back")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+@router.callback_query(F.data == "adm:seedream5_route")
+async def cb_seedream5_route(call: CallbackQuery, session: AsyncSession) -> None:
+    route = await get_seedream5_route(session)
+    await call.message.edit_text(
+        f"🔀 <b>Seedream 5 Pro</b>\nОсновной провайдер: <b>{route.primary_provider}</b>\n"
+        "Для текста и фото на сайте, в Mini App и боте. Резерв: KIE при подтверждённом отказе. "
+        "При неопределённом результате повтор не создаётся.",
+        reply_markup=_seedream5_provider_kb(route.primary_provider),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("adm:seedream5_primary:"))
+async def cb_seedream5_primary(call: CallbackQuery, session: AsyncSession) -> None:
+    requested = (call.data or "").rsplit(":", 1)[-1]
+    if requested not in {"neironych", "kie"}:
+        await call.answer("Недопустимый провайдер", show_alert=True)
+        return
+    route = await set_seedream5_route(session, requested, admin_tg_id=call.from_user.id, source="telegram")
+    await call.message.edit_text(
+        f"✅ <b>Seedream 5 Pro</b>\nОсновной провайдер: <b>{route.primary_provider}</b>\n"
+        "Изменение применено для новых задач и записано в журнал.",
+        reply_markup=_seedream5_provider_kb(route.primary_provider),
+    )
+    await call.answer()

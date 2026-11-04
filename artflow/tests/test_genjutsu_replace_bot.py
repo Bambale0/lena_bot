@@ -244,8 +244,11 @@ async def test_history_restores_exact_content_edit_before_charging(
 
 @pytest.mark.asyncio
 async def test_provider_rejection_refunds_once_and_keeps_editable_draft(
-    state, io, billing, provider
+    state, io, billing, provider, monkeypatch
 ):
+    from api import kieai_client
+    # Both paid provider boundaries are synthetic, including the fallback.
+    monkeypatch.setattr(kieai_client, "create_task", AsyncMock(side_effect=kieai_client.KieDefiniteRejection("synthetic rejection")))
     provider.side_effect = RuntimeError("provider rejected")
     await ready(state, io)
     token = (await state.get_data())["gj_token"]

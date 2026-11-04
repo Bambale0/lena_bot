@@ -14,6 +14,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from api import neironych_image_adapter
 from api.nexus_image_adapter import NEXUS_IMAGE_MODEL_MAP
 from core.config import settings
+from core.provider_routing import SEEDREAM_5_MODELS
 from db import repository as repo
 from db.models import Generation, GenerationStatus, GenerationType
 from db.session import AsyncSessionLocal
@@ -33,8 +34,8 @@ def _eligible_query():
         Generation.status.in_((GenerationStatus.pending, GenerationStatus.processing)),
         or_(
             (
-                (Generation.model == "nano-banana-2.1")
-                & Generation.task_id.like("%neironych-image:%")
+                Generation.model.in_(("nano-banana-2.1", *sorted(SEEDREAM_5_MODELS)))
+                & or_(Generation.task_id.like("%neironych-image:%"), Generation.task_id.like("%kie-submit:%"))
             ),
             (
                 Generation.model.in_(tuple(NEXUS_IMAGE_MODEL_MAP))

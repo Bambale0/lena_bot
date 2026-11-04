@@ -155,7 +155,7 @@ from core.neironych_video_poll_gate import (
     neironych_video_poll_guard,
     protect_neironych_video_poll_settlement,
 )
-from core.provider_routing import get_nano21_route
+from core.provider_routing import SEEDREAM_5_MODELS, get_nano21_route, get_seedream5_route
 from core.repeat_duration import duration_offer, resolve_repeat_duration
 from core.seedance_reconciliation import (
     handle_submission_not_sent,
@@ -709,7 +709,9 @@ async def _reconcile_neironych_image_generation(
         return await repo.get_generation_by_id(session, gen.id)
 
     try:
-        state = await neironych_image_adapter.fetch_nano_banana21_status(request_id)
+        state = await neironych_image_adapter.fetch_nano_banana21_status(
+            request_id, **({"expected_model": "seedream-5.0-pro"} if str(getattr(gen, "model", "")) in SEEDREAM_5_MODELS else {}),
+        )
     except Exception as exc:
         logger.warning("Neironych image reconciliation delayed gen=%s request_id=%s error=%s",
                        gen.id, request_id, type(exc).__name__)
@@ -887,6 +889,10 @@ async def _reconcile_generation_status(session: AsyncSession, gen):
             # Keep the charge and generation active for safe manual recovery.
             return gen
     task_id = provider_task_id(stored_task_id)
+    if gen.gen_type == GenerationType.image and task_id.startswith("kie-submit:"):
+        # A signed callback can bind a lost KIE submit response. Do not refund
+        # or resubmit an image whose paid acceptance is unknown.
+        return gen
     if gen.gen_type == GenerationType.video and task_id.startswith("kie-submit:"):
         # A submission journal marker is not a provider task ID. A delayed
         # signed webhook may still bind it; never poll KIE with this marker
@@ -3078,7 +3084,8 @@ async def create_image_generation(
         raise HTTPException(status_code=422, detail="Model not available")
     image_primary = (
         (await get_nano21_route(session)).primary_provider
-        if model == ImageModel.NANO_BANANA_21 else None
+        if model == ImageModel.NANO_BANANA_21 else
+        (await get_seedream5_route(session)).primary_provider if model.value in SEEDREAM_5_MODELS else None
     )
 
     max_refs = int(caps.get("max_refs", 1) or 1)
@@ -3139,8 +3146,18 @@ async def create_image_generation(
 
     image_request_id = (
         neironych_image_adapter.client_request_id_for_generation(gen.id)
-        if model == ImageModel.NANO_BANANA_21 else None
+        if model == ImageModel.NANO_BANANA_21 or model.value in SEEDREAM_5_MODELS else None
     )
+
+    async def persist_kie_handoff() -> None:
+        if not image_request_id:
+            return
+        saved = await repo.update_generation_task(
+            session, gen.id, task_id_for_surface(neironych_image_adapter.encode_kie_handoff_id(image_request_id), surface),
+            expected_task_id=task_id_for_surface(neironych_image_adapter.encode_task_id(image_request_id), surface),
+        )
+        if not saved:
+            raise RuntimeError("Seedream KIE handoff lost generation ownership")
 
     async def persist_nexus_submission(request_id: str, snapshot: dict) -> None:
         saved = await repo.persist_nexus_image_submission(
@@ -3157,7 +3174,7 @@ async def create_image_generation(
             # Commit a provider-specific recovery identity before every paid POST.
             initial_identity = (
                 neironych_image_adapter.encode_task_id(image_request_id)
-                if image_primary == "neironych"
+                if image_primary == "neironych" or model.value in SEEDREAM_5_MODELS
                 else nexus_image_adapter.encode_submission_id(image_request_id)
             )
             await repo.update_generation_task(
@@ -3170,15 +3187,22 @@ async def create_image_generation(
             aspect_ratio=normalized_ratio,
             n=body.count,
             quality=normalized_quality,
-            callback_url=_kie_callback_url(),
+            callback_url=callback_url_for_generation(_kie_callback_url(), gen.id) if model.value in SEEDREAM_5_MODELS else _kie_callback_url(),
             request_id=image_request_id,
             primary_provider=image_primary,
             before_nexus_submit=persist_nexus_submission,
+            before_kie_submit=persist_kie_handoff,
         )
+    except KieSubmissionOutcomeUnknown:
+        logger.warning("Seedream KIE acceptance unknown gen=%s; awaiting signed callback", gen.id)
+        await session.rollback()
+        await session.refresh(gen)
+        return _gen_out(gen)
     except ImageReferenceUnavailable as exc:
         await repo.fail_generation_and_refund(
             session, gen.id, str(exc), refund_note="image:reference_admission_failed",
-            require_missing_task_id=True,
+            **({"expected_task_id": task_id_for_surface(neironych_image_adapter.encode_task_id(image_request_id), surface)}
+               if image_request_id and model.value in SEEDREAM_5_MODELS else {"require_missing_task_id": True}),
         )
         raise HTTPException(status_code=422, detail=image_generation_user_error(exc)) from exc
     except nexus_image_adapter.NexusImageSubmissionUnknown as exc:
@@ -3243,7 +3267,8 @@ async def create_image_generation(
     else:
         await repo.update_generation_task(
             session, gen.id, task_id_for_surface(result.task_id or "", surface),
-            **({"expected_task_id": task_id_for_surface(nexus_image_adapter.encode_submission_id(image_request_id), surface)}
+            **({"expected_task_id": task_id_for_surface((neironych_image_adapter.encode_kie_handoff_id(image_request_id)
+                    if str(model.value) in SEEDREAM_5_MODELS else nexus_image_adapter.encode_submission_id(image_request_id)), surface)}
                if image_request_id else {}),
         )
     await repo.update_image_session_last_prompt(session, image_session.id, None if prompt_meta["hidden_prompt"] else user_prompt)
@@ -4874,7 +4899,8 @@ async def remix_feed_post(
     image_primary = (
         (await get_nano21_route(session)).primary_provider
         if gen_type == "image" and body.model == ImageModel.NANO_BANANA_21.value
-        else None
+        else (await get_seedream5_route(session)).primary_provider
+        if gen_type == "image" and body.model in SEEDREAM_5_MODELS else None
     )
 
     if gen_type == "video":
@@ -4955,8 +4981,8 @@ async def remix_feed_post(
     failed_user_id = user.id
     image_request_id = (
         neironych_image_adapter.client_request_id_for_generation(gen.id)
-        if gen_type == "image" and body.model == ImageModel.NANO_BANANA_21.value
-        else None
+        if gen_type == "image" and (body.model == ImageModel.NANO_BANANA_21.value
+            or body.model in SEEDREAM_5_MODELS) else None
     )
 
     submission_context = (
@@ -4969,6 +4995,16 @@ async def remix_feed_post(
     ):
         await session.refresh(gen)
         return _gen_out(gen)
+
+    async def persist_kie_handoff() -> None:
+        if not image_request_id:
+            return
+        saved = await repo.update_generation_task(
+            session, gen.id, task_id_for_surface(neironych_image_adapter.encode_kie_handoff_id(image_request_id), surface),
+            expected_task_id=task_id_for_surface(neironych_image_adapter.encode_task_id(image_request_id), surface),
+        )
+        if not saved:
+            raise RuntimeError("Seedream KIE handoff lost generation ownership")
 
     async def persist_remix_nexus_submission(request_id: str, snapshot: dict) -> None:
         saved = await repo.persist_nexus_image_submission(
@@ -4984,7 +5020,7 @@ async def remix_feed_post(
         if image_request_id:
             initial_identity = (
                 neironych_image_adapter.encode_task_id(image_request_id)
-                if image_primary == "neironych"
+                if image_primary == "neironych" or body.model in SEEDREAM_5_MODELS
                 else nexus_image_adapter.encode_submission_id(image_request_id)
             )
             await repo.update_generation_task(
@@ -5020,10 +5056,11 @@ async def remix_feed_post(
                 aspect_ratio=normalized_ratio,
                 n=body.count,
                 quality=normalized_quality,
-                callback_url=_kie_callback_url(),
+                callback_url=callback_url_for_generation(_kie_callback_url(), gen.id) if body.model in SEEDREAM_5_MODELS else _kie_callback_url(),
                 request_id=image_request_id,
                 primary_provider=image_primary,
                 before_nexus_submit=persist_remix_nexus_submission,
+                before_kie_submit=persist_kie_handoff,
             )
     except NeironychPreSubmitFailure:
         if await handle_submission_not_sent(session, failed_generation_id, submission_context):
@@ -5037,7 +5074,8 @@ async def remix_feed_post(
         return _gen_out(gen)
     except KieSubmissionOutcomeUnknown:
         await session.rollback()
-        await repo.mark_kie_video_submission_unknown(session, failed_generation_id)
+        if gen_type != "image":
+            await repo.mark_kie_video_submission_unknown(session, failed_generation_id)
         await repo.increment_feed_share(session, gen_id)
         await session.refresh(gen)
         return _gen_out(gen)
@@ -5132,7 +5170,8 @@ async def remix_feed_post(
     else:
         await repo.update_generation_task(
             session, gen.id, task_id_for_surface(result.task_id or "", surface),
-            **({"expected_task_id": task_id_for_surface(nexus_image_adapter.encode_submission_id(image_request_id), surface)}
+            **({"expected_task_id": task_id_for_surface((neironych_image_adapter.encode_kie_handoff_id(image_request_id)
+                    if body.model in SEEDREAM_5_MODELS else nexus_image_adapter.encode_submission_id(image_request_id)), surface)}
                if image_request_id else {}),
             **({"expected_task_id": ""} if submission_context else {}),
         )

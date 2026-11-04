@@ -20,7 +20,12 @@ from core.feed_recipe_identity_policy import (
     validate_instruction,
 )
 from core.image_recovery_policy import get_image_recovery_policy, set_image_recovery_policy
-from core.provider_routing import get_nano21_route, set_nano21_route
+from core.provider_routing import (
+    get_nano21_route,
+    get_seedream5_route,
+    set_nano21_route,
+    set_seedream5_route,
+)
 from core.qwen_routing import get_qwen_route, set_qwen_route
 from core.reporting_time import REPORTING_TZ, moscow_day_bounds_utc
 from core.wan30_routing_policy import MODELS as WAN_ROUTE_MODELS
@@ -1210,3 +1215,30 @@ async def admin_set_kling4_access(
 
     audience = await set_kling4_access(session, body.audience, admin_tg_id=user.tg_id, source="web")
     return ok({"audience": audience})
+
+
+
+class Seedream5ProviderRoutingUpdate(BaseModel):
+    primary_provider: Literal["neironych", "kie"]
+
+
+@router.get("/admin/provider-routing/seedream-5-pro")
+async def admin_get_seedream5_provider(
+    session: AsyncSession = Depends(get_session), user=Depends(get_web_user_or_none),
+):
+    if admin_error := _admin_error(user):
+        return admin_error
+    from dataclasses import asdict
+    return ok(asdict(await get_seedream5_route(session)))
+
+
+@router.put("/admin/provider-routing/seedream-5-pro")
+async def admin_set_seedream5_provider(
+    body: Seedream5ProviderRoutingUpdate,
+    session: AsyncSession = Depends(get_session), user=Depends(get_web_user_or_none),
+):
+    if admin_error := _admin_error(user):
+        return admin_error
+    from dataclasses import asdict
+    route = await set_seedream5_route(session, body.primary_provider, admin_tg_id=int(user.tg_id), source="web")
+    return ok(asdict(route))

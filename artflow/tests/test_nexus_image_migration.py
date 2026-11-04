@@ -129,6 +129,7 @@ async def test_generate_image_routes_migrated_models_only_to_nexus(monkeypatch, 
     result = await image_service.generate_image(
         model,
         "test prompt",
+        primary_provider="kie",
         image_url=refs,
         aspect_ratio="1:1",
         quality="2K",
@@ -150,7 +151,7 @@ async def test_generate_image_routes_migrated_models_only_to_nexus(monkeypatch, 
         (ImageModel.SEEDREAM_5_PRO_I2I, ["https://example.test/ref.jpg"]),
     ],
 )
-async def test_seedream_5_pro_routes_to_kie_not_nexus(monkeypatch, model: ImageModel, refs) -> None:
+async def test_seedream_5_pro_kie_override_does_not_use_nexus(monkeypatch, model: ImageModel, refs) -> None:
     nexus_create = AsyncMock(side_effect=AssertionError("Seedream 5 Pro must not call Nexus"))
     kie_create = AsyncMock(return_value={"code": 200, "data": {"taskId": "kie_seedream_task"}})
     monkeypatch.setattr(image_service.nexus_image_adapter, "create_nexus_image_task", nexus_create)
@@ -161,6 +162,7 @@ async def test_seedream_5_pro_routes_to_kie_not_nexus(monkeypatch, model: ImageM
     result = await image_service.generate_image(
         model,
         "test prompt",
+        primary_provider="kie",
         image_url=refs,
         aspect_ratio="9:16",
         quality="high",
@@ -243,7 +245,7 @@ def test_provider_inventory_matches_active_image_transports() -> None:
 
     for key in ("seedream/5-pro-text-to-image", "seedream/5-pro-image-to-image"):
         contract = by_model[key]
-        assert contract.provider == "kie"
+        assert contract.provider == "neironych"
         assert any("docs.kie.ai/market/seedream/5-pro" in url for url in contract.official_docs)
 
 @pytest.mark.asyncio
