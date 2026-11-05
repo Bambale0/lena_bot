@@ -694,3 +694,25 @@ async def test_wan_feed_kie_only_submission_binds_durable_identity(
         mark_unknown.assert_awaited_once_with(harness.session, harness.record.id, context)
     else:
         mark_unknown.assert_not_awaited()
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("surface", ["v1", "web"])
+async def test_creator_replay_personalization_preserves_recipe_and_hides_prompt(harness, surface):
+    recipe(harness, "wan/3-0-video")
+    changes = "Одежда: белый костюм. Причёска: каре. Число: 35."
+    body = {"model": harness.source.model, "image_url": PHOTO, "change_request": changes}
+    path = f"/api/{surface}/feed/77/remix"
+    quoted = await harness.client.post(path + "/quote", json=body)
+    assert quoted.status_code == 200, quoted.text
+    harness.charge.assert_not_awaited()
+    response = await harness.client.post(path, json={**body, "quoted_credits": 84})
+    assert response.status_code == 202, response.text
+    request = harness.submit.await_args.args[0]
+    assert request.prompt.startswith(SECRET)
+    assert changes in request.prompt
+    assert request.reference_image_urls == (PHOTO,)
+    assert request.reference_video_urls == (VIDEO,)
+    assert harness.source.prompt == SECRET
+    assert request.duration == 15 and request.resolution == "480p"
+    assert SECRET not in response.text and VIDEO not in response.text
+    assert harness.charge.await_args.args[2] == 84

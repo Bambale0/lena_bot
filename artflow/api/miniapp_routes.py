@@ -4297,8 +4297,6 @@ def _prepare_feed_remix_inputs(
         if original_videos is not None:
             if body.model not in VIDEO_CAPS or body.model != getattr(source, "model", None):
                 raise HTTPException(status_code=422, detail="Для точного повтора выбери модель автора")
-            if body.change_request.strip():
-                raise HTTPException(status_code=422, detail="Точный повтор использует промпт автора. Убери дополнительные инструкции.")
             if body.audio_ids or body.character_ids or body.seed is not None:
                 raise HTTPException(status_code=422, detail="Точный повтор не принимает дополнительные аудио и управляющие референсы")
             # Older clients may submit the public MP4 as if it were a photo.
@@ -4365,10 +4363,13 @@ def _prepare_feed_remix_inputs(
                 "audio_ids": [*body.audio_ids, *extra_videos],
             })
             logger.info(
-                "feed_creator_replay source_gen=%s model=%s photo_refs=%s original_video_refs=%s",
-                source.id, body.model, len(requested_refs), len(original_videos),
+                "feed_creator_replay source_gen=%s model=%s photo_refs=%s original_video_refs=%s personalized=%s",
+                source.id, body.model, len(requested_refs), len(original_videos), bool(body.change_request.strip()),
             )
-            return str(source.prompt or "").strip(), requested_refs, body, True, False, False
+            prompt = str(source.prompt or "").strip()
+            if body.change_request.strip():
+                prompt += "\n\nИзменения, которые запросил пользователь для повтора (имеют приоритет для указанных деталей): " + body.change_request.strip()
+            return prompt, requested_refs, body, True, False, False
 
     image_repeat = source_type == "image" and body.model in (IMAGE_CAPS.keys() | _MJ_STUDIO_IMAGE_MODELS)
     own_recipe = image_repeat and user_id is not None and owned_generation_prompt_is_visible(source, user_id)

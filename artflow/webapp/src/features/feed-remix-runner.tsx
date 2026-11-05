@@ -293,7 +293,7 @@ function FeedRemixRunnerPortal() {
     const chosenMode = creatorTextOnly ? "text" : bucket === "video" ? mode : "image";
     return {
       model: selectedModel.key,
-      change_request: creatorRecipeReplay ? "" : changeRequest.trim(),
+      change_request: changeRequest.trim(),
       mode: chosenMode,
       duration: creatorRecipeReplay ? item.original_duration ?? duration : duration,
       ...(bucket !== "video" || durationOverride == null ? {} : { duration_override: durationOverride }),
@@ -346,7 +346,7 @@ function FeedRemixRunnerPortal() {
     setSelectedPaymentProvider(null);
     setReferences(draft?.references || []);
     const sourceHasRecipe = nextItem && itemLooksVideo(nextItem) && typeof nextItem.source_has_video_reference === "boolean";
-    setChangeRequest(sourceHasRecipe ? "" : draft?.changeRequest || "");
+    setChangeRequest(draft?.changeRequest || "");
     setQuote(null);
     setQuotedBody("");
     setQuoteBusy(false);
@@ -973,23 +973,23 @@ function FeedRemixRunnerPortal() {
             </div>
           </div>
 
-          {!creatorRecipeReplay ? <details className="rounded-xl border border-border p-3"><summary className="apix-focus-ring cursor-pointer">Что изменить (необязательно)</summary><label className="mt-2 grid gap-1 text-sm">
+          <section className="rounded-xl border border-border p-3" aria-label="Персонализация повтора">
+            <h3 className="font-semibold">Одежда, причёска и цифры</h3>
+            <p className="mt-1 text-xs text-muted-foreground">Укажи, что хочешь изменить, или оставь поле пустым.</p>
+            <label className="mt-2 grid gap-1 text-sm">
             <span className="font-semibold">Что изменить в образе</span>
             <textarea
               rows={2}
               maxLength={800}
               className="min-h-16 resize-y rounded-xl border border-input bg-background px-3 py-2 text-sm"
-              placeholder="Например: замени одежду на белый костюм, сохрани лицо и позу"
+              placeholder="Например: белый костюм, причёска каре, число 35. Остальное сохрани."
               value={changeRequest}
               disabled={busy}
               onChange={(event) => setChangeRequest(event.target.value)}
             />
-            <span className="text-[11px] text-muted-foreground">Для повтора фото загрузи свой референс: модель получит промпт автора и только твои фото. Промпт автора остаётся скрыт.</span>
-          </label></details> : <p className="rounded-xl border border-primary/25 bg-primary/5 p-3 text-xs">
-            {creatorTextOnly
-              ? "Это повтор по исходному текстовому промпту автора без фото-референсов."
-              : "Это точный повтор авторской генерации: меняем только фото-референс, оригинальный промпт не раскрывается и не редактируется."}
-          </p>}
+            <span className="text-[11px] text-muted-foreground">Изменения применим вместе с твоими фото. Если фото не нужны, используем только описание. Промпт автора остаётся скрыт.</span>
+          </label>
+          </section>
 
           {!creatorTextOnly && <div className="grid gap-2 rounded-xl border border-border bg-card/60 p-3">
             <div className="flex items-center justify-between gap-2">
