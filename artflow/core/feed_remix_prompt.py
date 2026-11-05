@@ -15,6 +15,28 @@ class FeedRemixUnavailable(ValueError):
     """A personalized repeat cannot be grounded in applicable public media."""
 
 
+
+def apply_feed_video_personalization(model: str, original: str, changes: str) -> str:
+    """Keep the recipe server-side and validate the final prompt before quoting."""
+    from api.video_prompt_limits import validate_video_prompt
+
+    changes = str(changes or "").strip()
+    if len(changes) > 800:
+        raise FeedRemixUnavailable("Сократи изменения до 800 символов.")
+    prompt = str(original or "").strip()
+    if changes:
+        prompt += (
+            "\n\nИзменения, которые запросил пользователь для повтора "
+            "(имеют приоритет для указанных деталей): " + changes
+        )
+    try:
+        return validate_video_prompt(model, prompt)
+    except ValueError as exc:
+        raise FeedRemixUnavailable(
+            "Описание вместе с изменениями слишком длинное для этой модели. Сократи изменения."
+        ) from exc
+
+
 _LEGACY_SOURCE_FIRST_PROMPT = (
     "Edit the supplied public source media. Preserve its visible composition, "
     "style and scene except for the requested changes. "

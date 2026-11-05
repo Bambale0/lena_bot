@@ -987,7 +987,7 @@ function FeedRemixRunnerPortal() {
               disabled={busy}
               onChange={(event) => setChangeRequest(event.target.value)}
             />
-            <span className="text-[11px] text-muted-foreground">Изменения применим вместе с твоими фото. Если фото не нужны, используем только описание. Промпт автора остаётся скрыт.</span>
+            <span className="text-[11px] text-muted-foreground">Изменим только указанные детали. Промпт автора остаётся скрыт.</span>
           </label>
           </section>
 

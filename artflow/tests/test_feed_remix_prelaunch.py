@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
 
 from api import miniapp_routes
@@ -408,3 +409,14 @@ async def test_deep_link_feed_lookup_requires_authentication(client, monkeypatch
     response = await client.get("/api/v1/feed/88")
     assert response.status_code == 401
     lookup.assert_not_awaited()
+
+@pytest.mark.parametrize("model,limit", [("bytedance/seedance-2-5", 30000), ("kling-3.0/video", 2500)])
+def test_creator_personalization_validates_final_prompt_before_pricing(model, limit):
+    source = SimpleNamespace(id=77, user_id=99, model=model, gen_type="video",
+        prompt="x" * limit, result_url="https://example.test/output.mp4", result_urls=None,
+        input_params={"reference_video_url": None, "duration": 10, "resolution": "720p"})
+    with pytest.raises(HTTPException) as error:
+        miniapp_routes._prepare_feed_remix_inputs(source, miniapp_routes.FeedRemixRequest(
+            model=model, image_url="https://example.test/photo.jpg", change_request="Белый костюм",
+        ), user_id=42)
+    assert error.value.status_code == 422

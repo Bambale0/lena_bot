@@ -716,3 +716,36 @@ async def test_creator_replay_personalization_preserves_recipe_and_hides_prompt(
     assert request.duration == 15 and request.resolution == "480p"
     assert SECRET not in response.text and VIDEO not in response.text
     assert harness.charge.await_args.args[2] == 84
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("suffix", ["/quote", ""])
+async def test_personalization_over_limit_is_rejected_before_quote_or_charge(harness, suffix):
+    recipe(harness, "wan/3-0-video")
+    harness.source.prompt = "x" * 4500
+    response = await harness.client.post("/api/v1/feed/77/remix" + suffix, json={
+        "model": harness.source.model, "image_url": PHOTO,
+        "change_request": "Белый костюм", "quoted_credits": 84,
+    })
+    assert response.status_code == 422, response.text
+    harness.charge.assert_not_awaited()
+    harness.submit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_native_bot_personalization_survives_reconfirmation_without_duplicate_suffix(harness, monkeypatch):
+    from bot.handlers import video_gen
+
+    recipe(harness, "wan/3-0-video")
+    monkeypatch.setattr(video_gen, "_external_source_feed_id", AsyncMock(return_value=77))
+    changes = "Белый костюм, каре, число 35"
+    prompt = SECRET
+    data = {"feed_use_change_request": changes}
+    for _ in range(2):
+        prompt, photos, data, source_id = await video_gen._prepare_feed_video_inputs(
+            session=harness.session, db_user=harness.user, source_feed_gen_id=77,
+            model_key=harness.source.model, prompt=prompt, image_url=PHOTO, data=data,
+        )
+        assert prompt.startswith(SECRET) and prompt.count(changes) == 1
+        assert source_id == 77 and photos == PHOTO
+        assert data["feed_use_change_request"] == changes
+        assert harness.source.prompt == SECRET

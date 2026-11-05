@@ -96,6 +96,7 @@ from core.config import settings
 from core.feed_remix_prompt import (
     FEED_REMIX_CONTEXT_KEY,
     FeedRemixUnavailable,
+    apply_feed_video_personalization,
     build_feed_remix_prompt,
     feed_remix_context,
     feed_video_edit_prompt,
@@ -803,7 +804,10 @@ async def _prepare_feed_video_inputs(
                     restored = restore_feed_recipe(model_key, original_feed_video_inputs(source) or {}, refs)
                 except ValueError as exc:
                     raise FeedRemixUnavailable(str(exc)) from exc
-            if prompt.strip() != str(source.prompt or "").strip():
+            personalized_prompt = apply_feed_video_personalization(
+                model_key, source.prompt, data.get("feed_use_change_request", ""),
+            )
+            if prompt.strip() not in {str(source.prompt or "").strip(), personalized_prompt}:
                 raise legacy_feed_edit_unavailable()
             caps = VIDEO_CAPS.get(model_key, {})
             supports_photo = supports_feed_source_media(caps, "image")
@@ -847,7 +851,7 @@ async def _prepare_feed_video_inputs(
                 "mode": "multimodal" if caps.get("auto_route_by_inputs") and (refs or original_videos) else (
                     "image" if refs else "video" if original_videos else "text"
                 ),
-                FEED_REMIX_CONTEXT_KEY: feed_remix_context(source_feed_gen_id, source.prompt),
+                FEED_REMIX_CONTEXT_KEY: feed_remix_context(source_feed_gen_id, personalized_prompt),
             }
             data.update(restored)
             creator_inputs = original_feed_video_inputs(source) or {}
@@ -874,7 +878,7 @@ async def _prepare_feed_video_inputs(
                 "feed_creator_replay source_gen=%s model=%s photo_refs=%s original_video_refs=%s",
                 source_feed_gen_id, model_key, len(refs), len(original_videos),
             )
-            return source.prompt, refs if not refs or model_key == SEEDANCE25_MODEL_KEY or len(refs) > 1 else refs[0], data, source_feed_gen_id
+            return personalized_prompt, refs if not refs or model_key == SEEDANCE25_MODEL_KEY or len(refs) > 1 else refs[0], data, source_feed_gen_id
     user_refs = any(url != source_url or source_type != "image" for url in refs)
     source_videos = (
         _seedance_effective_video_refs(data) if model_key == SEEDANCE25_MODEL_KEY
@@ -884,7 +888,8 @@ async def _prepare_feed_video_inputs(
         prompt.strip() != str(getattr(source, "prompt", "") or "").strip()
         or user_refs or data.get("audio_ids") or data.get("character_ids")
         or (source_videos and (source_type != "video" or source_videos != [source_url]))
-        or data.get("seedance_repeat_editor") or data.get("flow_id") == "genjutsu_face_clothing"
+        or data.get("seedance_repeat_editor") or data.get("feed_use_change_request")
+        or data.get("flow_id") == "genjutsu_face_clothing"
     )
     if not personalized:
         return prompt, image_url, data, source_feed_gen_id
@@ -904,7 +909,9 @@ async def _prepare_feed_video_inputs(
     if prompt.strip() != str(getattr(source, "prompt", "") or "").strip() and safe_previous is None:
         raise legacy_feed_edit_unavailable()
     public_base = build_feed_remix_prompt("", has_user_references=True, has_source_media=applicable)
-    prompt = safe_previous or public_base
+    prompt = safe_previous or apply_feed_video_personalization(
+        model_key, public_base, data.get("feed_use_change_request", ""),
+    )
     if model_key == SEEDANCE25_MODEL_KEY and source_type == "video":
         prompt = feed_video_edit_prompt(prompt)
     data = {**data, FEED_REMIX_CONTEXT_KEY: feed_remix_context(source_feed_gen_id, prompt)}
@@ -2469,17 +2476,17 @@ async def cb_vpar_next(
     rate_or_flat = float(model_cost.credits if model_cost else data.get("credits", 0))
     await state.update_data(credits=rate_or_flat)
     if _is_feed_video_use(data):
-        await safe_answer_callback(call)
-        await _launch_video_generation_from_state(
-            source_message=call.message,  # type: ignore[arg-type]
-            state=state,
-            session=session,
-            db_user=db_user,
-            bot=bot,
-            prompt=str(data["feed_use_prompt"]),
-            source_feed_gen_id=data.get("source_feed_gen_id") or data.get("feed_use_gen_id"),
-            hidden_feed_prompt=True,
+        await state.set_state(VideoGenFSM.feed_repeat_edit)
+        current_changes = str(data.get("feed_use_change_request") or "").strip()
+        await safe_edit_message(
+            call.message,
+            "🎨 <b>Одежда, причёска и цифры</b>\n\n"
+            "Напиши, что изменить перед повтором: например белый костюм, каре, число 35.\n"
+            "Отправь <code>-</code>, чтобы повторить без изменений. Промпт автора останется скрыт."
+            + (f"\n\nТвои изменения: {escape(current_changes)}" if current_changes else ""),
+            reply_markup=video_back_kb(),
         )
+        await safe_answer_callback(call)
         return
 
     if _is_video_reuse_prompt(data):
@@ -2510,6 +2517,29 @@ async def cb_vpar_next(
         reply_markup=video_back_kb(),
     )
     await call.answer()
+
+
+
+@router.message(VideoGenFSM.feed_repeat_edit, F.text)
+async def handle_feed_repeat_edit(
+    message: Message, state: FSMContext, session: AsyncSession, db_user: User, bot: Bot,
+) -> None:
+    data = await state.get_data()
+    if not _is_feed_video_use(data):
+        await message.answer("Открой повтор из ленты ещё раз.", reply_markup=main_menu_kb())
+        return
+    changes = str(message.text or "").strip()
+    if len(changes) > 800:
+        await message.answer("Сократи изменения до 800 символов или отправь -, чтобы ничего не менять.")
+        return
+    await state.update_data(feed_use_change_request="" if changes == "-" else changes)
+    await state.set_state(VideoGenFSM.params_select)
+    await _launch_video_generation_from_state(
+        source_message=message, state=state, session=session, db_user=db_user, bot=bot,
+        prompt=str(data["feed_use_prompt"]),
+        source_feed_gen_id=data.get("source_feed_gen_id") or data.get("feed_use_gen_id"),
+        hidden_feed_prompt=True,
+    )
 
 
 @router.callback_query(VideoGenFSM.params_select, F.data == "vpar_back")

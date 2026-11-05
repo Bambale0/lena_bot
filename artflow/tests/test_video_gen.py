@@ -389,6 +389,10 @@ async def test_cb_vpar_next_feed_video_repeat_rejects_model_without_video_input(
                 get_poll_fn=MagicMock(),
             )) as mock_video_service:
                 await video_gen.cb_vpar_next(call, mock_state, mock_session, mock_db_user, mock_bot)
+                await video_gen.handle_feed_repeat_edit(
+                    SimpleNamespace(text="-", answer=call.message.answer),
+                    mock_state, mock_session, mock_db_user, mock_bot,
+                )
 
     repo_stub.spend_credits.assert_not_awaited()
     repo_stub.create_generation.assert_not_awaited()
@@ -1711,3 +1715,36 @@ async def test_wan30_prime_new_telegram_draft_uses_native_fixed_ratio(monkeypatc
     assert data["aspect_ratio"] == "16:9"
     assert data["duration"] == 5
     assert data["resolution"] == "720p"
+
+@pytest.mark.asyncio
+async def test_feed_repeat_asks_for_personalization_before_launch(monkeypatch):
+    state = _fake_state(model_key="bytedance/seedance-2-5", feed_use_gen_type="video",
+        feed_use_prompt="private creator", feed_use_gen_id=77, duration=10, resolution="720p")
+    launch = AsyncMock()
+    edit = AsyncMock()
+    monkeypatch.setattr(video_gen, "_resolve_video_model_cost", AsyncMock(return_value=_make_video_model_cost()))
+    monkeypatch.setattr(video_gen, "_launch_video_generation_from_state", launch)
+    monkeypatch.setattr(video_gen, "safe_edit_message", edit)
+    await video_gen.cb_vpar_next(make_callback(data="vpar_next"), state, AsyncMock(), SimpleNamespace(id=42), AsyncMock())
+    launch.assert_not_awaited()
+    state.set_state.assert_awaited_with(VideoGenFSM.feed_repeat_edit)
+    assert "Одежда, причёска и цифры" in edit.await_args.args[1]
+    assert "private creator" not in edit.await_args.args[1]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text", ["Белый костюм, каре, число 35", "-", "x" * 801])
+async def test_native_feed_repeat_collects_changes_before_price_confirmation(monkeypatch, text):
+    state = _fake_state(model_key="bytedance/seedance-2-5", feed_use_gen_type="video",
+        feed_use_prompt="private creator", feed_use_gen_id=77)
+    message = AsyncMock(text=text)
+    launch = AsyncMock()
+    monkeypatch.setattr(video_gen, "_launch_video_generation_from_state", launch)
+    await video_gen.handle_feed_repeat_edit(message, state, AsyncMock(), SimpleNamespace(id=42), AsyncMock())
+    if len(text) > 800:
+        launch.assert_not_awaited()
+        return
+    assert (await state.get_data())["feed_use_change_request"] == ("" if text == "-" else text)
+    assert launch.await_args.kwargs["prompt"] == "private creator"
+    assert launch.await_args.kwargs["source_feed_gen_id"] == 77
+    assert launch.await_args.kwargs["hidden_feed_prompt"] is True

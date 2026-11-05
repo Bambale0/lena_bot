@@ -121,6 +121,7 @@ from core.feed_recipe_identity_policy import get_feed_recipe_identity_instructio
 from core.feed_remix_prompt import (
     FEED_REMIX_CONTEXT_KEY,
     FeedRemixUnavailable,
+    apply_feed_video_personalization,
     build_feed_image_prompt,
     build_feed_image_recipe_prompt,
     build_owned_feed_image_prompt,
@@ -4366,9 +4367,10 @@ def _prepare_feed_remix_inputs(
                 "feed_creator_replay source_gen=%s model=%s photo_refs=%s original_video_refs=%s personalized=%s",
                 source.id, body.model, len(requested_refs), len(original_videos), bool(body.change_request.strip()),
             )
-            prompt = str(source.prompt or "").strip()
-            if body.change_request.strip():
-                prompt += "\n\nИзменения, которые запросил пользователь для повтора (имеют приоритет для указанных деталей): " + body.change_request.strip()
+            try:
+                prompt = apply_feed_video_personalization(body.model, source.prompt, body.change_request)
+            except FeedRemixUnavailable as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
             return prompt, requested_refs, body, True, False, False
 
     image_repeat = source_type == "image" and body.model in (IMAGE_CAPS.keys() | _MJ_STUDIO_IMAGE_MODELS)
