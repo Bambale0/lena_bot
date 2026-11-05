@@ -275,6 +275,11 @@ async def _initial_next(fixture):
     fixture.initial_call.data = "vpar_next"
     await video_gen.cb_vpar_next(fixture.initial_call, fixture.kwargs["state"], fixture.kwargs["session"],
                                 fixture.kwargs["db_user"], fixture.kwargs["bot"])
+    assert await fixture.kwargs["state"].get_state() == video_gen.VideoGenFSM.feed_repeat_edit.state
+    await video_gen.handle_feed_repeat_edit(
+        SimpleNamespace(text="-", answer=fixture.initial_call.message.answer),
+        fixture.kwargs["state"], fixture.kwargs["session"], fixture.kwargs["db_user"], fixture.kwargs["bot"],
+    )
 
 
 async def _initial_confirm(fixture, callback):
