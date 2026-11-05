@@ -481,7 +481,7 @@ test("black lilac foundation: independent repeat portal preserves draft through 
   const writes = await prepareRepeat(page);
   const repeat = page.getByRole("dialog", {name:"Повторить работу"});
   const draft = repeat.getByLabel("Что изменить в образе");
-  await repeat.getByText("Что изменить (необязательно)", { exact: true }).click();
+  await expect(repeat.getByLabel("Что изменить в образе")).toBeVisible();
   await draft.fill("Новый красный фон");
   await repeat.getByRole("button", {name:"Пополнить", exact:true}).click();
   await expect(repeat).not.toBeVisible();
