@@ -824,7 +824,8 @@ test("creator photo-to-video replay selects duration, restores draft and reconfi
   const dialog = page.getByRole("dialog", { name: "Повторить работу" });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText("Применим исходный промпт автора к твоему фото. Готовое видео автора не передаётся.")).toBeVisible();
-  await expect(dialog.getByLabel("Что изменить в образе")).toHaveCount(0);
+  await expect(dialog.getByLabel("Что изменить в образе")).toBeVisible();
+  await dialog.getByLabel("Что изменить в образе").fill("Белый костюм, причёска каре, число 35");
   await expandRepeatControls(dialog);
   await expect(dialog.getByLabel("Модель")).toBeDisabled();
   await dialog.locator("input[type=file]").setInputFiles({
@@ -847,6 +848,7 @@ test("creator photo-to-video replay selects duration, restores draft and reconfi
     resolution_override: "1080p",
   });
   await page.reload();
+  await expect(dialog.getByLabel("Что изменить в образе")).toHaveValue("Белый костюм, причёска каре, число 35");
   await expandRepeatControls(dialog);
   await expect(dialog.getByLabel("Длительность видео в повторе")).toHaveAttribute("aria-valuetext", "15 секунд");
   await expect(dialog.getByLabel("Формат")).toHaveValue("16:9");
@@ -864,7 +866,7 @@ test("creator photo-to-video replay selects duration, restores draft and reconfi
   await dialog.getByRole("button", { name: /Запустить повтор/ }).click();
   await expect(page.getByRole("dialog", { name: /Задача #9205/ })).toBeVisible();
   expect(sent).toMatchObject({
-    model: model.key, change_request: "",
+    model: model.key, change_request: "Белый костюм, причёска каре, число 35",
     image_url: "https://example.test/uploaded-ref.png",
     reference_urls: ["https://example.test/uploaded-ref.png"],
     video_url: null, duration: 10, duration_override: 15, quoted_credits: 35,

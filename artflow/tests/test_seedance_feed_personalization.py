@@ -242,3 +242,32 @@ async def test_historical_external_source_uses_real_precharge_rejection(seedance
     seedance_api.costs.assert_not_awaited()
     seedance_api.charge.assert_not_awaited()
     seedance_api.generate.assert_not_awaited()
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("surface", ["miniapp", "web"])
+async def test_seedance_creator_recipe_applies_personalization_before_first_launch(seedance_api, surface):
+    changes = "Белый костюм, причёска каре, число 35"
+    source = seedance_api.source
+    source.input_params = {
+        "image_url": "https://example.test/private-author.jpg",
+        "reference_video_url": None,
+        "duration": 10, "resolution": "720p", "aspect_ratio": "9:16",
+    }
+    body = seedance_api.routes.FeedRemixRequest(
+        model=MODEL, image_url=USER_IMAGE, change_request=changes,
+    )
+    quote = await seedance_api.routes.quote_feed_remix(
+        77, body, seedance_api.session, seedance_api.user,
+    )
+    seedance_api.charge.assert_not_awaited()
+    result = await seedance_api.routes.remix_feed_post(
+        77, body, seedance_api.session, seedance_api.user, surface=surface,
+    )
+    submitted = seedance_api.generate.await_args
+    assert submitted.args[1].startswith(SECRET)
+    assert changes in submitted.args[1]
+    assert source.prompt == SECRET
+    assert submitted.kwargs["image_url"] == [USER_IMAGE]
+    assert submitted.kwargs["reference_video_url"] is None
+    assert quote["cost_credits"] == seedance_api.charge.await_args.args[2]
+    assert result.prompt == "" and result.prompt_hidden is True
