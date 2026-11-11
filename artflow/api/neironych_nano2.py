@@ -17,6 +17,22 @@ MODEL = "nano-banana-2"
 SNAPSHOT_KEY = "neironych_nano2_submission"
 RATIOS = frozenset({"1:1", "16:9", "9:16", "4:3", "3:4"})
 QUALITIES = frozenset({"1K", "2K", "4K"})
+RATIO_CHOICES = ("1:1", "3:4", "4:3", "9:16", "16:9")
+
+
+def resolve_primary_aspect_ratio(value: str | None) -> str:
+    """Never route an unsupported ratio to paid Nexus when Neironych is primary.
+
+    The official Nano Banana 2 contract defaults to 1:1 and does not accept
+    "auto", 2:3 or the extended ratios available on Nexus/Pro.
+    """
+    ratio = value or "1:1"
+    if ratio not in RATIOS:
+        raise ValueError(
+            f"Формат {ratio} недоступен для Nano Banana 2 через Нейроныча. "
+            f"Выбери один из форматов: {', '.join(RATIO_CHOICES)}."
+        )
+    return ratio
 
 
 def normalized_quality(value: str) -> str:

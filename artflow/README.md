@@ -93,7 +93,7 @@ Nano Banana 2 primary-provider contract and recovery: [routing guide](docs/nano-
 
 ## Nano Banana provider routing
 
-Nano Banana 2 and Nano Banana Pro default to Neironych. Their independently audited DB routes are managed in the Telegram admin panel and authenticated web admin provider-routing endpoints. Nexus remains the reserve for a definitive rejection or unsupported native parameters (including auto aspect ratio). Ambiguous network outcomes do not start another provider request. Pro supports the reviewed fixed formats and up to four HTTPS references; the native timeout is bounded below ingress timeout.
+Nano Banana 2 and Nano Banana Pro default to Neironych. Their independently audited DB routes are managed in the Telegram admin panel and authenticated web admin provider-routing endpoints. On Neironych primary, unsupported aspect ratios (including explicit `auto`) are rejected before charging instead of silently going to Nexus; an omitted ratio uses the provider's 1:1 default. The Mini App and Telegram ratio selectors reflect the active primary provider. Nexus remains the reserve for definitive no-work rejection or other incompatible parameters. Ambiguous network outcomes do not start another provider request. Pro supports its reviewed fixed formats and up to fourteen HTTPS references at the native provider; the native timeout is bounded below ingress timeout.
 
 ## GPT Image providers
 

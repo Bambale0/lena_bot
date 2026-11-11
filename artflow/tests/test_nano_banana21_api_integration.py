@@ -94,6 +94,8 @@ async def test_miniapp_neironych_submit_settles_explicit_5xx_only(monkeypatch, h
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post("/api/v1/generate/image", json={
                 "model": model, "prompt": "test photo", "quality": "2K" if model == "nano-banana-2.1" else "basic",
+                # This test exercises provider HTTP failures, not unsupported ratio admission.
+                **({"aspect_ratio": "1:1"} if model == "nano-banana-2" else {}),
                 **({"reference_url": "https://example.test/ref.png"} if model.endswith("image-to-image") else {}),
             })
     finally:
@@ -105,6 +107,50 @@ async def test_miniapp_neironych_submit_settles_explicit_5xx_only(monkeypatch, h
     assert request_ids
     refunds.assert_not_awaited()
     assert settlement.await_count == (1 if http_status else 0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model,ratio", [
+    ("nano-banana-2", "2:3"),
+    ("nano-banana-2", "auto"),
+    ("nano-banana-pro", "auto"),
+    ("nano-banana-pro-vip", "auto"),
+])
+async def test_unsupported_primary_ratio_rejected_before_spend(monkeypatch, model, ratio):
+    charge = AsyncMock(side_effect=AssertionError("no credits may be charged"))
+    generate = AsyncMock(side_effect=AssertionError("no provider submission"))
+    monkeypatch.setattr(miniapp_routes.repo, "resolve_image_model_cost", AsyncMock(
+        return_value=SimpleNamespace(credits=2),
+    ))
+    monkeypatch.setattr(miniapp_routes.repo, "charge_image_generation", charge)
+    monkeypatch.setattr(miniapp_routes.image_service, "generate_image", generate)
+    monkeypatch.setattr(miniapp_routes, "get_nano2_route", AsyncMock(
+        return_value=ProviderRoute("nano-banana-2", "neironych", "database"),
+    ))
+    monkeypatch.setattr(miniapp_routes, "get_nano_pro_route", AsyncMock(
+        return_value=ProviderRoute("nano-banana-pro", "neironych", "database"),
+    ))
+
+    async def stub_session():
+        yield AsyncMock()
+
+    async def stub_user():
+        return SimpleNamespace(id=10, tg_id=1212121, credits=100)
+
+    app.dependency_overrides[get_session] = stub_session
+    app.dependency_overrides[get_miniapp_user] = stub_user
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post("/api/v1/generate/image", json={
+                "model": model, "prompt": "A product photo", "quality": "2K",
+                "aspect_ratio": ratio,
+            })
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 422, response.text
+    assert "Формат" in response.json()["detail"]
+    charge.assert_not_awaited()
+    generate.assert_not_awaited()
 
 
 @pytest.mark.asyncio

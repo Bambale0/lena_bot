@@ -814,10 +814,13 @@ def image_mode_kb(model_key: str) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def image_aspect_ratio_kb(model_key: str) -> InlineKeyboardMarkup:
+def image_aspect_ratio_kb(model_key: str, *, allowed_ratios: frozenset[str] | None = None) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     caps = IMAGE_CAPS.get(model_key, {})
-    ratios = _prioritize_ratio(caps.get("aspect_ratios", []))
+    choices = caps.get("aspect_ratios", [])
+    if allowed_ratios is not None:
+        choices = [ratio for ratio in choices if ratio in allowed_ratios]
+    ratios = _prioritize_ratio(choices)
     buttons = [
         InlineKeyboardButton(text=r, callback_data=f"img_ratio:{r}")
         for r in ratios

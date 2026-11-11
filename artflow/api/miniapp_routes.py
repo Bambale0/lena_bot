@@ -2829,19 +2829,37 @@ async def list_image_models(
     """All active image models with costs and capabilities."""
     model_costs = await repo.get_all_model_costs(session)
     image_keys = {m.value for m in ImageModel} | _MJ_STUDIO_IMAGE_MODELS
+    nano2_primary = nano_pro_primary = None
+    # Model listing must remain readable if provider route metadata is corrupt.
+    # Paid launches still validate the route strictly before charging.
+    if any(mc.model_key == ImageModel.NANO_BANANA_2.value for mc in model_costs):
+        try:
+            nano2_primary = (await get_nano2_route(session)).primary_provider
+        except ValueError as exc:
+            logger.warning("Nano Banana 2 model catalog route unavailable: %s", exc)
+    if any(mc.model_key in NANO_PRO_MODELS for mc in model_costs):
+        try:
+            nano_pro_primary = (await get_nano_pro_route(session)).primary_provider
+        except ValueError as exc:
+            logger.warning("Nano Banana Pro model catalog route unavailable: %s", exc)
     result = []
     for mc in model_costs:
         if mc.model_key not in image_keys:
             continue
         caps: dict[str, Any] = IMAGE_CAPS.get(mc.model_key, _MJ_IMAGE_CAPS.get(mc.model_key, {}))
         quality_raw = caps.get("quality_options", [])
+        aspect_ratios = caps.get("aspect_ratios", [])
+        if mc.model_key == ImageModel.NANO_BANANA_2.value and nano2_primary == "neironych":
+            aspect_ratios = [ratio for ratio in aspect_ratios if ratio in neironych_nano2.RATIOS]
+        elif mc.model_key in NANO_PRO_MODELS and nano_pro_primary == "neironych":
+            aspect_ratios = [ratio for ratio in aspect_ratios if ratio in neironych_nano_pro_runtime.RATIOS]
         quality_prices = await _resolve_image_quality_prices(session, mc.model_key, quality_raw, float(mc.credits))
         result.append(ModelInfo(
             key=mc.model_key,
             display_name=_friendly_model_name(mc.model_key, mc.display_name),
             credits=mc.credits,
             modes=caps.get("modes", ["text"]),
-            aspect_ratios=caps.get("aspect_ratios", []),
+            aspect_ratios=aspect_ratios,
             aspect_ratio_modes=caps.get("aspect_ratio_modes", caps.get("modes", ["text"])),
             aspect_ratio_min_refs=int(caps.get("aspect_ratio_min_refs", 0) or 0),
             quality_options=[{"value": value, "label": label} for value, label in quality_raw],
@@ -3120,6 +3138,19 @@ async def create_image_generation(
         (await get_gpt2_route(session)).primary_provider if model.value in GPT_IMAGE_MODELS else
         (await get_seedream5_route(session)).primary_provider if model.value in SEEDREAM_5_MODELS else None
     )
+
+    if image_primary == "neironych":
+        ratio_resolver = (
+            neironych_nano2.resolve_primary_aspect_ratio
+            if model == ImageModel.NANO_BANANA_2 else
+            neironych_nano_pro_runtime.resolve_primary_aspect_ratio
+            if model.value in NANO_PRO_MODELS else None
+        )
+        if ratio_resolver is not None:
+            try:
+                normalized_ratio = ratio_resolver(normalized_ratio)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     max_refs = int(caps.get("max_refs", 1) or 1)
     if len(all_refs) > max_refs:
@@ -4968,6 +4999,19 @@ async def remix_feed_post(
         else (await get_seedream5_route(session)).primary_provider
         if gen_type == "image" and body.model in SEEDREAM_5_MODELS else None
     )
+
+    if gen_type == "image" and image_primary == "neironych":
+        ratio_resolver = (
+            neironych_nano2.resolve_primary_aspect_ratio
+            if body.model == ImageModel.NANO_BANANA_2.value else
+            neironych_nano_pro_runtime.resolve_primary_aspect_ratio
+            if body.model in NANO_PRO_MODELS else None
+        )
+        if ratio_resolver is not None:
+            try:
+                normalized_ratio = ratio_resolver(normalized_ratio)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     if gen_type == "video":
         if wan_quote:
