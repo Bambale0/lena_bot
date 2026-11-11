@@ -20,7 +20,10 @@ from sqlalchemy import or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api import image_service, neironych_image_adapter, nexus_image_adapter
+from api import (
+    image_service, neironych_image_adapter, neironych_nano2,
+    neironych_nano_pro_runtime, nexus_image_adapter,
+)
 from api.image_errors import telegram_image_error_text
 from api.image_http_failure import is_http_5xx, settle_image_http_5xx
 from api.image_prompt_limits import validate_image_prompt
@@ -1497,6 +1500,26 @@ async def _launch_session_generation(
         (await get_seedream5_route(session)).primary_provider if model.value in SEEDREAM_5_MODELS else None
     )
 
+    if image_primary == "neironych":
+        ratio_resolver = (
+            neironych_nano2.resolve_primary_aspect_ratio
+            if model == ImageModel.NANO_BANANA_2 else
+            neironych_nano_pro_runtime.resolve_primary_aspect_ratio
+            if model.value in NANO_PRO_MODELS else None
+        )
+        if ratio_resolver is not None:
+            try:
+                selected_ratio = ratio_resolver(image_session.aspect_ratio)
+            except ValueError as exc:
+                await source_message.answer(
+                    f"⚠️ {exc}\n\nКредиты не списаны.",
+                    reply_markup=image_session_kb(parent_generation_id, allow_publish=not bool(source_feed_gen_id)),
+                )
+                return False
+            if selected_ratio != image_session.aspect_ratio:
+                image_session.aspect_ratio = selected_ratio
+                await session.commit()
+
     if _requires_reference_image(image_session.model) and not reference_url:
         await source_message.answer(
             "❌ Эта модель требует референс-изображение. Отправь фото.",
@@ -2196,8 +2219,20 @@ async def cb_image_dynamic_mode(call: CallbackQuery, state: FSMContext) -> None:
     await safe_answer_callback(call)
 
 
+async def _image_aspect_ratio_keyboard(model_key: str, session: AsyncSession | None) -> InlineKeyboardMarkup:
+    if session is None:
+        return image_aspect_ratio_kb(model_key)
+    if (model_key == ImageModel.NANO_BANANA_2.value
+            and (await get_nano2_route(session)).primary_provider == "neironych"):
+        return image_aspect_ratio_kb(model_key, allowed_ratios=neironych_nano2.RATIOS)
+    if (model_key in NANO_PRO_MODELS
+            and (await get_nano_pro_route(session)).primary_provider == "neironych"):
+        return image_aspect_ratio_kb(model_key, allowed_ratios=neironych_nano_pro_runtime.RATIOS)
+    return image_aspect_ratio_kb(model_key)
+
+
 @router.callback_query(ImageGenFSM.model_select, F.data.startswith("img_dyn:ratio:"))
-async def cb_image_dynamic_ratio(call: CallbackQuery, state: FSMContext) -> None:
+async def cb_image_dynamic_ratio(call: CallbackQuery, state: FSMContext, session: AsyncSession | None = None) -> None:
     model_key = call.data.split(":", 2)[2]
     if await _accept_model_reference_transition(call, state, model_key) is None:
         return
@@ -2205,7 +2240,7 @@ async def cb_image_dynamic_ratio(call: CallbackQuery, state: FSMContext) -> None
     await safe_edit_message(
         call.message,
         "📐 <b>Выбери формат</b>",
-        reply_markup=image_aspect_ratio_kb(model_key),
+        reply_markup=await _image_aspect_ratio_keyboard(model_key, session),
     )
     await state.set_state(ImageGenFSM.aspect_ratio_select)
     await safe_answer_callback(call)
@@ -2618,7 +2653,7 @@ async def cb_count_back(call: CallbackQuery, state: FSMContext, session: AsyncSe
         await safe_edit_message(
             call.message,  # type: ignore[arg-type]
             f"✅ <b>{display_name}</b>\n\n📐 Соотношение сторон:",
-            reply_markup=image_aspect_ratio_kb(model_key),
+            reply_markup=await _image_aspect_ratio_keyboard(model_key, session),
         )
     else:
         caps = IMAGE_CAPS.get(model_key, {})
@@ -2705,7 +2740,7 @@ async def _after_ref_upload(
         await message.answer(
             f"✅ Референс загружен!\n\n📐 <b>Выбери формат кадра</b> · {display_name}\n"
             "Квадрат, вертикаль или горизонталь.",
-            reply_markup=image_aspect_ratio_kb(model_key),
+            reply_markup=await _image_aspect_ratio_keyboard(model_key, session),
         )
     elif caps.get("has_quality"):
         await state.set_state(ImageGenFSM.count_select)

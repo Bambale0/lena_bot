@@ -582,6 +582,8 @@ async def generate_image(
         chosen_primary = primary_provider or settings.NANO_BANANA_2_PRIMARY_PROVIDER
         if chosen_primary not in {"neironych", "nexus"}:
             raise ValueError("Unsupported Nano Banana 2 primary provider")
+        if chosen_primary == "neironych":
+            aspect_ratio = neironych_nano2.resolve_primary_aspect_ratio(aspect_ratio)
         compatible = neironych_nano2.supports(image_urls=refs, aspect_ratio=aspect_ratio, quality=quality, n=n)
         if chosen_primary == "neironych" and compatible:
             try:
@@ -608,6 +610,8 @@ async def generate_image(
         chosen_primary = primary_provider or settings.NANO_BANANA_PRO_PRIMARY_PROVIDER
         if chosen_primary not in {"neironych", "nexus"}:
             raise ValueError("Unsupported Nano Banana Pro primary provider")
+        if chosen_primary == "neironych":
+            aspect_ratio = neironych_nano_pro_runtime.resolve_primary_aspect_ratio(aspect_ratio)
         compatible = neironych_nano_pro_runtime.supports(image_urls=refs, aspect_ratio=aspect_ratio, quality=quality, n=n)
         if chosen_primary == "neironych" and compatible:
             try:

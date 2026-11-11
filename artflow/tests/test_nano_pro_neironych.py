@@ -92,8 +92,7 @@ async def test_definitive_rejection_preserves_original_nexus_contract(monkeypatc
 
 
 @pytest.mark.parametrize("ratio,refs,primary", [
-    ("auto", [], "neironych"), (None, [], "neironych"),
-    ("1:1", [], "nexus"),
+    ("1:1", [], "nexus"), ("auto", [], "nexus"),
 ])
 async def test_unsupported_capabilities_bypass_primary_without_remapping(monkeypatch, ratio, refs, primary):
     native = AsyncMock(side_effect=AssertionError("unsupported contract"))
@@ -105,6 +104,31 @@ async def test_unsupported_capabilities_bypass_primary_without_remapping(monkeyp
     native.assert_not_awaited()
     assert fallback.call_args.kwargs["aspect_ratio"] == ratio
     assert fallback.call_args.kwargs["image_urls"] == refs
+
+
+@pytest.mark.parametrize("model", [ImageModel.NANO_BANANA_PRO, ImageModel.NANO_BANANA_PRO_VIP])
+async def test_neironych_pro_explicit_auto_never_uses_paid_nexus(monkeypatch, model):
+    primary, fallback = AsyncMock(), AsyncMock()
+    monkeypatch.setattr(nano_pro, "generate", primary)
+    monkeypatch.setattr(nexus_image_adapter, "create_nexus_image_task", fallback)
+    with pytest.raises(ValueError, match="Nano Banana Pro"):
+        await image_service.generate_image(model, "A cup", primary_provider="neironych",
+            aspect_ratio="auto", quality="2K", request_id=RID)
+    primary.assert_not_awaited()
+    fallback.assert_not_awaited()
+
+
+async def test_missing_neironych_pro_ratio_uses_native_square_default(monkeypatch):
+    primary, fallback = AsyncMock(return_value=URL), AsyncMock()
+    monkeypatch.setattr(nano_pro, "generate", primary)
+    monkeypatch.setattr(nexus_image_adapter, "create_nexus_image_task", fallback)
+    result = await image_service.generate_image(
+        ImageModel.NANO_BANANA_PRO, "A cup", primary_provider="neironych",
+        aspect_ratio=None, quality="2K", request_id=RID,
+    )
+    assert result.provider == "neironych"
+    assert primary.call_args.kwargs["aspect_ratio"] == "1:1"
+    fallback.assert_not_awaited()
 
 
 async def test_snapshot_admission_is_single_use_and_preserves_private_metadata(monkeypatch):

@@ -7,10 +7,16 @@ controls are unchanged. Site, Mini App, feed repeat and Telegram share this rout
 
 Neironych is primary for fixed ratios 1:1, 16:9, 9:16, 4:3 and 3:4 with up to
 three HTTPS references. Existing APIX 2K/4K choices map to native 2k/4k.
-Auto/unspecified framing, other existing ratios, four references and reference
-formats outside this contract continue through Nexus with the original inputs.
-A definitive no-work rejection can also fall back to Nexus. Network loss,
-timeouts, malformed results and ambiguous errors never launch a second provider.
+When Neironych is primary, an omitted ratio uses its documented 1:1 default.
+Explicit `auto` and other unsupported ratios are rejected before charging,
+with the available formats shown to the user; the Mini App model catalog and
+Telegram ratio picker expose only Neironych-supported ratios. This prevents
+unintended paid Nexus submissions for an incompatible ratio. Four references
+and reference formats outside the native contract still fall back to Nexus
+with original inputs. A definitive no-work rejection can also fall back to
+Nexus. Network loss, timeouts, malformed results and ambiguous errors never
+launch a second provider. When Nexus is selected as primary, its existing
+ratio options remain available.
 
 The database override is edited through Telegram admin → Banana 2 provider or
 authenticated GET/PUT `/api/web/admin/provider-routing/nano-banana-2`. Changes
