@@ -268,6 +268,63 @@ async def trend_client(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_trend_run_status_readonly_no_claim(trend_client):
+    client, monkeypatch, reserve, create = trend_client
+    response = await client.get("/api/v1/trends/12/runs/unknown-request-key")
+    assert response.status_code == 200
+    assert response.json() == {"state": "not_found", "task": None}
+    reserve.assert_not_awaited()
+    create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [("running", "processing"), ("uncertain", "uncertain")],
+)
+async def test_trend_run_status_unlinked_claim_never_resubmits(trend_client, status, expected):
+    client, monkeypatch, reserve, create = trend_client
+    claim = SimpleNamespace(trend_id=12, generation_id=None, status=status)
+    get_claim = AsyncMock(return_value=claim)
+    monkeypatch.setattr("api.trends_routes.get_claim", get_claim)
+    response = await client.get("/api/v1/trends/12/runs/unknown-request-key")
+    assert response.status_code == 200
+    assert response.json() == {"state": expected, "task": None}
+    get_claim.assert_awaited_once_with(ANY, 7, "unknown-request-key")
+    reserve.assert_not_awaited()
+    create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_trend_run_status_denies_another_trend_claim(trend_client):
+    client, monkeypatch, reserve, create = trend_client
+    monkeypatch.setattr("api.trends_routes.get_claim", AsyncMock(return_value=SimpleNamespace(
+        trend_id=99, generation_id=101, status="complete",
+    )))
+    response = await client.get("/api/v1/trends/12/runs/unknown-request-key")
+    assert response.status_code == 404
+    reserve.assert_not_awaited()
+    create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_trend_run_status_returns_only_owned_task(trend_client):
+    client, monkeypatch, reserve, create = trend_client
+    monkeypatch.setattr("api.trends_routes.get_claim", AsyncMock(return_value=SimpleNamespace(
+        trend_id=12, generation_id=101, status="complete",
+    )))
+    generation = SimpleNamespace(id=101, user_id=987)
+    lookup = AsyncMock(return_value=generation)
+    monkeypatch.setattr("api.trends_routes.repo.get_generation_by_id", lookup)
+    response = await client.get("/api/v1/trends/12/runs/unknown-request-key")
+    assert response.status_code == 200
+    assert response.json() == {"state": "unavailable", "task": None}
+    lookup.assert_awaited_once_with(ANY, 101)
+    reserve.assert_not_awaited()
+    create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_wan_trend_confirms_same_quote_before_paid_launch(trend_client):
     client, monkeypatch, reserve, create = trend_client
     trend = SimpleNamespace(
