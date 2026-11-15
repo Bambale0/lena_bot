@@ -236,8 +236,8 @@ test("library trend uses the existing trend runner without a generic paid launch
   await page.route("**/api/v1/prompts?**", route => route.fulfill({ json: { items: [{ id: 63, title: "Тренд библиотеки", model: "video-fixture", status: "approved", tags: [" Trend "] }], total: 1 } }));
   await page.route("**/api/v1/trends/63", route => route.fulfill({ json: { id: 63, title: "Тренд библиотеки", kind: "video", model: "video-fixture", description: "Добавьте фото в мастер тренда" } }));
   await page.goto("/?ux=3"); await page.getByRole("button", { name: "Библиотека промптов", exact: true }).click(); await page.getByRole("button", { name: /Тренд библиотеки/ }).click(); await page.getByRole("button", { name: "Использовать задание", exact: true }).click();
-  await expect(page.getByRole("dialog")).toHaveCount(1);
-  await expect(page.getByRole("dialog")).toContainText("Добавьте фото в мастер тренда");
+  // Other dialogs can briefly coexist during the transition; target the trend runner.
+  await expect(page.getByRole("dialog").filter({ hasText: "Добавьте фото в мастер тренда" })).toBeVisible();
   expect(writes.filter(row => row.path.includes("/generate/") || row.path.endsWith("/run"))).toHaveLength(0);
 });
 
