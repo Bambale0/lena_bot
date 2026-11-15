@@ -146,6 +146,8 @@ def _current_ratio(data: dict[str, Any], model_key: str) -> str | None:
 
 
 def _quality_options(model_key: str, ratio: str | None) -> list[tuple[str, str]]:
+    if not image_gen.IMAGE_CAPS.get(model_key, {}).get("has_quality"):
+        return []
     return [
         (value, label)
         for value, label in image_gen._quality_options(model_key)
