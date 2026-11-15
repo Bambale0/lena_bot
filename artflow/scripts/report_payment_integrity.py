@@ -16,13 +16,13 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from db.session import AsyncSessionLocal  # noqa: E402
+from core.config import settings  # noqa: E402
 
 # A single grouped query avoids N+1 lookups and reads a consistent PG snapshot.
 # source_id is VARCHAR and deliberately matched to the integer transaction ID.
@@ -150,11 +150,18 @@ async def collect_payment_integrity(session: AsyncSession) -> dict[str, Any]:
 
 
 async def report() -> dict[str, Any]:
-    async with AsyncSessionLocal() as session:
-        try:
-            return await collect_payment_integrity(session)
-        finally:
-            await session.rollback()
+    # A self-contained engine avoids importing the live app session/repository
+    # (and its API route initialization). Only a read-only PG snapshot is used.
+    engine = create_async_engine(settings.DATABASE_URL, pool_pre_ping=True)
+    try:
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with session_factory() as session:
+            try:
+                return await collect_payment_integrity(session)
+            finally:
+                await session.rollback()
+    finally:
+        await engine.dispose()
 
 
 def main() -> int:
