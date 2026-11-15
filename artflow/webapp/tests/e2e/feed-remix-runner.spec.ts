@@ -1413,7 +1413,7 @@ test("Seedance @Image2 repeat requires a second photo before quote and keeps the
   const dialog = page.getByRole("dialog", { name: "Повторить работу" });
   await expect(dialog.getByText(/Для повтора нужно фото: 2/)).toBeVisible();
   await dialog.getByLabel("Что изменить в образе").fill("Оставить моё лицо");
-  await dialog.locator("input[type=file]").setInputFiles({
+  await dialog.locator('input[type="file"][accept^="image/"]').setInputFiles({
     name: "face.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
   });
   await expect(dialog.getByText("Реф #1", { exact: true })).toBeVisible();
@@ -1423,7 +1423,7 @@ test("Seedance @Image2 repeat requires a second photo before quote and keeps the
   await page.reload();
   await expect(dialog.getByLabel("Что изменить в образе")).toHaveValue("Оставить моё лицо");
   await expect(dialog.getByText("Реф #1", { exact: true })).toBeVisible();
-  await dialog.locator("input[type=file]").setInputFiles({
+  await dialog.locator('input[type="file"][accept^="image/"]').setInputFiles({
     name: "outfit.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
   });
   await expect(dialog.getByText("Реф #2", { exact: true })).toBeVisible();
