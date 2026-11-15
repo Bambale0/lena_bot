@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 test("Studio black lilac navigation, balance cancel and profile work across the device matrix", async ({page}) => {
   const mutations: string[] = [];
   await page.addInitScript(() => {
-    window.Telegram = { WebApp: { initData:"studio-device-fixture", version:"8.0", colorScheme:"dark", ready(){}, expand(){}, requestFullscreen(){}, HapticFeedback:{impactOccurred(){},notificationOccurred(){}} } };
+    window.Telegram = { WebApp: { initData:new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify({ id: 123 }), hash: "e2e-fixture-not-a-real-signature" }).toString(), version:"8.0", colorScheme:"dark", ready(){}, expand(){}, requestFullscreen(){}, HapticFeedback:{impactOccurred(){},notificationOccurred(){}} } };
   });
   await page.route("**/telegram-web-app.js", route => route.fulfill({body:""}));
   await page.route("**/api/**", route => {

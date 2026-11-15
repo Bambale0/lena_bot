@@ -4,7 +4,7 @@ const keyframe='kling-4.0/keyframe-to-video';
 const models=[reference,keyframe].map(key=>({key,display_name:key===reference?'Kling 4 · Референсы':'Kling 4 · Ключевые кадры',modes:['text','image'],credits:28.5,is_per_second:true,credits_per_sec:28.5,max_refs:10,durations:Array.from({length:28},(_,i)=>i+3),resolutions:['720p','1080p'],has_quality:true,aspect_ratios:['auto','16:9','9:16','1:1','21:9']}));
 async function prepare(page: Page,admin=true) {
  const posts: Record<string,unknown>[]=[];let upload=0;
- await page.addInitScript(()=>{window.Telegram={WebApp:{initData:'kling4-test',initDataUnsafe:{user:{id:123,first_name:'Tester'}},ready(){},expand(){},colorScheme:'dark',HapticFeedback:{impactOccurred(){},notificationOccurred(){}}}} as any;});
+ await page.addInitScript(()=>{window.Telegram={WebApp:{initData:new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify({ id: 123 }), hash: "e2e-fixture-not-a-real-signature" }).toString(),initDataUnsafe:{user:{id:123,first_name:'Tester'}},ready(){},expand(){},colorScheme:'dark',HapticFeedback:{impactOccurred(){},notificationOccurred(){}}}} as any;});
  await page.route('**/telegram-web-app.js',route=>route.fulfill({body:'',contentType:'application/javascript'}));
  await page.route('**/api/**',async route=>{
   const path=new URL(route.request().url()).pathname;
