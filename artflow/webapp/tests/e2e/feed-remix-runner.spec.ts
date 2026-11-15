@@ -840,7 +840,7 @@ test("creator photo-to-video replay selects duration, restores draft and reconfi
   await expect(dialog.getByLabel("Длительность видео в повторе")).toHaveAttribute("aria-valuetext", "10 секунд");
   await expandRepeatControls(dialog);
   await dialog.getByRole("button", { name: "15 сек", exact: true }).click();
-  await dialog.getByLabel("Формат").selectOption("16:9");
+  await dialog.locator('select:has(option[value="16:9"])').selectOption("16:9");
   await dialog.getByLabel("Разрешение").selectOption("1080p");
   await expect(dialog.getByText("Стоимость: 30 💋").first()).toBeVisible();
   expect(sent).toBeNull();
@@ -853,7 +853,7 @@ test("creator photo-to-video replay selects duration, restores draft and reconfi
   await expect(dialog.getByLabel("Что изменить в образе")).toHaveValue("Белый костюм, причёска каре, число 35");
   await expandRepeatControls(dialog);
   await expect(dialog.getByLabel("Длительность видео в повторе")).toHaveAttribute("aria-valuetext", "15 секунд");
-  await expect(dialog.getByLabel("Формат")).toHaveValue("16:9");
+  await expect(dialog.locator('select:has(option[value="16:9"])')).toHaveValue("16:9");
   await expect(dialog.getByLabel("Разрешение")).toHaveValue("1080p");
   await expect(dialog.getByText("Стоимость: 30 💋").first()).toBeVisible();
   if (testInfo.project.name === "iPhone SE") {
