@@ -171,9 +171,14 @@ async def _reconcile_transaction_status(
             actual_minor = strict_minor(state.get("Amount"), positive=True)
         except (TypeError, ValueError, RefundNeedsReconciliation) as exc:
             raise ValueError("T-Bank amount not verifiable") from exc
-        if actual_minor != expected_minor:
-            raise ValueError("T-Bank amount mismatch")
         status = str(state.get("Status", "")).upper()
+        # A partial refund can carry only its refunded portion in Amount.
+        # Never accept more than the original payment or a non-positive value.
+        if status == "PARTIAL_REFUNDED":
+            if actual_minor > expected_minor:
+                raise ValueError("T-Bank partial refund amount exceeds original payment")
+        elif actual_minor != expected_minor:
+            raise ValueError("T-Bank amount mismatch")
         if status == "CONFIRMED":
             balance = await _confirm_paid_transaction(session, external_id)
         elif status in TBANK_FINAL_FAILURE_STATUSES | {"REVERSED"}:
