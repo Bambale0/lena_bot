@@ -402,7 +402,7 @@ async def _set_model(call: CallbackQuery, session: AsyncSession, state: FSMConte
         prompt_multi_ref_count=uploaded,
         prompt_multi_ref_max=max_refs,
         prompt_multi_ref_ratio=ratio,
-        prompt_multi_ref_quality=quality,
+        prompt_multi_ref_quality=marketplace._default_quality_for_model(model_key),
     )
     data = await state.get_data()
     await call.message.answer(  # type: ignore[union-attr]
