@@ -77,6 +77,8 @@ const trends = [
 ];
 
 async function mockApi(page: import("@playwright/test").Page) {
+  // The synthetic WebView auth fixture must not be overwritten by the real Telegram SDK.
+  await page.route("https://telegram.org/js/telegram-web-app.js", route => route.fulfill({ contentType: "application/javascript", body: "" }));
   await page.route("**/api/v1/me", (route) => route.fulfill({ json: user }));
   await page.route("**/api/v1/models/image", (route) => route.fulfill({ json: imageModels }));
   await page.route("**/api/v1/models/video", (route) => route.fulfill({ json: videoModels }));
