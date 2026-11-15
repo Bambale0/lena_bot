@@ -38,6 +38,7 @@ async function prepare(page: Page, protectedAlbum = false, trends: Record<string
     ...item, is_mine: false, source_image_recipe_available: true, result_url: "", result_urls: [],
     preview_url: boundResults[0], preview_urls: boundResults,
   } : item);
+  await page.route("https://telegram.org/js/telegram-web-app.js", route => route.fulfill({ contentType: "application/javascript", body: "" }));
   await page.addInitScript(() => {
     const handlers = new Set<() => void>();
     window.addEventListener("apix:gallery-test-back", () => handlers.forEach(handler => handler()));

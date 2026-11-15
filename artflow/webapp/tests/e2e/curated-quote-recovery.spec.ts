@@ -8,6 +8,7 @@ async function prepare(page: Page) {
     quotes: [] as Record<string, string>[], runs: [] as Record<string, unknown>[], payments: 0 };
   const trend = { id: 101, title: "Кинопортрет", kind: "video", preview_url: "",
     user_fields: [{ key: "name", type: "text", label: "Имя героя", required: true }] };
+  await page.route("https://telegram.org/js/telegram-web-app.js", route => route.fulfill({ contentType: "application/javascript", body: "" }));
   await page.addInitScript(() => {
     window.Telegram = { WebApp: { initData: new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify({ id: 123 }), hash: "e2e-fixture-not-a-real-signature" }).toString(), initDataUnsafe: { user: { id: 123 } }, ready() {}, expand() {},
       openLink() {}, HapticFeedback: { impactOccurred() {}, notificationOccurred() {} } } } as any;

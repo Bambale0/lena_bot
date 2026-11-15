@@ -40,6 +40,7 @@ test("service=pinterest opens Pinterest Flow directly from the bot button", asyn
   await page.route("**/api/v1/plans", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/music/voices", (route) => route.fulfill({ json: [] }));
 
+  await page.route("https://telegram.org/js/telegram-web-app.js", route => route.fulfill({ contentType: "application/javascript", body: "" }));
   await page.addInitScript(() => {
     window.Telegram = {
       WebApp: {
