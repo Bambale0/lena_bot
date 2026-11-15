@@ -479,6 +479,7 @@ async def cb_feed_use(
         feed_original_recipe_replay=original_recipe,
         feed_use_user_id=db_user.id,
         **({"prompt_multi_ref_ratio": creator["aspect_ratio"]} if original_recipe and creator["aspect_ratio"] else {}),
+        **({"prompt_multi_ref_quality": creator["quality"]} if original_recipe and creator["quality"] else {}),
     )
     await call.message.answer(  # type: ignore[union-attr]
         "🎨 <b>Повторить изображение</b>\n\n"
