@@ -292,7 +292,7 @@ async def test_status_check_payment_credit_is_atomic(payment_db, monkeypatch, pr
     from bot.handlers import payment
     factory, engine = payment_db
     tx_id, payer_id, _ = await seed_payment(factory, provider, status=TransactionStatus.pending, balance=0)
-    monkeypatch.setattr(payment.tbank, "get_payment_state", AsyncMock(return_value={"Status": "CONFIRMED"}))
+    monkeypatch.setattr(payment.tbank, "get_payment_state", AsyncMock(return_value={"Success": True, "PaymentId": "test-payment-1", "Amount": 50000, "Status": "CONFIRMED"}))
     monkeypatch.setattr(payment.cryptobot, "get_invoice", AsyncMock(return_value={"status": "paid"}))
     monkeypatch.setattr(payment.lava, "get_invoice", AsyncMock(return_value={"status": "paid"}))
     monkeypatch.setattr(main.settings, "REFERRAL_L1_CREDITS", 0)
@@ -323,7 +323,7 @@ async def test_status_check_uses_same_partial_refund_as_webhook(payment_db, monk
     from bot.handlers import payment
     factory, _ = payment_db
     tx_id, payer_id, _ = await seed_payment(factory, PaymentProvider.tbank)
-    monkeypatch.setattr(payment.tbank, "get_payment_state", AsyncMock(return_value={"Status": "PARTIAL_REFUNDED", "Amount": 25000}))
+    monkeypatch.setattr(payment.tbank, "get_payment_state", AsyncMock(return_value={"Success": True, "PaymentId": "test-payment-1", "Status": "PARTIAL_REFUNDED", "Amount": 25000}))
     async with factory() as session:
         status, _ = await payment._reconcile_transaction_status(session, await session.get(Transaction, tx_id))
         assert status == TransactionStatus.paid
@@ -441,7 +441,7 @@ async def test_review_partial_refund_status_message_never_claims_full_credit(pay
     from bot.handlers import payment
     factory, _ = payment_db
     _, payer_id, _ = await seed_payment(factory, PaymentProvider.tbank)
-    monkeypatch.setattr(payment.tbank, "get_payment_state", AsyncMock(return_value={"Status": "PARTIAL_REFUNDED", "Amount": 25000}))
+    monkeypatch.setattr(payment.tbank, "get_payment_state", AsyncMock(return_value={"Success": True, "PaymentId": "test-payment-1", "Status": "PARTIAL_REFUNDED", "Amount": 25000}))
     call = SimpleNamespace(data="pay:check:test-payment-1", answer=AsyncMock(), message=SimpleNamespace(edit_text=AsyncMock()))
     async with factory() as session:
         user = await session.get(User, payer_id)
