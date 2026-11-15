@@ -483,10 +483,19 @@ async def cb_prompt_pick_model(
         await call.answer("Для исходного поста и твоего фото нужна модель минимум с двумя референсами.", show_alert=True)
         return
     ratios = repeat_references._repeat_ratio_options(model_key)
+    available_quality = {value for value, _ in IMAGE_CAPS.get(model_key, {}).get("quality_options", [])}
+    original_quality = str(data.get("prompt_multi_ref_quality") or "") if (
+        is_feed_use and data.get("feed_use_model") == model_key
+    ) else ""
+    selected_quality = (
+        original_quality if original_quality in available_quality else _default_quality_for_model(model_key)
+    )
     await state.update_data(
         use_model_key=model_key,
         prompt_multi_ref_max=max_refs,
         prompt_multi_ref_ratio=ratios[0] if ratios else None,
+        prompt_multi_ref_quality=selected_quality,
+        prompt_multi_ref_quality_explicit=False,
     )
     await state.set_state(PromptUseFSM.reference_upload)
     if is_feed_use:
