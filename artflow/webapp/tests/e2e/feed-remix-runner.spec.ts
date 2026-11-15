@@ -81,6 +81,8 @@ const feedItems = [
 ];
 
 async function mockMiniAppApi(page: Page, withTelegram = true, nativeBack = false, imageRecipe = false) {
+  // All synthetic WebView scenarios must outrank the live Telegram SDK script.
+  await page.route("https://telegram.org/js/telegram-web-app.js", route => route.fulfill({ contentType: "application/javascript", body: "" }));
   if (withTelegram) await page.addInitScript((nativeBack) => {
     const backHandlers = new Set<() => void>();
     if (nativeBack) window.addEventListener("apix:test-back", () => backHandlers.forEach(handler => handler()));
