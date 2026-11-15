@@ -8,7 +8,7 @@ const models = [baseModel, { ...baseModel, key: "selection-b", display_name: "On
 async function prepare(page: Page, options: { light?: boolean; owner?: number } = {}) {
   const posts: Record<string, unknown>[] = [];
   await page.addInitScript(({ light }) => {
-    window.Telegram = { WebApp: { initData: "selection-fixture", colorScheme: light ? "light" : "dark",
+    window.Telegram = { WebApp: { initData: new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify({ id: 123 }), hash: "e2e-fixture-not-a-real-signature" }).toString(), colorScheme: light ? "light" : "dark",
       initDataUnsafe: { user: { id: 123, first_name: "Tester" } }, ready() {}, expand() {},
       HapticFeedback: { impactOccurred() {}, notificationOccurred() {} },
     }} as any;
