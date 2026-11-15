@@ -153,8 +153,26 @@ async def _reconcile_transaction_status(
     balance = None
     if provider == PaymentProvider.tbank:
         state = await tbank.get_payment_state(external_id)
-        if str(state.get("PaymentId", external_id)) != external_id:
-            raise ValueError("Payment state identity mismatch")
+        # Validate the provider response before any credit or status transition.
+        from db.payment_refunds import money_minor, strict_minor
+
+        if state.get("Success") is not True:
+            raise ValueError("T-Bank state not successful")
+        if str(state.get("PaymentId") or "") != external_id:
+            raise ValueError("T-Bank payment identity mismatch")
+        terminal = state.get("TerminalKey")
+        if terminal is not None and str(terminal) != settings.TBANK_TERMINAL_KEY:
+            raise ValueError("T-Bank terminal identity mismatch")
+        expected_amount = getattr(tx, "provider_amount_minor", None)
+        if expected_amount is None:
+            expected_amount = money_minor(amount_rub)
+        try:
+            expected_minor = strict_minor(expected_amount, positive=True)
+            actual_minor = strict_minor(state.get("Amount"), positive=True)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("T-Bank amount not verifiable") from exc
+        if actual_minor != expected_minor:
+            raise ValueError("T-Bank amount mismatch")
         status = str(state.get("Status", "")).upper()
         if status == "CONFIRMED":
             balance = await _confirm_paid_transaction(session, external_id)
