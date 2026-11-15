@@ -20,7 +20,7 @@ async function prepare(page: Page, videoModels = [videoModel]) {
   page.on("pageerror", error => errors.push(error.message));
   await page.addInitScript(() => {
     window.Telegram = { WebApp: {
-      initData: "creation-studio-fixture", initDataUnsafe: { user: { id: 123 } }, colorScheme: "dark",
+      initData: new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify({ id: 123 }), hash: "e2e-fixture-not-a-real-signature" }).toString(), initDataUnsafe: { user: { id: 123 } }, colorScheme: "dark",
       ready() {}, expand() {}, openLink() {},
       HapticFeedback: { impactOccurred() {}, notificationOccurred() {} },
       BackButton: { show() {}, hide() {}, onClick() {}, offClick() {} },
