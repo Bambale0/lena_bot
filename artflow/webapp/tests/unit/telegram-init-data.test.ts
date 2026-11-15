@@ -20,6 +20,7 @@ function browser(options: { live?: string; cached?: string; url?: string; early?
       location: { href: options.url || "https://example.invalid/app", origin: "https://example.invalid" },
       Telegram: { WebApp: { initData: options.live || "" } },
       sessionStorage: storage,
+      setTimeout: globalThis.setTimeout,
       __APIX_EARLY_URL__: options.early || "",
     },
   });
