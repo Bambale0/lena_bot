@@ -21,6 +21,7 @@ Safety properties:
 - T-Bank `Success=True`, exact `PaymentId`, optional terminal key and integer minor-unit amount must agree.
 - `CONFIRMED` is credited via the existing atomic `confirm_transaction_and_add_credits` ledger seam, with the first-topup referral policy installed. Concurrent webhook/reconcile calls cannot credit the same pending transaction twice.
 - Only verified final provider failures can set `failed`; all other statuses are retained.
+- If a payer has a referral lineage, the script returns `referral_commissions_require_review` instead of crediting; use the full payment-webhook/commission settlement path so affiliate earnings are not silently skipped.
 - Refund and partial refund states always require the separate refund-reconciliation path; **never** assume they can be marked failed.
 - No direct SQL changes to balances or transaction statuses. An error during one transaction does not cancel the batch.
 - Never automatically retry the checkout or create new invoices.
