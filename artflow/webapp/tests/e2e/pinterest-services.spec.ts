@@ -60,7 +60,7 @@ async function mockApi(page: import("@playwright/test").Page) {
   await page.addInitScript(() => {
     window.Telegram = {
       WebApp: {
-        initData: "test",
+        initData: new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify({ id: 123 }), hash: "e2e-fixture-not-a-real-signature" }).toString(),
         initDataUnsafe: { user: { id: 123, first_name: "Test" } },
         colorScheme: "dark",
         ready: () => undefined,
