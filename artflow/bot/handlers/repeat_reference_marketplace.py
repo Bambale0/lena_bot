@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.public_files import mirror_telegram_file, public_url_is_available
 from bot.handlers import image_gen, marketplace, repeat_references
+from bot.keyboards.models import IMAGE_CAPS
+from core.model_pricing import pricing_variant_key
 from bot.keyboards.main_menu import back_to_menu_kb
 from bot.states import PromptUseFSM
 from bot.utils.feed_media import feed_identity_references
@@ -86,6 +88,7 @@ def _keyboard(*, uploaded: int, max_refs: int, feed_repeat: bool) -> InlineKeybo
             InlineKeyboardButton(text="📐 Выбрать формат", callback_data="prompt_multi_ref:ratio_menu"),
         )
         builder.row(
+            InlineKeyboardButton(text="💎 Качество", callback_data="prompt_multi_ref:quality_menu"),
             InlineKeyboardButton(text="🧠 Выбрать нейросеть", callback_data="prompt_multi_ref:model_menu")
         )
     if uploaded:
@@ -120,11 +123,13 @@ def _text(data: dict[str, Any]) -> str:
         footer += "\nМожно отправлять фото по одному или альбомом. Генерация начнётся только после кнопки запуска."
     model_key = str(data.get("use_model_key") or marketplace.DEFAULT_PROMPT_MODEL)
     ratio = str(data.get("prompt_multi_ref_ratio") or "авто")
+    quality = _current_quality(data, model_key)
     return (
         f"{title}\n\n"
         f"Референсы: <b>{uploaded}/{max_refs}</b>\n\n"
         f"Режим: <b>Фото → фото</b>\n"
         f"Формат: <b>{ratio}</b>\n"
+        f"Качество: <b>{quality}</b>\n"
         f"Нейросеть: <b>{image_gen.get_image_model_label(model_key)}</b>{footer}"
     )
 
@@ -135,6 +140,32 @@ def _current_ratio(data: dict[str, Any], model_key: str) -> str | None:
     if current in options:
         return current
     return options[0] if options else None
+
+
+def _quality_options(model_key: str) -> list[tuple[str, str]]:
+    return list(IMAGE_CAPS.get(model_key, {}).get("quality_options") or [])
+
+
+def _current_quality(data: dict[str, Any], model_key: str) -> str:
+    selected = str(data.get("prompt_multi_ref_quality") or "")
+    if selected in {value for value, _ in _quality_options(model_key)}:
+        return selected
+    return marketplace._default_quality_for_model(model_key)
+
+
+def _quality_keyboard(model_key: str, selected: str) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    buttons = [
+        InlineKeyboardButton(
+            text=f"{'✅ ' if value == selected else ''}{label}",
+            callback_data=f"prompt_multi_ref:quality:{model_key}:{value}",
+        )
+        for value, label in _quality_options(model_key)
+    ]
+    for offset in range(0, len(buttons), 3):
+        builder.row(*buttons[offset : offset + 3])
+    builder.row(InlineKeyboardButton(text="← К референсам", callback_data="prompt_multi_ref:back"))
+    return builder.as_markup()
 
 
 def _ratio_keyboard(model_key: str, selected: str | None) -> InlineKeyboardMarkup:
@@ -277,6 +308,50 @@ async def _set_ratio(call: CallbackQuery, state: FSMContext) -> None:
     await safe_answer_callback(call, f"Формат: {ratio}")
 
 
+async def _quality_menu(call: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    model_key = str(data.get("use_model_key") or marketplace.DEFAULT_PROMPT_MODEL)
+    if not _quality_options(model_key):
+        await call.answer("Для этой модели качество определяется автоматически", show_alert=True)
+        return
+    await call.message.answer(
+        "💎 <b>Выбери качество результата</b>",
+        reply_markup=_quality_keyboard(model_key, _current_quality(data, model_key)),
+    )
+    await safe_answer_callback(call)
+
+
+async def _set_quality(call: CallbackQuery, session: AsyncSession, state: FSMContext) -> None:
+    data = await state.get_data()
+    model_key = str(data.get("use_model_key") or marketplace.DEFAULT_PROMPT_MODEL)
+    requested = (call.data or "").removeprefix("prompt_multi_ref:quality:")
+    requested_model, _, quality = requested.rpartition(":")
+    if requested_model != model_key or quality not in {value for value, _ in _quality_options(model_key)}:
+        await call.answer("Качество недоступно для выбранной модели", show_alert=True)
+        return
+    cost = await repo.get_model_cost(session, _quality_price_key(model_key, quality))
+    if not cost or not cost.is_active:
+        await call.answer("Тариф этого качества недоступен", show_alert=True)
+        return
+    await state.update_data(prompt_multi_ref_quality=quality)
+    data = await state.get_data()
+    await call.message.answer(
+        _text(data),
+        reply_markup=_keyboard(
+            uploaded=_uploaded_count(data),
+            max_refs=int(data.get("prompt_multi_ref_max") or 1),
+            feed_repeat=data.get("feed_use_prompt") is not None,
+        ),
+    )
+    await safe_answer_callback(call, f"Качество: {quality}")
+
+
+def _quality_price_key(model_key: str, quality: str) -> str:
+    if model_key == "nano-banana-2.1" and quality == "1K":
+        return model_key
+    return pricing_variant_key(model_key, quality=quality)
+
+
 async def _model_menu(call: CallbackQuery, session: AsyncSession, state: FSMContext) -> None:
     data = await state.get_data()
     try:
@@ -327,6 +402,7 @@ async def _set_model(call: CallbackQuery, session: AsyncSession, state: FSMConte
         prompt_multi_ref_count=uploaded,
         prompt_multi_ref_max=max_refs,
         prompt_multi_ref_ratio=ratio,
+        prompt_multi_ref_quality=quality,
     )
     data = await state.get_data()
     await call.message.answer(  # type: ignore[union-attr]
@@ -479,11 +555,13 @@ async def _run(
     ) is None:
         return
 
-    model_cost = await repo.resolve_image_model_cost(
-        session,
-        model_key,
-        quality=marketplace._default_quality_for_model(model_key),
-    )
+    quality = _current_quality(data, model_key)
+    if _quality_options(model_key):
+        model_cost = await repo.get_model_cost(session, _quality_price_key(model_key, quality))
+        if model_cost and not model_cost.is_active:
+            model_cost = None
+    else:
+        model_cost = await repo.resolve_image_model_cost(session, model_key, quality=quality)
     if not model_cost:
         await call.answer("Модель недоступна", show_alert=True)
         return
@@ -504,7 +582,7 @@ async def _run(
             model=model_key,
             mode="image",
             aspect_ratio=aspect_ratio,
-            quality=marketplace._default_quality_for_model(model_key),
+            quality=quality,
             count=marketplace._default_count_for_model(model_key),
             base_prompt=None,
             reference_file_id=file_ids[0],
@@ -556,7 +634,7 @@ async def _run(
         model=model_key,
         mode="image",
         aspect_ratio=aspect_ratio,
-        quality=marketplace._default_quality_for_model(model_key),
+        quality=quality,
         count=marketplace._default_count_for_model(model_key),
         base_prompt=prompt.prompt_text,
         reference_file_id=file_ids[0],
@@ -596,6 +674,8 @@ marketplace.router.callback_query.register(_hint, PromptUseFSM.reference_upload,
 marketplace.router.callback_query.register(_mode, PromptUseFSM.reference_upload, F.data == "prompt_multi_ref:mode")
 marketplace.router.callback_query.register(_ratio_menu, PromptUseFSM.reference_upload, F.data == "prompt_multi_ref:ratio_menu")
 marketplace.router.callback_query.register(_set_ratio, PromptUseFSM.reference_upload, F.data.startswith("prompt_multi_ref:ratio:"))
+marketplace.router.callback_query.register(_quality_menu, PromptUseFSM.reference_upload, F.data == "prompt_multi_ref:quality_menu")
+marketplace.router.callback_query.register(_set_quality, PromptUseFSM.reference_upload, F.data.startswith("prompt_multi_ref:quality:"))
 marketplace.router.callback_query.register(_model_menu, PromptUseFSM.reference_upload, F.data == "prompt_multi_ref:model_menu")
 marketplace.router.callback_query.register(_set_model, PromptUseFSM.reference_upload, F.data.startswith("pmr:m:"))
 marketplace.router.callback_query.register(_back, PromptUseFSM.reference_upload, F.data == "prompt_multi_ref:back")
