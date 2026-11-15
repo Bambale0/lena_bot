@@ -1023,7 +1023,16 @@ for (const surface of ["telegram", "browser"] as const) {
         status: "pending", result_urls: [], credits_spent: 1.5, created_at: new Date().toISOString(),
       } });
     });
-    await page.goto("/?tgWebAppData=test");
+    // In the browser branch there is no Telegram SDK, so launch with synthetic
+    // fresh initData in the URL instead of the legacy invalid "test" string.
+    const browserInitData = new URLSearchParams({
+      auth_date: String(Math.floor(Date.now() / 1000)),
+      user: JSON.stringify({ id: 123 }),
+      hash: "e2e-fixture-not-a-real-signature",
+    }).toString();
+    await page.goto(surface === "browser"
+      ? "/?tgWebAppData=" + encodeURIComponent(browserInitData)
+      : "/?tgWebAppData=test");
     await expect(page.getByText("Artist QA")).toBeVisible();
     await page.getByRole("button", { name: "Открыть внутри приложения", exact: true }).first().click();
     const viewer = page.locator(".apix-media-viewer");
