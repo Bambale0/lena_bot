@@ -223,10 +223,10 @@ async function mockMiniApp(page: Page, options: MockOptions = {}) {
   // do not block the live SDK behind every host proxy; it can replace start_param.
   await page.route("https://telegram.org/js/telegram-web-app.js", route => route.fulfill({ contentType: "application/javascript", body: "" }));
   await page.addInitScript(
-    ({ colorScheme, startParam }) => {
+    ({ colorScheme, startParam, initData }) => {
       window.Telegram = {
         WebApp: {
-          initData: "journey-test",
+          initData,
           initDataUnsafe: {
             user: { id: 123, first_name: "Journey" },
             start_param: startParam || undefined,
@@ -243,7 +243,15 @@ async function mockMiniApp(page: Page, options: MockOptions = {}) {
         },
       } as typeof window.Telegram;
     },
-    { colorScheme: options.colorScheme || "dark", startParam: options.startParam || "" },
+    { colorScheme: options.colorScheme || "dark", startParam: options.startParam || "",
+      // Fixtures have a real-looking auth_date; backend endpoints are separately mocked.
+      // Never relax client expiry checks merely to support synthetic E2E credentials.
+      initData: new URLSearchParams({
+        auth_date: String(Math.floor(Date.now() / 1000)),
+        user: JSON.stringify({ id: 123, first_name: "Journey" }),
+        hash: "journey-fixture-not-a-real-signature",
+      }).toString(),
+    },
   );
 
   await page.route("https://example.test/**", async (route) => {
