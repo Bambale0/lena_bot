@@ -60,6 +60,32 @@ def test_nano_banana_21_repeat_exposes_resolution_buttons() -> None:
     assert all(f"prompt_multi_ref:quality:{tier}" in labels for tier in ("1K", "2K", "4K"))
 
 
+def test_models_with_fixed_quality_do_not_show_a_resolution_control() -> None:
+    markup = repeat_reference_marketplace._keyboard(
+        uploaded=2, max_refs=4, feed_repeat=True, model_key="qwen/image-edit",
+    )
+    callbacks = {button.callback_data for row in markup.inline_keyboard for button in row}
+    assert "prompt_multi_ref:quality_menu" not in callbacks
+
+
+@pytest.mark.asyncio
+async def test_model_choice_restores_original_supported_resolution_and_resets_on_switch(monkeypatch) -> None:
+    monkeypatch.setattr(marketplace, "safe_edit_message", AsyncMock())
+    state = FakeState({
+        "feed_use_prompt": "recipe", "feed_use_model": "nano-banana-2.1",
+        "feed_original_recipe_replay": True, "prompt_multi_ref_quality": "4K",
+    })
+    call = SimpleNamespace(
+        data="prompt_pick_model:77:nano-banana-2.1",
+        message=SimpleNamespace(), answer=AsyncMock(),
+    )
+    await marketplace.cb_prompt_pick_model(call, state)
+    assert state.data["prompt_multi_ref_quality"] == "4K"
+    call.data = "prompt_pick_model:77:nano-banana-2"
+    await marketplace.cb_prompt_pick_model(call, state)
+    assert state.data["prompt_multi_ref_quality"] == marketplace._default_quality_for_model("nano-banana-2")
+
+
 @pytest.mark.asyncio
 async def test_repeat_quality_selection_updates_summary_and_rejects_unknown_tier() -> None:
     state = FakeState({
