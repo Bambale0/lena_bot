@@ -61,3 +61,27 @@ def test_cli_help_does_not_call_provider():
     )
     assert result.returncode == 0
     assert "--lookback-days" in result.stdout
+
+
+def test_cli_help_exposes_bounded_pagination():
+    script = Path(__file__).parents[1] / "scripts/reconcile_cryptobot_pending.py"
+    result = subprocess.run([sys.executable, str(script), "--help"], capture_output=True, text=True, timeout=15)
+    assert result.returncode == 0
+    assert "--offset" in result.stdout
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("offset", [-1, 10001])
+async def test_invalid_audit_offset_rejected_before_provider_or_database_access(offset):
+    from scripts.reconcile_cryptobot_pending import audit
+    with pytest.raises(ValueError, match="offset must be within"):
+        await audit(offset=offset)
+
+
+def test_paginated_audit_does_not_write_to_transactions_or_ledger():
+    source = (Path(__file__).parents[1] / "scripts/reconcile_cryptobot_pending.py").read_text()
+    assert ".offset(offset).limit(limit)" in source
+    assert "Transaction.created_at.asc(), Transaction.id.asc()" in source
+    assert "confirm_transaction_and_add_credits" not in source
+    assert "set_transaction_status" not in source
+    assert "session.commit(" not in source
