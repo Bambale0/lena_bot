@@ -9,7 +9,7 @@ async function prepare(page: Page) {
   const trend = { id: 101, title: "Кинопортрет", kind: "video", preview_url: "",
     user_fields: [{ key: "name", type: "text", label: "Имя героя", required: true }] };
   await page.addInitScript(() => {
-    window.Telegram = { WebApp: { initData: "test", initDataUnsafe: { user: { id: 123 } }, ready() {}, expand() {},
+    window.Telegram = { WebApp: { initData: new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify({ id: 123 }), hash: "e2e-fixture-not-a-real-signature" }).toString(), initDataUnsafe: { user: { id: 123 } }, ready() {}, expand() {},
       openLink() {}, HapticFeedback: { impactOccurred() {}, notificationOccurred() {} } } } as any;
   });
   await page.route("**/telegram-web-app.js", route => route.fulfill({ body: "" }));
