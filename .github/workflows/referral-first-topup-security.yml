@@ -93,7 +93,12 @@ jobs:
         run: |
           grep -q "install_referral_reward_policy(repo)" api/web/__init__.py
           grep -q "install_referral_reward_policy(repo)" run_polling.py
-          grep -q "install_referral_reward_policy(repo)" scripts/reconcile_cryptobot_pending.py
+          # This entrypoint is intentionally read-only, so it must never install
+          # a reward writer or call a settlement/status mutation helper.
+          grep -q '"mode": "dry_run"' scripts/reconcile_cryptobot_pending.py
+          ! grep -q "confirm_transaction_and_add_credits" scripts/reconcile_cryptobot_pending.py
+          ! grep -q "set_transaction_status" scripts/reconcile_cryptobot_pending.py
+          ! grep -q "session.commit(" scripts/reconcile_cryptobot_pending.py
 
       - name: Referral regression tests
         run: pytest -q tests/test_referral_first_topup_policy.py
