@@ -153,6 +153,8 @@ export class MiniAppApi {
   // Re-read credentials at request time: this client can outlive a Telegram SDK session.
   // Never revive an expired initData captured in the constructor.
   private currentInitData(): string {
+    // SSR/test callers have no Telegram WebView; browsers must never revive stale credentials.
+    if (typeof window === "undefined") return this.initData;
     return readTelegramInitData() || (telegramInitDataIsFresh(this.initData) ? this.initData : "");
   }
 
