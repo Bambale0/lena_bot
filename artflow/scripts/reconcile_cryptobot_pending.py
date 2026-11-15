@@ -56,9 +56,11 @@ def classify_invoice(external_id: str, response: dict[str, Any]) -> tuple[str, s
     return "review", "provider_status_unknown"
 
 
-async def audit(*, limit: int = 20, lookback_days: int = 30, min_age_minutes: int = 30) -> dict[str, Any]:
+async def audit(*, limit: int = 20, offset: int = 0, lookback_days: int = 30, min_age_minutes: int = 30) -> dict[str, Any]:
     if not 1 <= limit <= MAX_BATCH_SIZE:
         raise ValueError(f"limit must be within 1..{MAX_BATCH_SIZE}")
+    if not 0 <= offset <= 10000:
+        raise ValueError("offset must be within 0..10000")
     if not 1 <= lookback_days <= 3650:
         raise ValueError("lookback-days must be within 1..3650")
     if not 5 <= min_age_minutes <= 1440:
@@ -75,7 +77,7 @@ async def audit(*, limit: int = 20, lookback_days: int = 30, min_age_minutes: in
                 Transaction.external_id.is_not(None),
                 Transaction.created_at >= now - timedelta(days=lookback_days),
                 Transaction.created_at <= now - timedelta(minutes=min_age_minutes),
-            ).order_by(Transaction.created_at.asc(), Transaction.id.asc()).limit(limit)
+            ).order_by(Transaction.created_at.asc(), Transaction.id.asc()).offset(offset).limit(limit)
         )).scalars().all()
     # DB connection released before any provider network call.
     counts: Counter[str] = Counter()
@@ -96,7 +98,7 @@ async def audit(*, limit: int = 20, lookback_days: int = 30, min_age_minutes: in
             # Never print invoice ids, user ids, token, provider payload, or balance.
             print(json.dumps({"tx_id": tx.id, "decision": decision, "reason": reason}))
             await asyncio.sleep(0.25)
-    summary = {"mode": "dry_run", "checked": len(rows), "outcomes": dict(counts)}
+    summary = {"mode": "dry_run", "offset": offset, "checked": len(rows), "outcomes": dict(counts)}
     print(json.dumps({"summary": summary}))
     return summary
 
@@ -104,12 +106,13 @@ async def audit(*, limit: int = 20, lookback_days: int = 30, min_age_minutes: in
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--limit", type=int, default=20)
+    parser.add_argument("--offset", type=int, default=0, help="Skip earlier pending invoices in stable created_at/id order (0..10000)")
     parser.add_argument("--lookback-days", type=int, default=30)
     parser.add_argument("--min-age-minutes", type=int, default=30)
     args = parser.parse_args()
     try:
         asyncio.run(audit(
-            limit=args.limit, lookback_days=args.lookback_days,
+            limit=args.limit, offset=args.offset, lookback_days=args.lookback_days,
             min_age_minutes=args.min_age_minutes,
         ))
     except (ValueError, RuntimeError) as exc:
