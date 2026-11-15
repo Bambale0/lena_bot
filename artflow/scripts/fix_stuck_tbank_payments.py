@@ -130,12 +130,21 @@ async def reconcile(*, limit: int, lookback_days: int, min_age_minutes: int, app
                     ):
                         outcome = "already_resolved"
                     elif action == "paid":
-                        result = await repo.confirm_transaction_and_add_credits(
-                            session,
-                            str(tx.external_id),
-                            note="T-Bank verified GetState reconciliation",
-                        )
-                        outcome = "confirmed" if result else "already_resolved"
+                        # Percent-based referral commissions are normally applied by
+                        # the webhook's separate commission seam. This CLI must not
+                        # silently bypass them for referred users.
+                        user = await repo.get_user_by_id(session, current.user_id)
+                        if user is None or any((
+                            user.referrer_id, user.referrer_l2_id, user.referrer_l3_id,
+                        )):
+                            outcome = "referral_commissions_require_review"
+                        else:
+                            result = await repo.confirm_transaction_and_add_credits(
+                                session,
+                                str(tx.external_id),
+                                note="T-Bank verified GetState reconciliation",
+                            )
+                            outcome = "confirmed" if result else "already_resolved"
                     else:
                         result = await repo.set_transaction_status(
                             session, str(tx.external_id), TransactionStatus.failed
