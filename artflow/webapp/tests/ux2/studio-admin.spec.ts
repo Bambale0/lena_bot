@@ -5,6 +5,7 @@ async function setup(page: Page) {
   const reads: string[] = [];
   const state = { status: "processing", refunded: false, lose: false, forbid: "", modelCredits: 5 };
   let plan = { id: 3, key: "basic", label: "Пакет", credits: 100, price_rub: 200, price_stars: null as number | null, sort_order: 1, is_active: true };
+  await page.route("https://telegram.org/js/telegram-web-app.js", route => route.fulfill({ contentType: "application/javascript", body: "" }));
   await page.addInitScript(() => { window.Telegram = { WebApp: { initData: new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify({ id: 123 }), hash: "e2e-fixture-not-a-real-signature" }).toString(), initDataUnsafe: { user: { id: 123 } }, ready() {}, expand() {}, BackButton: { show() {}, hide() {}, onClick() {}, offClick() {} } } } as any; });
   await page.route("**/telegram-web-app.js", r => r.fulfill({ body: "" }));
   await page.route("**/api/**", async r => {

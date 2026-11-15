@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 async function prepare(page: Page, allowed = true, light = false, extra: { ownerId?: number; historyFails?: () => boolean } = {}) {
+  await page.route("https://telegram.org/js/telegram-web-app.js", route => route.fulfill({ contentType: "application/javascript", body: "" }));
   await page.addInitScript(({ light }) => {
     (window as any).__back = null;
     window.Telegram = { WebApp: {
