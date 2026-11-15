@@ -296,6 +296,30 @@ async def test_trend_run_status_unlinked_claim_never_resubmits(trend_client, sta
 
 
 @pytest.mark.asyncio
+async def test_trend_run_status_returns_existing_owned_task_without_new_post(trend_client):
+    client, monkeypatch, reserve, create = trend_client
+    monkeypatch.setattr("api.trends_routes.get_claim", AsyncMock(return_value=SimpleNamespace(
+        trend_id=12, generation_id=101, status="complete",
+    )))
+    generation = SimpleNamespace(
+        id=101, user_id=7, model="wan/3-0-video", gen_type="video",
+        prompt="", status="processing", result_url=None, credits_spent=12.0,
+        created_at="2026-11-15T11:00:00+00:00",
+    )
+    monkeypatch.setattr(
+        "api.trends_routes.repo.get_generation_by_id",
+        AsyncMock(return_value=generation),
+    )
+    response = await client.get("/api/v1/trends/12/runs/unknown-request-key")
+    assert response.status_code == 200, response.text
+    assert response.json()["state"] == "complete"
+    assert response.json()["task"]["id"] == 101
+    assert response.json()["task"]["cost"] == 12.0
+    reserve.assert_not_awaited()
+    create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_trend_run_status_denies_another_trend_claim(trend_client):
     client, monkeypatch, reserve, create = trend_client
     monkeypatch.setattr("api.trends_routes.get_claim", AsyncMock(return_value=SimpleNamespace(
