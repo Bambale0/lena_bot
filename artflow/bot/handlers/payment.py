@@ -154,7 +154,7 @@ async def _reconcile_transaction_status(
     if provider == PaymentProvider.tbank:
         state = await tbank.get_payment_state(external_id)
         # Validate the provider response before any credit or status transition.
-        from db.payment_refunds import money_minor, strict_minor
+        from db.payment_refunds import RefundNeedsReconciliation, money_minor, strict_minor
 
         if state.get("Success") is not True:
             raise ValueError("T-Bank state not successful")
@@ -169,7 +169,7 @@ async def _reconcile_transaction_status(
         try:
             expected_minor = strict_minor(expected_amount, positive=True)
             actual_minor = strict_minor(state.get("Amount"), positive=True)
-        except (TypeError, ValueError) as exc:
+        except (TypeError, ValueError, RefundNeedsReconciliation) as exc:
             raise ValueError("T-Bank amount not verifiable") from exc
         if actual_minor != expected_minor:
             raise ValueError("T-Bank amount mismatch")
