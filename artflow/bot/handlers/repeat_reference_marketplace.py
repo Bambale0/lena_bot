@@ -556,7 +556,7 @@ async def _run(
         return
 
     quality = _current_quality(data, model_key)
-    if _quality_options(model_key):
+    if model_key == "nano-banana-2.1":
         model_cost = await repo.get_model_cost(session, _quality_price_key(model_key, quality))
         if model_cost and not model_cost.is_active:
             model_cost = None
