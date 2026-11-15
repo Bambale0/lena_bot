@@ -326,3 +326,56 @@ async def test_marketplace_run_uses_recipe_without_canonical_scene(monkeypatch, 
     launch.assert_awaited_once()
     assert launch.await_args.kwargs["reference_url"] == ["https://example.test/identity.jpg"]
     assert source_url not in str(launch.await_args)
+
+def test_banana21_repeat_exposes_all_quality_buttons_and_selected_value() -> None:
+    handler = repeat_reference_marketplace
+    options = handler._quality_keyboard("nano-banana-2.1", "4K")
+    callbacks = {button.callback_data for row in options.inline_keyboard for button in row}
+    assert {f"prompt_multi_ref:quality:nano-banana-2.1:{q}" for q in ("1K", "2K", "4K")} <= callbacks
+    assert handler._current_quality({"prompt_multi_ref_quality": "4K"}, "nano-banana-2.1") == "4K"
+    assert handler._quality_price_key("nano-banana-2.1", "1K") == "nano-banana-2.1"
+    assert handler._quality_price_key("nano-banana-2.1", "4K") != "nano-banana-2.1"
+    text = handler._text({
+        "feed_use_prompt": "hidden", "use_model_key": "nano-banana-2.1",
+        "prompt_multi_ref_quality": "4K", "prompt_multi_ref_count": 3, "prompt_multi_ref_max": 4,
+    })
+    assert "Качество: <b>4K</b>" in text
+
+
+@pytest.mark.asyncio
+async def test_banana21_quality_rejects_disabled_tariff_without_changing_state(monkeypatch) -> None:
+    handler = repeat_reference_marketplace
+    state = FakeState({"use_model_key": "nano-banana-2.1", "prompt_multi_ref_quality": "1K"})
+    call = SimpleNamespace(
+        data="prompt_multi_ref:quality:nano-banana-2.1:4K",
+        answer=AsyncMock(), message=SimpleNamespace(answer=AsyncMock()),
+    )
+    lookup = AsyncMock(return_value=SimpleNamespace(is_active=False, credits=3))
+    monkeypatch.setattr(handler.repo, "get_model_cost", lookup)
+    await handler._set_quality(call, AsyncMock(), state)
+    assert state.data["prompt_multi_ref_quality"] == "1K"
+    assert call.answer.await_args.kwargs["show_alert"] is True
+    call.message.answer.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_banana21_quality_change_preserves_references_and_ratio(monkeypatch) -> None:
+    handler = repeat_reference_marketplace
+    state = FakeState({
+        "feed_use_prompt": "hidden", "use_model_key": "nano-banana-2.1",
+        "prompt_multi_ref_quality": "1K", "prompt_multi_ref_ratio": "9:16",
+        "prompt_multi_ref_file_ids": ["one", "two"], "prompt_multi_ref_count": 2,
+        "prompt_multi_ref_max": 4,
+    })
+    call = SimpleNamespace(
+        data="prompt_multi_ref:quality:nano-banana-2.1:4K",
+        answer=AsyncMock(), message=SimpleNamespace(answer=AsyncMock()),
+    )
+    monkeypatch.setattr(handler.repo, "get_model_cost", AsyncMock(return_value=SimpleNamespace(is_active=True, credits=8)))
+    monkeypatch.setattr(handler, "safe_answer_callback", AsyncMock())
+    await handler._set_quality(call, AsyncMock(), state)
+    assert state.data["prompt_multi_ref_quality"] == "4K"
+    assert state.data["prompt_multi_ref_ratio"] == "9:16"
+    assert state.data["prompt_multi_ref_file_ids"] == ["one", "two"]
+    assert "Качество: <b>4K</b>" in call.message.answer.await_args.args[0]
+
