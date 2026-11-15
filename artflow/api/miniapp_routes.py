@@ -502,7 +502,7 @@ def _feed_card_out(card: Any, user: User | None) -> dict:
         "shares_count": generation.shares_count,
         "aspect_ratio": card.aspect_ratio,
         "source_has_video_reference": bool(replay_videos) if replay_videos is not None else None,
-        "source_required_photo_count": required_feed_reader_photos(generation.model, creator_inputs or {}, generation.prompt),
+        "source_required_photo_count": required_feed_reader_photos(generation.model, creator_inputs or {}, str(getattr(generation, "prompt", "") or "")),
         "source_image_recipe_available": bool(photo_recipe),
         "source_image_recipe_available_for_nano21": bool(nano21_recipe),
         "original_image_quality": image_recipe_settings.get("quality"),

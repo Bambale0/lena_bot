@@ -278,7 +278,7 @@ class FeedCard(BaseModel):
             can_remix=bool(result_url),
             can_use_reference=gen_type == "image" and bool(result_url),
             source_has_video_reference=bool(origin_videos) if origin_videos is not None else None,
-            source_required_photo_count=required_feed_reader_photos(generation.model, creator_inputs or {}, generation.prompt),
+            source_required_photo_count=required_feed_reader_photos(generation.model, creator_inputs or {}, str(getattr(generation, "prompt", "") or "")),
             source_image_recipe_available=bool(photo_recipe),
             source_image_recipe_available_for_nano21=bool(nano21_recipe),
             original_image_quality=image_recipe_settings.get("quality"),
