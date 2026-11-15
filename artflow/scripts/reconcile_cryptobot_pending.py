@@ -24,7 +24,6 @@ from sqlalchemy import select
 
 # Initialize API contracts before db.session to avoid a standalone CLI import cycle.
 import api  # noqa: E402,F401
-
 from core.config import settings
 from db.models import PaymentProvider, Transaction, TransactionStatus
 from db.session import AsyncSessionLocal
