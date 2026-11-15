@@ -89,7 +89,12 @@ test("owned result downloads through signed backend attachment not the thumbnail
   await prepare(page);
   await page.route("**/api/v1/history?**", route => route.fulfill({ json: [{ id: 81, model: "image-fixture", gen_type: "image", prompt: "Мой результат", status: "done", result_url: "https://media.example.test/original.png" }] }));
   let signed = false;
-  await page.route("**/api/web/generations/81/download", route => { signed = route.request().headers()["x-telegram-init-data"] === "studio-capability-fixture"; return route.fulfill({ contentType: "image/png", headers: { "Content-Disposition": 'attachment; filename="result-81.png"' }, body: Buffer.from("fixture-image") }); });
+  await page.route("**/api/web/generations/81/download", route => { const auth = new URLSearchParams(route.request().headers()["x-telegram-init-data"] || "");
+    const issuedAt = Number(auth.get("auth_date") || 0);
+    signed = auth.get("hash") === "e2e-fixture-not-a-real-signature"
+      && issuedAt >= Math.floor(Date.now() / 1000) - 120
+      && issuedAt <= Math.floor(Date.now() / 1000) + 300
+      && JSON.parse(auth.get("user") || "{}").id === 123; return route.fulfill({ contentType: "image/png", headers: { "Content-Disposition": 'attachment; filename="result-81.png"' }, body: Buffer.from("fixture-image") }); });
   await page.goto("/?ux=3"); await page.getByRole("tab", { name: "Профиль", exact: true }).click();
   await page.getByRole("button", { name: "Мой результат — Готово", exact: true }).click();
   const download = page.waitForEvent("download");
