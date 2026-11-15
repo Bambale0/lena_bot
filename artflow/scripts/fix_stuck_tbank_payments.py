@@ -1,9 +1,20 @@
 #!/usr/bin/env python3
-"""Fix stuck T-Bank pending transactions by checking their status at T-Bank."""
+"""Conservative, bounded T-Bank pending reconciliation.
+
+Default mode is read-only against the local database and calls only T-Bank GetState.
+Use --apply only after reviewing dry-run results; no age-based status changes.
+All balance/ledger writes use the atomic repository seam and referral policy.
+"""
+from __future__ import annotations
+
+import argparse
 import asyncio
 import json
 import sys
+from collections import Counter
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -11,78 +22,156 @@ if str(ROOT) not in sys.path:
 
 from sqlalchemy import select
 
-from db.models import Transaction, TransactionStatus, User
+from core.config import settings
+from db import repository as repo
+from db.models import PaymentProvider, Transaction, TransactionStatus
+from db.payment_refunds import RefundNeedsReconciliation, money_minor, strict_minor
+from db.referral_reward_policy import install_referral_reward_policy
 from db.session import AsyncSessionLocal
 from payments.tbank import get_payment_state
 
+FINAL_FAILURES = frozenset({
+    "CANCELED", "CANCELLED", "REJECTED", "DEADLINE_EXPIRED", "AUTH_FAIL", "REVERSED",
+})
+REVIEW_STATES = frozenset({"REFUNDED", "PARTIAL_REFUNDED", "PARTIAL_REVERSED"})
+MAX_BATCH_SIZE = 50
 
-async def main() -> int:
-    fixed = 0
-    errors = 0
+
+def decide_tbank_action(
+    *,
+    external_id: str,
+    amount_rub: float,
+    provider_amount_minor: int | None,
+    state: dict[str, Any],
+    expected_terminal_key: str,
+) -> tuple[str, str]:
+    """Return (paid|failed|pending|review, safe_reason). No writes or provider calls."""
+    if state.get("Success") is not True:
+        return "review", "provider_not_successful"
+    if str(state.get("PaymentId") or "") != external_id:
+        return "review", "payment_identity_mismatch"
+    terminal_key = state.get("TerminalKey")
+    if terminal_key is not None and str(terminal_key) != expected_terminal_key:
+        return "review", "terminal_identity_mismatch"
+    try:
+        expected = provider_amount_minor
+        if expected is None:
+            expected = money_minor(amount_rub)
+        expected = strict_minor(expected, positive=True)
+        actual = strict_minor(state.get("Amount"), positive=True)
+    except (ValueError, TypeError, RefundNeedsReconciliation):
+        return "review", "amount_not_verifiable"
+    if actual != expected:
+        return "review", "amount_mismatch"
+
+    status = str(state.get("Status") or "").upper()
+    if status == "CONFIRMED":
+        return "paid", "provider_confirmed"
+    if status in FINAL_FAILURES:
+        return "failed", "provider_terminal_failure"
+    if status in REVIEW_STATES:
+        return "review", "refund_requires_separate_reconciliation"
+    return "pending", "provider_not_final"
+
+
+async def reconcile(*, limit: int, lookback_days: int, min_age_minutes: int, apply: bool) -> dict[str, object]:
+    if not 1 <= limit <= MAX_BATCH_SIZE:
+        raise ValueError(f"limit must be within 1..{MAX_BATCH_SIZE}")
+    if not 1 <= lookback_days <= 3650:
+        raise ValueError("lookback-days must be within 1..3650")
+    if not 5 <= min_age_minutes <= 24 * 60:
+        raise ValueError("min-age-minutes must be within 5..1440")
+    if not settings.TBANK_TERMINAL_KEY or not settings.TBANK_PASSWORD:
+        raise RuntimeError("T-Bank credentials are not configured")
+
+    now = datetime.now(timezone.utc)
     async with AsyncSessionLocal() as session:
         rows = (
             await session.execute(
                 select(Transaction)
                 .where(
-                    Transaction.provider == 'tbank',
+                    Transaction.provider == PaymentProvider.tbank,
                     Transaction.status == TransactionStatus.pending,
                     Transaction.external_id.is_not(None),
+                    Transaction.created_at >= now - timedelta(days=lookback_days),
+                    Transaction.created_at <= now - timedelta(minutes=min_age_minutes),
                 )
-                .order_by(Transaction.created_at.desc())
-                .limit(50)
+                .order_by(Transaction.created_at.asc(), Transaction.id.asc())
+                .limit(limit)
             )
         ).scalars().all()
-
-        print(f"Found {len(rows)} pending T-Bank transactions")
-
-        for tx in rows:
-            print(f"\n{'='*60}")
-            print(f"Tx #{tx.id} | user={tx.user_id} | {tx.amount_rub}₽/{tx.credits}💋 | {tx.created_at}")
-            print(f"External ID: {tx.external_id}")
+    # Deliberately release the query transaction before calling the provider.
+    # A dry-run does not issue any local write or status mutation.
+    counts: Counter[str] = Counter()
+    for tx in rows:
+        try:
+            state = await get_payment_state(str(tx.external_id))
+            action, reason = decide_tbank_action(
+                external_id=str(tx.external_id),
+                amount_rub=tx.amount_rub,
+                provider_amount_minor=tx.provider_amount_minor,
+                state=state,
+                expected_terminal_key=settings.TBANK_TERMINAL_KEY,
+            )
+        except Exception as exc:
+            action, reason = "review", f"provider_read_{type(exc).__name__}"
+        outcome = "observed"
+        if apply and action in {"paid", "failed"}:
+            # Only a verified provider response can reach this code path.
+            # Repository helpers atomically guard pending->terminal and ledger exactly-once.
             try:
-                state = await get_payment_state(str(tx.external_id))
-                status = str(state.get("Status", "")).upper()
-                success = state.get("Success")
-                print(f"T-Bank response: Status={status} Success={success}")
-
-                if status == "CONFIRMED" and success:
-                    # Mark as paid and add credits
-                    tx.status = TransactionStatus.paid
-                    user = await session.get(User, tx.user_id)
-                    if user:
-                        user.credits = float(user.credits or 0) + float(tx.credits)
-                        await session.commit()
-                        print(f"✅ FIXED! Credited {tx.credits}💋 to user {tx.user_id}")
-                        fixed += 1
-                        fixed_details.append({
-                            "tx_id": tx.id,
-                            "user_id": tx.user_id,
-                            "amount_rub": tx.amount_rub,
-                            "credits": tx.credits,
-                            "external_id": tx.external_id,
-                        })
+                async with AsyncSessionLocal() as session:
+                    current = await session.get(Transaction, tx.id)
+                    if (
+                        current is None
+                        or current.provider != PaymentProvider.tbank
+                        or current.status != TransactionStatus.pending
+                        or current.external_id != tx.external_id
+                    ):
+                        outcome = "already_resolved"
+                    elif action == "paid":
+                        result = await repo.confirm_transaction_and_add_credits(
+                            session,
+                            str(tx.external_id),
+                            note="T-Bank verified GetState reconciliation",
+                        )
+                        outcome = "confirmed" if result else "already_resolved"
                     else:
-                        print(f"❌ User {tx.user_id} not found!")
-                        await session.rollback()
-                elif status in ("CANCELED", "CANCELLED", "REJECTED", "DEADLINE_EXPIRED", "AUTH_FAIL"):
-                    tx.status = TransactionStatus.failed
-                    await session.commit()
-                    print(f"⏭ Marked as failed (status={status})")
-                else:
-                    print(f"⏳ Still pending at T-Bank (status={status})")
+                        result = await repo.set_transaction_status(
+                            session, str(tx.external_id), TransactionStatus.failed
+                        )
+                        outcome = "failed" if result else "already_resolved"
+            except Exception as exc:
+                outcome = f"write_failed_{type(exc).__name__}"
+        counts[f"{action}:{reason}:{outcome}"] += 1
+        # User IDs, payment references, provider payloads and API credentials are not printed.
+        print(json.dumps({"tx_id": tx.id, "decision": action, "reason": reason, "outcome": outcome}))
+        await asyncio.sleep(0.25)
 
-            except Exception as e:
-                errors += 1
-                print(f"❌ Error checking tx #{tx.id}: {e}")
-                await session.rollback()
+    return {"mode": "apply" if apply else "dry_run", "checked": len(rows), "outcomes": dict(counts)}
 
-    print(f"\n{'='*60}")
-    print(f"Done: fixed={fixed} errors={errors}")
-    if fixed_details:
-        print(f"\nFixed details: {json.dumps(fixed_details, ensure_ascii=False, indent=2)}")
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--apply", action="store_true", help="Apply verified paid/final-failure states; default is dry-run")
+    parser.add_argument("--limit", type=int, default=20, help="Max pending invoices to query (1..50)")
+    parser.add_argument("--lookback-days", type=int, default=30, help="Only newer pending invoices (1..3650)")
+    parser.add_argument("--min-age-minutes", type=int, default=30, help="Skip very new invoices (5..1440)")
+    args = parser.parse_args()
+    install_referral_reward_policy(repo)
+    try:
+        summary = asyncio.run(reconcile(
+            limit=args.limit,
+            lookback_days=args.lookback_days,
+            min_age_minutes=args.min_age_minutes,
+            apply=args.apply,
+        ))
+    except (ValueError, RuntimeError) as exc:
+        print(f"reconciliation_config_error={type(exc).__name__}", file=sys.stderr)
+        return 2
+    print(json.dumps({"summary": summary}))
     return 0
 
 
 if __name__ == "__main__":
-    fixed_details = []
-    raise SystemExit(asyncio.run(main()))
+    raise SystemExit(main())
