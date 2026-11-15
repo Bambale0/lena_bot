@@ -13,7 +13,7 @@ async function openPhoto(page: Page) {
 async function prepare(page: Page, options: { light?: boolean } = {}) {
   const uploads: string[] = []; const posts: Record<string, unknown>[] = [];
   const state = { owner: 7, failSecond: false, brokenPreview: false, policyBytes: 20 * 1024 * 1024, malformed: false };
-  await page.addInitScript(({ light }) => { window.Telegram = { WebApp: { initData: "uploads-fixture", colorScheme: light ? "light" : "dark",
+  await page.addInitScript(({ light }) => { window.Telegram = { WebApp: { initData: new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify({ id: 123 }), hash: "e2e-fixture-not-a-real-signature" }).toString(), colorScheme: light ? "light" : "dark",
     initDataUnsafe: { user: { id: 123 } }, ready() {}, expand() {}, HapticFeedback: { impactOccurred() {}, notificationOccurred() {} },
   }} as any; }, { light: options.light || false });
   await page.route("**/telegram-web-app.js", route => route.fulfill({ body: "", contentType: "application/javascript" }));
