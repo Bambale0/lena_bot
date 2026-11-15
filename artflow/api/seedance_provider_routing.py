@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, TypeVar
 from api.kieai_client import KieDefiniteRejection, KieSubmissionOutcomeUnknown
 from api.neironych_seedance import NeironychPreSubmitFailure, NeironychSubmissionUnknown
 from core.config import settings
-from core.neironych_seedance_contract import SeedanceCapabilityUnavailable, SeedanceContractError
+from core.neironych_seedance_contract import SeedanceContractError
 
 if TYPE_CHECKING:
     from api.neironych_seedance_runtime import SubmissionContext
