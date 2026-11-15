@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, TypeVar
 from api.kieai_client import KieDefiniteRejection, KieSubmissionOutcomeUnknown
 from api.neironych_seedance import NeironychPreSubmitFailure, NeironychSubmissionUnknown
 from core.config import settings
-from core.neironych_seedance_contract import SeedanceCapabilityUnavailable
+from core.neironych_seedance_contract import SeedanceCapabilityUnavailable, SeedanceContractError
 
 if TYPE_CHECKING:
     from api.neironych_seedance_runtime import SubmissionContext
@@ -33,7 +33,7 @@ async def submit_seedance(
     try:
         return await providers[primary]()
     except (NeironychSubmissionUnknown, NeironychPreSubmitFailure,
-            KieSubmissionOutcomeUnknown, SeedanceCapabilityUnavailable):
+            KieSubmissionOutcomeUnknown, SeedanceContractError):
         raise
     except Exception as primary_exc:
         if primary == "kieai" and not isinstance(primary_exc, KieDefiniteRejection):
@@ -50,7 +50,7 @@ async def submit_seedance(
         try:
             return await providers[secondary]()
         except (NeironychSubmissionUnknown, NeironychPreSubmitFailure,
-                KieSubmissionOutcomeUnknown, SeedanceCapabilityUnavailable):
+                KieSubmissionOutcomeUnknown, SeedanceContractError):
             raise
         except Exception as fallback_exc:
             raise RuntimeError(

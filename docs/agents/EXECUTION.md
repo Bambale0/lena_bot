@@ -70,3 +70,11 @@
 - Local full pytest note: the Windows run completed but retains pre-existing POSIX,
   Docker/Nginx-fixture and generated-site contract failures. The required Linux
   `backend-quality` gate with disposable PostgreSQL remains authoritative and pending.
+
+### 2026-11-15 — Seedance invalid-reference preflight does not trigger paid fallback
+- Baseline: origin/main at 5ab974b9.
+- Observed: a Seedance 2.5 prompt named @Image2 without a matching uploaded reference; the primary local contract error triggered an unnecessary KIE fallback (which returned 402), yielding 502 at /api/v1/feed/{id}/remix.
+- Fix: route SeedanceContractError as a definitive local validation error, including both primary and fallback paths. Never execute a second paid provider call for this error.
+- Regression: failing test captured fallback before code change; after change the specific test and complete nearby admission/runtime/video modules passed (101 tests).
+- Invariants: preserve no-double-billing guarantees, other provider fallback for real post-submission rejections, original prompt and selected media.
+- Follow-up: feed user-facing reference validation and recovery of historical missing media are independent from provider routing.

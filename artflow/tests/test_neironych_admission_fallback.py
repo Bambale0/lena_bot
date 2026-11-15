@@ -459,3 +459,22 @@ async def test_crash_after_kie_rejection_resumes_only_neironych_fallback(
             assert final.status == GenerationStatus.failed
             assert session.get(User, 42).credits == 140
         kie_post.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_seedance_local_reference_validation_must_not_fallback(monkeypatch):
+    from core.neironych_seedance_contract import SeedanceContractError
+
+    monkeypatch.setattr(seedance_provider_routing.settings, "SEEDANCE_PRIMARY_PROVIDER", "neironych")
+    primary = AsyncMock(
+        side_effect=SeedanceContractError(
+            "Промпт ссылается на отсутствующие референсы: @Image2"
+        )
+    )
+    backup = AsyncMock(return_value="kie-should-not-be-called")
+    with pytest.raises(SeedanceContractError, match="@Image2"):
+        await seedance_provider_routing.submit_seedance(
+            "bytedance/seedance-2-5", neironych=primary, kie=backup,
+        )
+    primary.assert_awaited_once()
+    backup.assert_not_awaited()
