@@ -1368,3 +1368,55 @@ for (const modelKey of ["wan/3-0-video", "wan/3-0-video-prime"]) {
     expect(launches[0]).not.toHaveProperty("prompt");
   });
 }
+
+test("Seedance @Image2 repeat requires a second photo before quote and keeps the draft", async ({ page }) => {
+  await mockMiniAppApi(page);
+  const model = { key: "bytedance/seedance-2-5", display_name: "Seedance 2.5",
+    modes: ["text", "multimodal"], max_refs: 30,
+    aspect_ratios: ["16:9", "9:16"], durations: [5, 10], resolutions: ["480p", "720p"] };
+  const source = { id: 201, model: model.key, gen_type: "video", prompt: "", prompt_hidden: true,
+    source_has_video_reference: false, source_required_photo_count: 2, original_duration: 10,
+    original_aspect_ratio: "9:16", original_resolution: "480p",
+    result_url: "https://example.test/rendered.mp4", result_urls: ["https://example.test/rendered.mp4"],
+    author: "Creator", likes_count: 0, shares_count: 0, remixes: 0, is_mine: false };
+  await page.route("**/api/v1/feed?**", route => route.fulfill({ json: [source] }));
+  await page.route("**/api/v1/feed/201", route => route.fulfill({ json: source }));
+  await page.route("**/api/v1/models/video", route => route.fulfill({ json: [model] }));
+  let uploads = 0;
+  await page.route("**/api/web/upload-media", route => route.fulfill({
+    json: { data: { url: "https://example.test/reader-" + (++uploads) + ".jpg", kind: "image" } },
+  }));
+  let quotes = 0;
+  let launches = 0;
+  await page.route("**/api/v1/feed/201/remix/quote", route => {
+    quotes++;
+    return route.fulfill({ json: {
+      cost_credits: 20, balance_credits: 100, can_run: true, deficit_credits: 0, recommended_plan: null,
+    } });
+  });
+  await page.route("**/api/v1/feed/201/remix", route => {
+    launches++;
+    return route.fulfill({ status: 500 });
+  });
+  await page.goto("/?tgWebAppData=test&feed=201");
+  const dialog = page.getByRole("dialog", { name: "Повторить работу" });
+  await expect(dialog.getByText(/Для повтора нужно фото: 2/)).toBeVisible();
+  await dialog.getByLabel("Что изменить в образе").fill("Оставить моё лицо");
+  await dialog.locator("input[type=file]").setInputFiles({
+    name: "face.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
+  });
+  await expect(dialog.getByText("Реф #1", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: /Запустить повтор/ })).toBeDisabled();
+  expect(quotes).toBe(0);
+  expect(launches).toBe(0);
+  await page.reload();
+  await expect(dialog.getByLabel("Что изменить в образе")).toHaveValue("Оставить моё лицо");
+  await expect(dialog.getByText("Реф #1", { exact: true })).toBeVisible();
+  await dialog.locator("input[type=file]").setInputFiles({
+    name: "outfit.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
+  });
+  await expect(dialog.getByText("Реф #2", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("Стоимость: 20 💋").first()).toBeVisible();
+  expect(quotes).toBeGreaterThan(0);
+  expect(launches).toBe(0);
+});

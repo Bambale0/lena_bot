@@ -421,8 +421,8 @@ async def cb_feed_use(
         creator_caps = VIDEO_CAPS.get(gen.model, {})
         needs_photo = supports_feed_source_media(creator_caps, "image")
         original_inputs = original_feed_video_inputs(gen) or {}
-        from api.wan30_feed_recipe import required_reader_photos
-        required_photos = required_reader_photos(gen.model, original_inputs)
+        from api.feed_reference_requirements import required_feed_reader_photos
+        required_photos = required_feed_reader_photos(gen.model, original_inputs, gen.prompt)
         source_reference_video = (
             origin_videos[0] if origin_videos else None
         ) if has_recipe else canonical_generation_result_url(gen)

@@ -528,6 +528,76 @@ def test_old_legacy_surface_uses_same_safe_feed_recipe_runner():
     assert 'openFeedRemixRunner(feedItem)' in source
 
 
+
+@pytest.mark.asyncio
+async def test_seedance_feed_remix_missing_image_two_rejects_quote_and_launch_before_charge(api_launch):
+    api_launch.source.gen_type = GenerationType.video
+    api_launch.source.model = MODEL
+    api_launch.source.prompt = "Use @Image1 as the person, outfit in @Image2."
+    api_launch.source.result_url = RESULT_MP4
+    api_launch.source.input_params = origin()
+    body = api_launch.routes.FeedRemixRequest(
+        model=MODEL, image_url=USER, duration=10,
+        aspect_ratio="9:16", resolution="480p",
+    )
+    for route in (api_launch.routes.quote_feed_remix, api_launch.routes.remix_feed_post):
+        with pytest.raises(HTTPException) as error:
+            await route(77, body, api_launch.session, api_launch.user)
+        assert error.value.status_code == 422
+        assert "2" in str(error.value.detail)
+        assert "1" in str(error.value.detail)
+        assert "добав" in str(error.value.detail).lower()
+    api_launch.charge.assert_not_awaited()
+    api_launch.generate.assert_not_awaited()
+
+
+def test_seedance_feed_public_cards_expose_required_image_two_without_author_prompt():
+    source = SimpleNamespace(
+        id=77, user_id=99, model=MODEL, gen_type=GenerationType.video,
+        prompt="Keep face in @Image1; copy outfit from @Image2; private text",
+        result_url=RESULT_MP4, result_urls=None,
+        likes_count=0, shares_count=0, created_at=datetime.now(timezone.utc),
+        input_params=origin(), is_public_feed=True,
+    )
+    card = SimpleNamespace(generation=source, username="author", full_name=None,
+                           aspect_ratio="9:16", remix_count=0, quality=None)
+    for payload in (_feed_card_out(card, SimpleNamespace(id=42)), FeedCard.from_feed_card(card).model_dump()):
+        assert payload["source_required_photo_count"] == 2
+        assert "private text" not in str({k: v for k, v in payload.items() if k != "prompt"})
+
+
+@pytest.mark.asyncio
+async def test_seedance_telegram_feed_entry_asks_for_both_reader_photos(monkeypatch):
+    from bot.handlers import feed
+
+    source = SimpleNamespace(
+        id=77, model=MODEL, gen_type=GenerationType.video,
+        prompt="A person in @Image1 wears @Image2.",
+        input_params=origin(), result_url=RESULT_MP4,
+    )
+    monkeypatch.setattr(feed.repo, "get_public_feed_generation", AsyncMock(return_value=source))
+    monkeypatch.setattr(feed.repo, "get_all_model_costs", AsyncMock(return_value=[]))
+    call = SimpleNamespace(data="feed:use:77", message=SimpleNamespace(answer=AsyncMock()), answer=AsyncMock())
+    state = AsyncMock()
+    await feed.cb_feed_use(call, AsyncMock(), SimpleNamespace(id=42), state)
+    assert state.update_data.await_args.kwargs["feed_use_required_photos"] == 2
+    assert "Для повтора нужно фото: 2" in call.message.answer.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_seedance_telegram_video_preflight_asks_for_second_photo(video_launch):
+    video_launch.source.model = MODEL
+    video_launch.source.prompt = "Use the face from @Image1 and clothing from @Image2."
+    video_launch.source.input_params = origin()
+    with pytest.raises(video_gen.FeedRemixUnavailable, match="2"):
+        await video_gen._prepare_feed_video_inputs(
+            session=video_launch.kwargs["session"], db_user=video_launch.kwargs["db_user"],
+            source_feed_gen_id=77, model_key=MODEL,
+            prompt=video_launch.source.prompt, image_url=USER, data=video_launch.data,
+        )
+    video_launch.repo.spend_credits.assert_not_awaited()
+
+
 @pytest.mark.parametrize("mode,count", [("edit", 4), ("reference", 3), ("first", 1), ("first_last", 2)])
 def test_wan_feed_public_cards_expose_required_photo_count_without_references(mode, count):
     source = SimpleNamespace(

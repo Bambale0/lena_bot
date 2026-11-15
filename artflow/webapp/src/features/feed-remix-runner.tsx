@@ -1011,6 +1011,13 @@ function FeedRemixRunnerPortal() {
                 Добавить
               </Button>
             </div>
+            {creatorRecipeReplay && !creatorTextOnly && referencesMissing && !referencesOverLimit ? (
+              <p role="status" className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs">
+                Не хватает фото: {requiredPhotos - references.length}. Добавь {requiredPhotos - references.length === 1 ? "ещё одно" : "недостающие"} фото
+                {" "}({"@Image" + (references.length + 1)}{requiredPhotos - references.length > 1 ? "–@Image" + requiredPhotos : ""}).
+                Запуск и списание пока недоступны.
+              </p>
+            ) : null}
             {referencesOverLimit ? <p role="alert" className="text-xs text-destructive">Сохранённые фото не удалены. {referenceLimitMessage} Удали лишние фото или выбери другую модель.</p> : null}
             {references.length ? (
               <div className="flex flex-wrap gap-1.5">
