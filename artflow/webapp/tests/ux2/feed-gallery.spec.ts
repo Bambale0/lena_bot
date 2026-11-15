@@ -42,7 +42,7 @@ async function prepare(page: Page, protectedAlbum = false, trends: Record<string
     const handlers = new Set<() => void>();
     window.addEventListener("apix:gallery-test-back", () => handlers.forEach(handler => handler()));
     window.Telegram = { WebApp: {
-      initData: "gallery-fixture", initDataUnsafe: { user: { id: 123 } }, colorScheme: "dark",
+      initData: new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify({ id: 123 }), hash: "e2e-fixture-not-a-real-signature" }).toString(), initDataUnsafe: { user: { id: 123 } }, colorScheme: "dark",
       ready() {}, expand() {}, openLink() {},
       HapticFeedback: { impactOccurred() {}, notificationOccurred() {} },
       BackButton: { show() {}, hide() {}, onClick(handler: () => void) { handlers.add(handler); },
