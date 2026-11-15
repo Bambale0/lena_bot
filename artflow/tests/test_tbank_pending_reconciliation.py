@@ -1,6 +1,8 @@
 """Production-safe T-Bank catch-up decisions. No provider calls or database writes."""
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -71,3 +73,14 @@ def test_script_never_mutates_user_credits_or_transaction_status_directly() -> N
     assert "repo.confirm_transaction_and_add_credits(" in source
     assert "repo.set_transaction_status(" in source
     assert 'parser.add_argument("--apply", action="store_true"' in source
+
+
+def test_standalone_cli_help_does_not_trigger_db_api_import_cycle() -> None:
+    """The deployed operator CLI must be executable as a fresh Python process."""
+    path = Path(__file__).parents[1] / "scripts/fix_stuck_tbank_payments.py"
+    process = subprocess.run(
+        [sys.executable, str(path), "--help"],
+        capture_output=True, text=True, timeout=15, check=False,
+    )
+    assert process.returncode == 0
+    assert "--apply" in process.stdout

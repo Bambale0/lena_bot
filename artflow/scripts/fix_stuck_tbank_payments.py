@@ -22,6 +22,10 @@ if str(ROOT) not in sys.path:
 
 from sqlalchemy import select
 
+# Initialize API routes first: repository imports an API contract whose
+# package initializer uses db.session; otherwise standalone CLI can deadlock
+# on a partially initialized db.repository.
+import api  # noqa: E402,F401
 from core.config import settings
 from db import repository as repo
 from db.models import PaymentProvider, Transaction, TransactionStatus
