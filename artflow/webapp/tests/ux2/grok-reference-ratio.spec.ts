@@ -14,7 +14,7 @@ async function prepare(page: Page) {
   const quotes: Record<string, unknown>[] = [];
   const launches: Record<string, unknown>[] = [];
   await page.addInitScript(() => {
-    window.Telegram = { WebApp: { initData: "grok-ratio-fixture", colorScheme: "dark",
+    window.Telegram = { WebApp: { initData: new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify({ id: 123 }), hash: "e2e-fixture-not-a-real-signature" }).toString(), colorScheme: "dark",
       initDataUnsafe: { user: { id: 123 } }, ready() {}, expand() {},
       HapticFeedback: { impactOccurred() {}, notificationOccurred() {} },
     } } as any;
