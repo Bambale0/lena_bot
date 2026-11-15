@@ -285,8 +285,9 @@ test("one-photo trend waits for explicit launch without exposing generation cont
   expect(runPayload).not.toHaveProperty("duration");
 });
 
-test("retrying a trend after a lost response keeps the same request key", async ({ page }) => {
+test("lost trend response performs read-only status lookup, never a second paid POST", async ({ page }) => {
   const keys: string[] = [];
+  let lookups = 0;
   await page.route("**/api/v1/trends/upload", (route) => route.fulfill({ json: {
     asset_id: "apixasset.retry.signature", url: "https://example.test/user.jpg", kind: "image",
   } }));
@@ -294,6 +295,10 @@ test("retrying a trend after a lost response keeps the same request key", async 
     const body = route.request().postDataJSON() as { idempotency_key: string };
     keys.push(body.idempotency_key);
     return route.fulfill({ status: 503, json: { detail: "Temporary response failure" } });
+  });
+  await page.route("**/api/v1/trends/101/runs/*", (route) => {
+    lookups++;
+    return route.fulfill({ json: { state: "uncertain", task: null } });
   });
 
   await page.goto("/?tgWebAppData=test");
@@ -305,19 +310,27 @@ test("retrying a trend after a lost response keeps the same request key", async 
     name: "face.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
   });
   await dialog.getByRole("button", { name: /Создать/ }).click();
-  await expect.poll(() => keys.length).toBe(1);
-  await dialog.getByRole("button", { name: /Создать/ }).click();
-  await expect.poll(() => keys.length).toBe(2);
-  expect(keys[1]).toBe(keys[0]);
+  await expect.poll(() => lookups).toBe(1);
+  expect(keys).toHaveLength(1);
+  await expect(dialog.getByRole("button", { name: /Создать/ })).toBeDisabled();
+  await dialog.getByRole("button", { name: "Проверить запуск без нового списания" }).click();
+  await expect.poll(() => lookups).toBe(2);
+  expect(keys).toHaveLength(1);
+  expect(keys[0]).toMatch(/^trend-101-/);
 });
 
-test("trend runner shows a useful message for an empty server error", async ({ page }) => {
+test("trend 500 with empty body warns of uncertain paid outcome, not a blind retry", async ({ page }) => {
+  let lookups = 0;
   await page.route("**/api/v1/trends/upload", (route) => route.fulfill({ json: {
     asset_id: "apixasset.server.signature", url: "https://example.test/user.jpg", kind: "image",
   } }));
   await page.route("**/api/v1/trends/101/run", (route) => route.fulfill({
     status: 500, body: "", contentType: "text/plain",
   }));
+  await page.route("**/api/v1/trends/101/runs/*", (route) => {
+    lookups++;
+    return route.fulfill({ json: { state: "not_found", task: null } });
+  });
 
   await page.goto("/?tgWebAppData=test");
   await page.getByRole("tab", { name: "Тренды" }).click();
@@ -328,8 +341,41 @@ test("trend runner shows a useful message for an empty server error", async ({ p
   });
 
   await dialog.getByRole("button", { name: /Создать/ }).click();
-  await expect(dialog.getByText("Не удалось запустить тренд. Попробуйте ещё раз.")).toBeVisible();
-  await expect(dialog).not.toContainText("Ошибка API 500");
+  await expect.poll(() => lookups).toBe(1);
+  await expect(dialog.getByText(/Новую генерацию не запускаем/).first()).toBeVisible();
+  await expect(dialog.getByRole("button", { name: /Создать/ })).toBeDisabled();
+  await expect(dialog).not.toContainText("Попробуйте ещё раз");
+});
+
+test("ambiguous trend run resolves to already created task using GET only", async ({ page }) => {
+  let submissions = 0;
+  let lookups = 0;
+  await page.route("**/api/v1/trends/upload", (route) => route.fulfill({ json: {
+    asset_id: "apixasset.complete.signature", url: "https://example.test/user.jpg", kind: "image",
+  } }));
+  await page.route("**/api/v1/trends/101/run", (route) => {
+    submissions++;
+    return route.fulfill({ status: 502, json: { detail: "Lost provider response" } });
+  });
+  await page.route("**/api/v1/trends/101/runs/*", (route) => {
+    lookups++;
+    return route.fulfill({ json: { state: "complete", task: {
+      id: 9003, model: "Nano Banana 2", gen_type: "image", prompt: "",
+      prompt_hidden: true, status: "pending", credits_spent: 1.5,
+      result_url: null, result_urls: [], created_at: new Date().toISOString(),
+    } } });
+  });
+  await page.goto("/?tgWebAppData=test");
+  await page.getByRole("tab", { name: "Тренды" }).click();
+  await page.getByRole("button", { name: "Повторить: Кинопортрет", exact: true }).click();
+  const dialog = page.locator("#apix-trend-runner-root").getByRole("dialog", { name: /Кинопортрет/ });
+  await dialog.locator("input[type=file]").setInputFiles({
+    name: "face.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
+  });
+  await dialog.getByRole("button", { name: /Создать/ }).click();
+  await expect(page.getByRole("dialog", { name: /Задача #9003/ })).toBeVisible();
+  expect(submissions).toBe(1);
+  expect(lookups).toBe(1);
 });
 
 test("stale trend price refreshes checkout and reuses the uploaded photo", async ({ page }) => {

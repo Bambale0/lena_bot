@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable
 from typing import Annotated, Any, TypeVar
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Query, UploadFile
 from pydantic import BaseModel, BeforeValidator, Field
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -630,6 +630,37 @@ async def prepare_trend(
     return {
         **trend_public_payload(await _get_public_trend(session, trend_id)),
         "prompt_hidden": True,
+    }
+
+
+@router.get("/trends/{trend_id}/runs/{request_key}")
+async def trend_run_status(
+    trend_id: int,
+    request_key: str = Path(min_length=8, max_length=128),
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> dict[str, Any]:
+    """Read-only lookup after an ambiguous paid run result; never resubmit.
+
+    Claims are scoped to the authenticated user. An unlinked claim may represent
+    accepted provider work; its status is not proof that retry/refund is safe.
+    """
+    claim = await get_claim(session, int(user.id), request_key)
+    if claim is None:
+        return {"state": "not_found", "task": None}
+    if claim.trend_id != trend_id:
+        raise HTTPException(status_code=404, detail="Trend run not found")
+    if claim.generation_id is None:
+        return {
+            "state": "uncertain" if claim.status == "uncertain" else "processing",
+            "task": None,
+        }
+    generation = await repo.get_generation_by_id(session, claim.generation_id)
+    if generation is None or generation.user_id != user.id:
+        return {"state": "unavailable", "task": None}
+    return {
+        "state": "complete",
+        "task": _task_payload(GenerationOut.model_validate(generation, from_attributes=True)),
     }
 
 

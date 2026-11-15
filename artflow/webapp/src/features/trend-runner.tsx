@@ -12,6 +12,7 @@ import { canReopenPayment, paymentFromResponse, paymentResolution, type RepeatPa
 import { isPinterestServiceTrend } from "@/features/pinterest-service";
 import type { GenerationTask, TrendItem, TrendUserField } from "@/lib/types";
 import { notifyHaptic, openExternalUrl, readStartParam, readTelegramInitData } from "@/lib/telegram";
+import { trendRunNeedsReadOnlyRecovery, TREND_RUN_UNCERTAIN_MESSAGE } from "@/lib/trend-run-recovery";
 import { safeExternalUrl } from "@/lib/utils";
 
 const TREND_RUNNER_EVENT = "apix:open-trend-runner";
@@ -79,6 +80,8 @@ type TrendRunnerEventDetail = {
   trend?: TrendPublic;
   trendId?: number;
 };
+
+type TrendRunStatus = { state: "not_found" | "processing" | "uncertain" | "complete" | "unavailable"; task: GenerationTask | null };
 
 let runnerRoot: Root | null = null;
 let runnerMounted = false;
@@ -556,6 +559,7 @@ function TrendRunnerPortal() {
   const [trend, setTrend] = useState<TrendPublic | null>(null);
   const [phase, setPhase] = useState<RunnerPhase>("idle");
   const [error, setError] = useState("");
+  const [uncertainRunKey, setUncertainRunKey] = useState<string | null>(null);
   const [localPreview, setLocalPreview] = useState("");
   const [uploadedAsset, setUploadedAsset] = useState<TrendUploadResponse | null>(null);
   const [userValues, setUserValues] = useState<Record<string, string>>({});
@@ -608,6 +612,7 @@ function TrendRunnerPortal() {
     checkoutSequence.current++;
     setDuration(null);
     runKeyRef.current = null;
+    setUncertainRunKey(null);
     setPhase("idle");
     setError("");
     setPinterestBusy(false);
@@ -629,10 +634,10 @@ function TrendRunnerPortal() {
 
   const closeRunner = useCallback(() => {
     if (busy || paymentBusy) return;
-    if (paymentWaiting) { setTrend(null); return; }
+    if (paymentWaiting || uncertainRunKey) { setTrend(null); return; }
     resetRunner();
     setTrend(null);
-  }, [busy, paymentWaiting, paymentBusy, resetRunner]);
+  }, [busy, paymentWaiting, paymentBusy, uncertainRunKey, resetRunner]);
 
   useLayoutEffect(() => subscribePaymentAccessRevoked(actorId => {
     if (paymentOwner.current !== actorId && previousBalance.current?.actorId !== actorId) return;
@@ -640,13 +645,13 @@ function TrendRunnerPortal() {
   }), [resetRunner]);
 
   const showTrend = useCallback((next: TrendPublic) => {
-    if (heldTrend.current && (paymentRef.current || heldTrend.current.id === next.id)) {
+    if (heldTrend.current && (paymentRef.current || uncertainRunKey || heldTrend.current.id === next.id)) {
       setTrend(heldTrend.current);
-      if (heldTrend.current.id !== next.id) setError("Сначала проверь оплату предыдущего повтора. Фото и настройки сохранены.");
+      if (heldTrend.current.id !== next.id) setError(uncertainRunKey ? TREND_RUN_UNCERTAIN_MESSAGE : "Сначала проверь оплату предыдущего повтора. Фото и настройки сохранены.");
       return;
     }
     resetRunner(); setUserValues(initialTrendUserValues(next)); setTrend(next);
-  }, [resetRunner]);
+  }, [resetRunner, uncertainRunKey]);
 
   const loadTrend = useCallback(async (trendId: number) => {
     try {
@@ -884,8 +889,29 @@ function TrendRunnerPortal() {
     });
   }, []);
 
+  const checkUncertainRun = useCallback(async (key: string, trendId: number) => {
+    try {
+      const status = await apiJson<TrendRunStatus>(`/trends/${trendId}/runs/${encodeURIComponent(key)}`);
+      if (status.state === "complete" && status.task?.id) {
+        setUncertainRunKey(null);
+        setSelectedTask(status.task);
+        setTaskOpen(true);
+        setTrend(null);
+        resetRunner();
+        toast.success("Задача найдена. Повторный запуск не требуется.");
+        return true;
+      }
+      setError(TREND_RUN_UNCERTAIN_MESSAGE);
+      return false;
+    } catch {
+      // A failed read-only lookup cannot prove a paid POST was not accepted.
+      setError(TREND_RUN_UNCERTAIN_MESSAGE);
+      return false;
+    }
+  }, [resetRunner]);
+
   const startTrend = useCallback(async (assetId: string, values: Record<string, string>) => {
-    if (!trend || genericBusy || paymentBusy || balance?.open) return;
+    if (!trend || genericBusy || paymentBusy || balance?.open || uncertainRunKey) return;
     if (!checkout || checkoutBusy || !checkout.can_run) {
       toast.error("Сначала дождись расчёта стоимости тренда");
       return;
@@ -920,6 +946,20 @@ function TrendRunnerPortal() {
     } catch (runError) {
       if (sequence !== operationSequence.current) return;
       notifyHaptic("error");
+      // A 5xx, timeout, 409 (running claim), or malformed response does not
+      // prove that no paid generation was accepted. Query status via GET only.
+      if (!(runError instanceof TrendApiError && runError.code === "trend_quote_stale")
+          && trendRunNeedsReadOnlyRecovery(runError instanceof TrendApiError ? runError.status : undefined)) {
+        const key = runKeyRef.current?.key;
+        if (key) {
+          setUncertainRunKey(key);
+          setPhase("error");
+          setError(TREND_RUN_UNCERTAIN_MESSAGE);
+          const resolved = await checkUncertainRun(key, trend.id);
+          if (!resolved && sequence === operationSequence.current) toast.error(TREND_RUN_UNCERTAIN_MESSAGE);
+          return;
+        }
+      }
       const message = runError instanceof Error ? runError.message : "Не удалось запустить тренд";
       setError(message);
       setPhase("error");
@@ -930,7 +970,7 @@ function TrendRunnerPortal() {
       }
       toast.error(message);
     }
-  }, [checkout, checkoutBusy, duration, genericBusy, paymentBusy, balance?.open, refreshCheckout, resetRunner, trend]);
+  }, [checkout, checkoutBusy, duration, genericBusy, paymentBusy, balance?.open, uncertainRunKey, checkUncertainRun, refreshCheckout, resetRunner, trend]);
 
   const runPhoto = useCallback(async (file: File | undefined | null) => {
     if (!trend || !file || genericBusy) return;
@@ -1209,7 +1249,7 @@ function TrendRunnerPortal() {
 
               {uploadedAsset ? (
                 <Button
-                  disabled={genericBusy || paymentBusy || checkoutBusy || Boolean(balance?.open) || !userFieldsReady || !checkout || !checkout.can_run}
+                  disabled={genericBusy || paymentBusy || checkoutBusy || Boolean(balance?.open) || Boolean(uncertainRunKey) || !userFieldsReady || !checkout || !checkout.can_run}
                   className="min-h-12 w-full"
                   onClick={() => {
                     if (uploadedAsset) void startTrend(uploadedAsset.asset_id, userValues);
@@ -1218,6 +1258,16 @@ function TrendRunnerPortal() {
                   {phase === "generating" ? <LoaderCircle className="animate-spin" /> : null}
                   {phase === "generating" ? "Генерирую…" : `Создать · ${checkout?.cost_credits ?? "—"} 💋`}
                 </Button>
+              ) : null}
+
+              {uncertainRunKey && trend ? (
+                <div className="grid gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
+                  <p role="alert">{TREND_RUN_UNCERTAIN_MESSAGE}</p>
+                  <Button type="button" variant="outline"
+                    onClick={() => void checkUncertainRun(uncertainRunKey, trend.id)}>
+                    Проверить запуск без нового списания
+                  </Button>
+                </div>
               ) : null}
 
               {personalized && !userFieldsReady ? (
