@@ -7,7 +7,7 @@ async function prepare(page: Page, initialBalance = 100) {
     quotes: [] as any[], runs: [] as any[], payments: 0, receipt: "pending", failQuote: false };
   const trend = { id: 101, title: "Кинопортрет", kind: "video", preview_url: "", category: "portrait", category_title: "Портреты", user_fields: [{ key: "name", type: "text", label: "Имя героя", required: true }] };
   const item = { id: 201, model: "video-fixture", gen_type: "video", prompt_hidden: true, prompt: "", author: "Автор", result_url: "https://example.test/clip.mp4", source_has_video_reference: false, original_duration: 5, original_aspect_ratio: "16:9", original_resolution: "720p" };
-  await page.addInitScript(() => { window.Telegram = { WebApp: { initData: "test", initDataUnsafe: { user: { id: 123 } }, ready() {}, expand() {}, openLink() {}, HapticFeedback: { impactOccurred() {}, notificationOccurred() {} } } } as any; });
+  await page.addInitScript(() => { window.Telegram = { WebApp: { initData: new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify({ id: 123 }), hash: "e2e-fixture-not-a-real-signature" }).toString(), initDataUnsafe: { user: { id: 123 } }, ready() {}, expand() {}, openLink() {}, HapticFeedback: { impactOccurred() {}, notificationOccurred() {} } } } as any; });
   await page.route("**/telegram-web-app.js", route => route.fulfill({ body: "" }));
   await page.route("https://example.test/**", route => route.fulfill({ body: "" }));
   await page.route("**/api/**", route => {
