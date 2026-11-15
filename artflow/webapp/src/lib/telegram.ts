@@ -1,6 +1,9 @@
 import type { StartTarget } from "@/lib/types";
 
 const INIT_DATA_STORAGE_KEY = "apix:telegram-init-data:v2";
+// Match the server's seven-day initData limit; the server remains the HMAC authority.
+const TELEGRAM_INIT_DATA_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
+const TELEGRAM_INIT_DATA_FUTURE_SKEW_SECONDS = 300;
 const START_PARAM_STORAGE_KEY = "apix:start-param:v2";
 const DIRECT_START_TARGETS = ["feed", "remix", "prompt", "trend", "task", "profile"] as const;
 
@@ -53,19 +56,36 @@ function storeValue(key: string, value: string): void {
   }
 }
 
+/** An early UX filter, never a replacement for server-side Telegram HMAC verification. */
+export function telegramInitDataIsFresh(value: string, nowSeconds = Math.floor(Date.now() / 1000)): boolean {
+  if (!value.trim()) return false;
+  const rawDate = new URLSearchParams(value).get("auth_date");
+  if (!rawDate || !/^\d+$/.test(rawDate)) return false;
+  const issuedAt = Number(rawDate);
+  return Number.isSafeInteger(issuedAt)
+    && issuedAt > 0
+    && issuedAt <= nowSeconds + TELEGRAM_INIT_DATA_FUTURE_SKEW_SECONDS
+    && nowSeconds - issuedAt <= TELEGRAM_INIT_DATA_MAX_AGE_SECONDS;
+}
+
 export function readTelegramInitData(): string {
   if (typeof window === "undefined") return "";
   const current = window.location.href;
   const early = window.__APIX_EARLY_URL__ || "";
+  // The live Telegram SDK wins over a copied URL or previous WebView session.
+  // Never let a stale cached value short-circuit waitForTelegramInitData().
   const candidates = [
-    paramFromUrl(current, "tgWebAppData"),
-    new URL(current).searchParams.get("tgWebAppData") || "",
     webApp()?.initData || "",
+    paramFromUrl(current, "tgWebAppData"),
     paramFromUrl(early, "tgWebAppData"),
     storedValue(INIT_DATA_STORAGE_KEY),
   ];
-  const result = candidates.find((value) => value.trim())?.trim() || "";
-  storeValue(INIT_DATA_STORAGE_KEY, result);
+  const result = candidates.find((value) => telegramInitDataIsFresh(value))?.trim() || "";
+  if (result) {
+    storeValue(INIT_DATA_STORAGE_KEY, result);
+  } else {
+    try { window.sessionStorage.removeItem(INIT_DATA_STORAGE_KEY); } catch { /* Storage is optional. */ }
+  }
   return result;
 }
 
