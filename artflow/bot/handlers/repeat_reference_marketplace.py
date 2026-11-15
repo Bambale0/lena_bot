@@ -126,7 +126,7 @@ def _text(data: dict[str, Any]) -> str:
     ratio = str(data.get("prompt_multi_ref_ratio") or "авто")
     quality_options = _quality_options(model_key, _current_ratio(data, model_key))
     quality = _current_quality(data, model_key) if quality_options else None
-    quality_text = f"Качество: <b>{image_gen._quality_label(model_key, quality)}</b>\\n" if quality else ""
+    quality_text = f"Качество: <b>{image_gen._quality_label(model_key, quality)}</b>\n" if quality else ""
     return (
         f"{title}\n\n"
         f"Референсы: <b>{uploaded}/{max_refs}</b>\n\n"
@@ -430,6 +430,7 @@ async def _set_model(call: CallbackQuery, session: AsyncSession, state: FSMConte
 
 async def _back(call: CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
+    model_key = str(data.get("use_model_key") or marketplace.DEFAULT_PROMPT_MODEL)
     await call.message.answer(  # type: ignore[union-attr]
         _text(data),
         reply_markup=_keyboard(
@@ -445,6 +446,7 @@ async def _back(call: CallbackQuery, state: FSMContext) -> None:
 async def _clear(call: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(prompt_multi_ref_file_ids=[], prompt_multi_ref_count=0)
     data = await state.get_data()
+    model_key = str(data.get("use_model_key") or marketplace.DEFAULT_PROMPT_MODEL)
     await call.message.answer(  # type: ignore[union-attr]
         _text(data),
         reply_markup=_keyboard(
