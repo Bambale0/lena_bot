@@ -11,7 +11,7 @@ import { clearPendingTopup, readPendingTopup, savePendingTopup, sameTopupAttempt
 import { canReopenPayment, paymentFromResponse, paymentResolution, type RepeatPayment, type PaymentProvider } from "@/features/feed-repeat-payment";
 import { isPinterestServiceTrend } from "@/features/pinterest-service";
 import type { GenerationTask, TrendItem, TrendUserField } from "@/lib/types";
-import { notifyHaptic, openExternalUrl, readStartParam } from "@/lib/telegram";
+import { notifyHaptic, openExternalUrl, readStartParam, readTelegramInitData } from "@/lib/telegram";
 import { safeExternalUrl } from "@/lib/utils";
 
 const TREND_RUNNER_EVENT = "apix:open-trend-runner";
@@ -96,14 +96,6 @@ function ensureTrendRunnerPortal(): void {
   runnerMounted = true;
 }
 
-function initDataHeader(): string {
-  try {
-    return window.Telegram?.WebApp?.initData || window.sessionStorage.getItem("apix:telegram-init-data:v2") || "";
-  } catch {
-    return window.Telegram?.WebApp?.initData || "";
-  }
-}
-
 class TrendApiError extends Error {
   constructor(message: string, readonly status: number, readonly code?: string) {
     super(message);
@@ -117,7 +109,7 @@ async function apiJson<T>(path: string, init: RequestInit = {}): Promise<T> {
     ...init,
     headers: {
       ...(isForm ? {} : { "Content-Type": "application/json" }),
-      "X-Telegram-Init-Data": initDataHeader(),
+      "X-Telegram-Init-Data": readTelegramInitData(),
       ...(init.headers || {}),
     },
   });

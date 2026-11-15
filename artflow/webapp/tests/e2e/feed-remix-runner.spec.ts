@@ -81,12 +81,14 @@ const feedItems = [
 ];
 
 async function mockMiniAppApi(page: Page, withTelegram = true, nativeBack = false, imageRecipe = false) {
+  // All synthetic WebView scenarios must outrank the live Telegram SDK script.
+  await page.route("https://telegram.org/js/telegram-web-app.js", route => route.fulfill({ contentType: "application/javascript", body: "" }));
   if (withTelegram) await page.addInitScript((nativeBack) => {
     const backHandlers = new Set<() => void>();
     if (nativeBack) window.addEventListener("apix:test-back", () => backHandlers.forEach(handler => handler()));
     window.Telegram = {
       WebApp: {
-        initData: "test",
+        initData: new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify({ id: 123 }), hash: "e2e-fixture-not-a-real-signature" }).toString(),
         initDataUnsafe: { user: { id: 123, first_name: "Test" } },
         colorScheme: "dark",
         ready: () => undefined,
@@ -838,7 +840,7 @@ test("creator photo-to-video replay selects duration, restores draft and reconfi
   await expect(dialog.getByLabel("Длительность видео в повторе")).toHaveAttribute("aria-valuetext", "10 секунд");
   await expandRepeatControls(dialog);
   await dialog.getByRole("button", { name: "15 сек", exact: true }).click();
-  await dialog.getByLabel("Формат").selectOption("16:9");
+  await dialog.locator('select:has(option[value="16:9"])').selectOption("16:9");
   await dialog.getByLabel("Разрешение").selectOption("1080p");
   await expect(dialog.getByText("Стоимость: 30 💋").first()).toBeVisible();
   expect(sent).toBeNull();
@@ -851,7 +853,7 @@ test("creator photo-to-video replay selects duration, restores draft and reconfi
   await expect(dialog.getByLabel("Что изменить в образе")).toHaveValue("Белый костюм, причёска каре, число 35");
   await expandRepeatControls(dialog);
   await expect(dialog.getByLabel("Длительность видео в повторе")).toHaveAttribute("aria-valuetext", "15 секунд");
-  await expect(dialog.getByLabel("Формат")).toHaveValue("16:9");
+  await expect(dialog.locator('select:has(option[value="16:9"])')).toHaveValue("16:9");
   await expect(dialog.getByLabel("Разрешение")).toHaveValue("1080p");
   await expect(dialog.getByText("Стоимость: 30 💋").first()).toBeVisible();
   if (testInfo.project.name === "iPhone SE") {
@@ -1021,7 +1023,16 @@ for (const surface of ["telegram", "browser"] as const) {
         status: "pending", result_urls: [], credits_spent: 1.5, created_at: new Date().toISOString(),
       } });
     });
-    await page.goto("/?tgWebAppData=test");
+    // In the browser branch there is no Telegram SDK, so launch with synthetic
+    // fresh initData in the URL instead of the legacy invalid "test" string.
+    const browserInitData = new URLSearchParams({
+      auth_date: String(Math.floor(Date.now() / 1000)),
+      user: JSON.stringify({ id: 123 }),
+      hash: "e2e-fixture-not-a-real-signature",
+    }).toString();
+    await page.goto(surface === "browser"
+      ? "/?tgWebAppData=" + encodeURIComponent(browserInitData)
+      : "/?tgWebAppData=test");
     await expect(page.getByText("Artist QA")).toBeVisible();
     await page.getByRole("button", { name: "Открыть внутри приложения", exact: true }).first().click();
     const viewer = page.locator(".apix-media-viewer");

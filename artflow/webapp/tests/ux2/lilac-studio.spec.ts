@@ -4,8 +4,9 @@ const defaultVideoModels = [{ key: "fixture-video", display_name: "Видео м
 
 async function prepare(page: Page, admitted = true, videoModels = defaultVideoModels, isAdmin = false) {
   const writes: Array<{ path: string; body: any }> = [];
+  await page.route("https://telegram.org/js/telegram-web-app.js", route => route.fulfill({ contentType: "application/javascript", body: "" }));
   await page.addInitScript(() => {
-    window.Telegram = { WebApp: { initData: "lilac-fixture", initDataUnsafe: { user: { id: 123 } },
+    window.Telegram = { WebApp: { initData: new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify({ id: 123 }), hash: "e2e-fixture-not-a-real-signature" }).toString(), initDataUnsafe: { user: { id: 123 } },
       colorScheme: "dark", ready() {}, expand() {}, openLink() {},
       HapticFeedback: { impactOccurred() {}, notificationOccurred() {} },
       BackButton: { show() {}, hide() {}, onClick() {}, offClick() {} },

@@ -19,7 +19,7 @@ import type {
   TrendCategoryPage,
   UserProfile,
 } from "@/lib/types";
-import { parseStartTarget, readStartParam } from "@/lib/telegram";
+import { parseStartTarget, readStartParam, readTelegramInitData, telegramInitDataIsFresh } from "@/lib/telegram";
 import { asArray, asRecord } from "@/lib/utils";
 import { attachmentName } from "@/lib/download";
 
@@ -150,8 +150,16 @@ function feedItemFromPublicPayload(payload: unknown): FeedItem | null {
 export class MiniAppApi {
   constructor(private readonly initData: string) {}
 
+  // Re-read credentials at request time: this client can outlive a Telegram SDK session.
+  // Never revive an expired initData captured in the constructor.
+  private currentInitData(): string {
+    // SSR/test callers have no Telegram WebView; browsers must never revive stale credentials.
+    if (typeof window === "undefined") return this.initData;
+    return readTelegramInitData() || (telegramInitDataIsFresh(this.initData) ? this.initData : "");
+  }
+
   async downloadGeneration(id: number, signal?: AbortSignal): Promise<{ blob: Blob; filename: string }> {
-    const response = await fetch(`/api/web/generations/${id}/download`, { signal, credentials: "same-origin", headers: { "X-Telegram-Init-Data": this.initData } });
+    const response = await fetch(`/api/web/generations/${id}/download`, { signal, credentials: "same-origin", headers: { "X-Telegram-Init-Data": this.currentInitData() } });
     if (!response.ok) throw await readApiError(response);
     const contentType = response.headers.get("Content-Type") || "";
     if (/text\/html|application\/json/i.test(contentType)) throw new Error("Сервер не вернул файл. Обновите результат и попробуйте снова.");
@@ -164,7 +172,7 @@ export class MiniAppApi {
     const response = await fetch(`/api/web${path}`, {
       ...init, signal: signal ?? init.signal, credentials: "same-origin",
       headers: { ...(init.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
-        "X-Telegram-Init-Data": this.initData, ...(init.headers || {}) },
+        "X-Telegram-Init-Data": this.currentInitData(), ...(init.headers || {}) },
     });
     if (!response.ok) throw await readApiError(response);
     const payload = asRecord(await response.json());
@@ -178,7 +186,7 @@ export class MiniAppApi {
       signal: signal ?? init.signal,
       headers: {
         ...(isForm ? {} : { "Content-Type": "application/json" }),
-        "X-Telegram-Init-Data": this.initData,
+        "X-Telegram-Init-Data": this.currentInitData(),
         ...(init.headers || {}),
       },
     });
@@ -327,7 +335,7 @@ export class MiniAppApi {
   async checkReferenceAvailability(url: string, signal?: AbortSignal): Promise<unknown> {
     const response = await fetch("/api/web/upload-media/check", {
       method: "POST", cache: "no-store", signal,
-      headers: { "Content-Type": "application/json", "X-Telegram-Init-Data": this.initData },
+      headers: { "Content-Type": "application/json", "X-Telegram-Init-Data": this.currentInitData() },
       body: JSON.stringify({ url }),
     });
     if (!response.ok) throw await readApiError(response);
@@ -337,7 +345,7 @@ export class MiniAppApi {
 
   async getPhotoUploadPolicy(signal?: AbortSignal): Promise<unknown> {
     const response = await fetch("/api/web/upload-media/policy", {
-      cache: "no-store", signal, headers: { "X-Telegram-Init-Data": this.initData },
+      cache: "no-store", signal, headers: { "X-Telegram-Init-Data": this.currentInitData() },
     });
     if (!response.ok) throw await readApiError(response);
     const payload = asRecord(await response.json());
@@ -346,7 +354,7 @@ export class MiniAppApi {
 
   async uploadKling4Asset(file: File, ownerId: number): Promise<{ url: string; kind?: string }> {
     const form = new FormData(); form.append("file", file); form.append("owner_id", String(ownerId));
-    const response = await fetch("/api/web/kling4/assets", { method: "POST", body: form, headers: { "X-Telegram-Init-Data": this.initData } });
+    const response = await fetch("/api/web/kling4/assets", { method: "POST", body: form, headers: { "X-Telegram-Init-Data": this.currentInitData() } });
     if (!response.ok) throw await readApiError(response);
     const payload = asRecord(await response.json()); const data = asRecord(payload.data || payload);
     return { url: String(data.url || ""), kind: typeof data.kind === "string" ? data.kind : undefined };
@@ -359,7 +367,7 @@ export class MiniAppApi {
       method: "POST",
       signal,
       body: form,
-      headers: { "X-Telegram-Init-Data": this.initData },
+      headers: { "X-Telegram-Init-Data": this.currentInitData() },
     });
     if (!response.ok) throw await readApiError(response);
     const payload = asRecord(await response.json());
@@ -406,7 +414,7 @@ export class MiniAppApi {
       body: "{}",
       headers: {
         "Content-Type": "application/json",
-        "X-Telegram-Init-Data": this.initData,
+        "X-Telegram-Init-Data": this.currentInitData(),
       },
     });
     if (!response.ok) throw await readApiError(response);

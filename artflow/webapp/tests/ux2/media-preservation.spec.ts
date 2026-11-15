@@ -14,9 +14,10 @@ const refs = ["https://media.example.test/first.png", "https://media.example.tes
 
 async function prepare(page: Page, enabled = true) {
   const posts: Record<string, unknown>[] = [];
+  await page.route("https://telegram.org/js/telegram-web-app.js", route => route.fulfill({ contentType: "application/javascript", body: "" }));
   await page.addInitScript(() => {
     window.Telegram = { WebApp: {
-      initData: "ux2-test", initDataUnsafe: { user: { id: 123, first_name: "Test" } }, colorScheme: "dark",
+      initData: new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify({ id: 123 }), hash: "e2e-fixture-not-a-real-signature" }).toString(), initDataUnsafe: { user: { id: 123, first_name: "Test" } }, colorScheme: "dark",
       ready() {}, expand() {}, HapticFeedback: { impactOccurred() {}, notificationOccurred() {} },
     }} as any;
   });

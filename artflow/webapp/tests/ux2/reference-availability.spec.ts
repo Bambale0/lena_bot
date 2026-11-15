@@ -4,7 +4,8 @@ const model = { key: "availability-photo", display_name: "Photo", modes: ["text"
   max_refs: 2, aspect_ratios: ["1:1"], counts: [1], quality_options: [{ value: "basic", label: "Обычное" }] };
 async function prepare(page: Page, states: Record<string,string> = {}, light = false) {
   const posts: any[] = []; const checks: string[] = [];
-  await page.addInitScript(({ light }) => { window.Telegram = { WebApp: { initData: "availability-fixture", colorScheme: light ? "light" : "dark", ready() {}, expand() {}, initDataUnsafe: { user: { id: 123 } }, HapticFeedback: { impactOccurred() {}, notificationOccurred() {} } } } as any; }, { light });
+  await page.route("https://telegram.org/js/telegram-web-app.js", route => route.fulfill({ contentType: "application/javascript", body: "" }));
+  await page.addInitScript(({ light }) => { window.Telegram = { WebApp: { initData: new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify({ id: 123 }), hash: "e2e-fixture-not-a-real-signature" }).toString(), colorScheme: light ? "light" : "dark", ready() {}, expand() {}, initDataUnsafe: { user: { id: 123 } }, HapticFeedback: { impactOccurred() {}, notificationOccurred() {} } } } as any; }, { light });
   await page.route("**/telegram-web-app.js", route => route.fulfill({ contentType: "application/javascript", body: "" }));
   await page.route("**/api/**", async route => {
     const path = new URL(route.request().url()).pathname;

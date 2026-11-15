@@ -43,9 +43,10 @@ async function prepare(page: Page, precedingPhotos = 0) {
     remixes: 0, likes_count: 0, shares_count: 0,
   }));
   const items = [...photos, ...videos];
+  await page.route("https://telegram.org/js/telegram-web-app.js", route => route.fulfill({ contentType: "application/javascript", body: "" }));
   await page.addInitScript(() => {
     window.Telegram = { WebApp: {
-      initData: "video-first-frame-fixture", initDataUnsafe: { user: { id: 123 } }, colorScheme: "dark",
+      initData: new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify({ id: 123 }), hash: "e2e-fixture-not-a-real-signature" }).toString(), initDataUnsafe: { user: { id: 123 } }, colorScheme: "dark",
       ready() {}, expand() {}, openLink() {},
       HapticFeedback: { impactOccurred() {}, notificationOccurred() {} },
       BackButton: { show() {}, hide() {}, onClick() {}, offClick() {} },

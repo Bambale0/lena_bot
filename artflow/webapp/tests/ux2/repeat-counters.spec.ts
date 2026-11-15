@@ -12,8 +12,9 @@ const tasks = [
 async function prepare(page: Page) {
   let repeats = 7;
   const writes: string[] = [];
+  await page.route("https://telegram.org/js/telegram-web-app.js", route => route.fulfill({ contentType: "application/javascript", body: "" }));
   await page.addInitScript(() => {
-    window.Telegram = { WebApp: { initData: "repeat-count-fixture", initDataUnsafe: { user: { id: 123 } }, ready() {}, expand() {},
+    window.Telegram = { WebApp: { initData: new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify({ id: 123 }), hash: "e2e-fixture-not-a-real-signature" }).toString(), initDataUnsafe: { user: { id: 123 } }, ready() {}, expand() {},
       HapticFeedback: { impactOccurred() {}, notificationOccurred() {} }, BackButton: { show() {}, hide() {}, onClick() {}, offClick() {} },
     } } as any;
   });

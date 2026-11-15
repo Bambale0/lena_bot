@@ -38,11 +38,12 @@ async function prepare(page: Page, protectedAlbum = false, trends: Record<string
     ...item, is_mine: false, source_image_recipe_available: true, result_url: "", result_urls: [],
     preview_url: boundResults[0], preview_urls: boundResults,
   } : item);
+  await page.route("https://telegram.org/js/telegram-web-app.js", route => route.fulfill({ contentType: "application/javascript", body: "" }));
   await page.addInitScript(() => {
     const handlers = new Set<() => void>();
     window.addEventListener("apix:gallery-test-back", () => handlers.forEach(handler => handler()));
     window.Telegram = { WebApp: {
-      initData: "gallery-fixture", initDataUnsafe: { user: { id: 123 } }, colorScheme: "dark",
+      initData: new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify({ id: 123 }), hash: "e2e-fixture-not-a-real-signature" }).toString(), initDataUnsafe: { user: { id: 123 } }, colorScheme: "dark",
       ready() {}, expand() {}, openLink() {},
       HapticFeedback: { impactOccurred() {}, notificationOccurred() {} },
       BackButton: { show() {}, hide() {}, onClick(handler: () => void) { handlers.add(handler); },

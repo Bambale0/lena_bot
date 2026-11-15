@@ -2,7 +2,8 @@ import { expect, test, type Page } from "@playwright/test";
 
 async function prepare(page: Page, admin = false) {
   const writes: Array<{ path: string; body: any }> = [];
-  await page.addInitScript(() => { window.Telegram = { WebApp: { initData: "studio-capability-fixture", initDataUnsafe: { user: { id: 123 } }, colorScheme: "dark", ready() {}, expand() {}, openLink() {}, HapticFeedback: { impactOccurred() {}, notificationOccurred() {} } } } as any; });
+  await page.route("https://telegram.org/js/telegram-web-app.js", route => route.fulfill({ contentType: "application/javascript", body: "" }));
+  await page.addInitScript(() => { window.Telegram = { WebApp: { initData: new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify({ id: 123 }), hash: "e2e-fixture-not-a-real-signature" }).toString(), initDataUnsafe: { user: { id: 123 } }, colorScheme: "dark", ready() {}, expand() {}, openLink() {}, HapticFeedback: { impactOccurred() {}, notificationOccurred() {} } } } as any; });
   await page.route("**/telegram-web-app.js", route => route.fulfill({ body: "" }));
   await page.route("**/api/**", route => {
     const path = new URL(route.request().url()).pathname;
@@ -88,7 +89,12 @@ test("owned result downloads through signed backend attachment not the thumbnail
   await prepare(page);
   await page.route("**/api/v1/history?**", route => route.fulfill({ json: [{ id: 81, model: "image-fixture", gen_type: "image", prompt: "Мой результат", status: "done", result_url: "https://media.example.test/original.png" }] }));
   let signed = false;
-  await page.route("**/api/web/generations/81/download", route => { signed = route.request().headers()["x-telegram-init-data"] === "studio-capability-fixture"; return route.fulfill({ contentType: "image/png", headers: { "Content-Disposition": 'attachment; filename="result-81.png"' }, body: Buffer.from("fixture-image") }); });
+  await page.route("**/api/web/generations/81/download", route => { const auth = new URLSearchParams(route.request().headers()["x-telegram-init-data"] || "");
+    const issuedAt = Number(auth.get("auth_date") || 0);
+    signed = auth.get("hash") === "e2e-fixture-not-a-real-signature"
+      && issuedAt >= Math.floor(Date.now() / 1000) - 120
+      && issuedAt <= Math.floor(Date.now() / 1000) + 300
+      && JSON.parse(auth.get("user") || "{}").id === 123; return route.fulfill({ contentType: "image/png", headers: { "Content-Disposition": 'attachment; filename="result-81.png"' }, body: Buffer.from("fixture-image") }); });
   await page.goto("/?ux=3"); await page.getByRole("tab", { name: "Профиль", exact: true }).click();
   await page.getByRole("button", { name: "Мой результат — Готово", exact: true }).click();
   const download = page.waitForEvent("download");

@@ -35,7 +35,8 @@ const active = { id: 21, model: "fixture-photo", mode: "image", quality: "basic"
 async function prepare(page: Page, previous: unknown = null, admin = false) {
   const writes: Array<{ path: string; body: Record<string, unknown> }> = [];
   let mineReads = 0;
-  await page.addInitScript(() => { window.Telegram = { WebApp: { initData: "consumer-fixture", initDataUnsafe: { user: { id: 123 } }, ready() {}, expand() {}, HapticFeedback: { impactOccurred() {}, notificationOccurred() {} } } } as any; });
+  await page.route("https://telegram.org/js/telegram-web-app.js", route => route.fulfill({ contentType: "application/javascript", body: "" }));
+  await page.addInitScript(() => { window.Telegram = { WebApp: { initData: new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify({ id: 123 }), hash: "e2e-fixture-not-a-real-signature" }).toString(), initDataUnsafe: { user: { id: 123 } }, ready() {}, expand() {}, HapticFeedback: { impactOccurred() {}, notificationOccurred() {} } } } as any; });
   await page.route("**/telegram-web-app.js", route => route.fulfill({ body: "" }));
   await page.route("**/api/**", route => {
     const path = new URL(route.request().url()).pathname;

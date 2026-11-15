@@ -26,8 +26,9 @@ async function prepare(page: Page, admin = true) {
   let folderPage = 0;
   let revision = 3;
   let adminItems = categories.items.map(({ preview_items: _preview, ...item }) => ({ ...item, is_visible: true, published_count: item.trend_count }));
+  await page.route("https://telegram.org/js/telegram-web-app.js", route => route.fulfill({ contentType: "application/javascript", body: "" }));
   await page.addInitScript(() => {
-    window.Telegram = { WebApp: { initData: "category-fixture", initDataUnsafe: { user: { id: 123 } }, ready() {}, expand() {}, requestFullscreen() {}, HapticFeedback: { impactOccurred() {}, notificationOccurred() {} } } } as any;
+    window.Telegram = { WebApp: { initData: new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify({ id: 123 }), hash: "e2e-fixture-not-a-real-signature" }).toString(), initDataUnsafe: { user: { id: 123 } }, ready() {}, expand() {}, requestFullscreen() {}, HapticFeedback: { impactOccurred() {}, notificationOccurred() {} } } } as any;
   });
   await page.route("**/telegram-web-app.js", route => route.fulfill({ body: "" }));
   await page.route("https://media.example.test/**", route => {

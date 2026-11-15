@@ -146,10 +146,10 @@ docker compose run --rm -T app alembic upgrade head </dev/null
 # A green deploy must mean the bot process actually runs the freshly built image.
 # Force recreation avoids a stale long-lived app container surviving an otherwise
 # successful git pull/build cycle.
-log "starting fresh app and nginx containers"
+log "starting fresh app and nginx containers (nginx waits for healthy app)"
 docker compose up -d --force-recreate --remove-orphans app nginx
 
-wait_for_container app none 120
+wait_for_container app healthy 150
 wait_for_container nginx none 120
 
 log "verifying Seedance 2.5 feed-repeat runtime and Telegram webhook"
