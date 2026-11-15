@@ -2824,3 +2824,13 @@ Scope expanded by user: both GPT image models through Neironych. User approved G
 ## 2026-11-04 — VIP image aliases use Neironych primary
 
 Baseline 2b957b4569c5273bb876ad4ad2298bba4ca108bf. User authorizes unified Neironych models for Nano Banana Pro VIP/GPT Image 2 VIP. Audit and acceptance: `docs/agents/EXECUTION/neironych-vip-primary-20261104.md`. Reuse family DB admin routing and exact request snapshots; preserve public keys/prices/parameters, all three surfaces, guarded recovery and Nexus reserve. No migration. Step 1 complete; implementation/verification/release pending.
+
+### 2026-11-15 — Seedance feed repeat required image reference guidance
+- Baseline: origin/main from clean worktree created for this task; PR #339 already merged and prevents paid fallback on local SeedanceContractError.
+- Live failure: prompt with @Image2 but one reader image; UI public source_required_photo_count defaults to one because only Wan snapshots calculate required_reader_photos. Quote and launch do not preflight the hidden Seedance reference count, leading to delayed validation.
+- Desired behavior: publish only a safe required-image count for a public video, never private prompt or reference URLs; show exact missing count in Mini App and Telegram; quote and launch both fail with precise user-actionable HTTP 422 before financial writes; preserve draft uploads/prompt and idempotency.
+- Scope: shared reference requirement calculation, quote/launch and Telegram preflight, UI notice and regression tests. No new prices, provider routes or bypasses; preserve real provider max refs and protected source-media rules.
+- Verification plan: red tests (metadata, precharge, Telegram, browser) -> fix -> focused test suites, Ruff, tsc/Vite, Playwright, CI -> merge -> exact-SHA production verification.
+
+- 2026-11-15 verification: Four regression tests red before change, green after. 263 focused backend tests passed; six changed Python files Ruff green; TypeScript and Vite production build succeeded; iPhone SE Playwright regression for preserving first ref and quote-after-second passed.
+- Ready for PR (not yet deployed). Provider billing and source video ownership untouched.

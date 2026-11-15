@@ -40,6 +40,10 @@ from api import (
     video_service,
 )
 from api.assistant_service import generate_assistant_reply, generate_prompt_moderation_decision
+from api.feed_reference_requirements import (
+    reader_photo_shortfall_message,
+    required_feed_reader_photos,
+)
 from api.image_errors import (
     ImagePromptTooLong,
     ImageReferenceUnavailable,
@@ -94,7 +98,7 @@ from api.video_reference_billing import VideoSeconds, measured_video_seconds
 from api.video_runtime_fixes import seedance25_edit_billing_duration
 from api.video_service import VideoModel
 from api.wan30_contract import WAN30_MODELS
-from api.wan30_feed_recipe import recipe_options, required_reader_photos, restore_feed_recipe
+from api.wan30_feed_recipe import recipe_options, restore_feed_recipe
 from bot.keyboards.models import (
     _IMAGE_MODEL_ORDER,
     _VIDEO_MODEL_ORDER,
@@ -498,7 +502,7 @@ def _feed_card_out(card: Any, user: User | None) -> dict:
         "shares_count": generation.shares_count,
         "aspect_ratio": card.aspect_ratio,
         "source_has_video_reference": bool(replay_videos) if replay_videos is not None else None,
-        "source_required_photo_count": required_reader_photos(generation.model, creator_inputs or {}),
+        "source_required_photo_count": required_feed_reader_photos(generation.model, creator_inputs or {}, str(getattr(generation, "prompt", "") or "")),
         "source_image_recipe_available": bool(photo_recipe),
         "source_image_recipe_available_for_nano21": bool(nano21_recipe),
         "original_image_quality": image_recipe_settings.get("quality"),
@@ -4371,6 +4375,12 @@ def _prepare_feed_remix_inputs(
                 prompt = apply_feed_video_personalization(body.model, source.prompt, body.change_request)
             except FeedRemixUnavailable as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
+            required_photos = required_feed_reader_photos(body.model, creator_inputs, prompt)
+            if required_photos is not None and len(requested_refs) < required_photos:
+                raise HTTPException(
+                    status_code=422,
+                    detail=reader_photo_shortfall_message(required_photos, len(requested_refs)),
+                )
             return prompt, requested_refs, body, True, False, False
 
     image_repeat = source_type == "image" and body.model in (IMAGE_CAPS.keys() | _MJ_STUDIO_IMAGE_MODELS)

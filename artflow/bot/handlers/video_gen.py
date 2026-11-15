@@ -813,6 +813,17 @@ async def _prepare_feed_video_inputs(
             supports_photo = supports_feed_source_media(caps, "image")
             if not refs and supports_photo:
                 raise FeedRemixUnavailable("Для повтора загрузи своё фото-референс.")
+            if supports_photo:
+                from api.feed_reference_requirements import (
+                    reader_photo_shortfall_message,
+                    required_feed_reader_photos,
+                )
+
+                required_photos = required_feed_reader_photos(
+                    model_key, original_feed_video_inputs(source) or {}, personalized_prompt,
+                )
+                if required_photos is not None and len(refs) < required_photos:
+                    raise FeedRemixUnavailable(reader_photo_shortfall_message(required_photos, len(refs)))
             if refs and not supports_photo:
                 raise FeedRemixUnavailable("Модель автора принимает только текст, без фото.")
             if not supports_photo and not original_videos and "text" not in caps.get("modes", []):
