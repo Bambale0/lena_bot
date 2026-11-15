@@ -577,7 +577,7 @@ async def _run(
     aspect_ratio = _current_ratio(data, model_key)
     allowed_quality = {value for value, _ in _quality_options(model_key, aspect_ratio)}
     quality = _current_quality(data, model_key)
-    if selected_quality and selected_quality not in allowed_quality:
+    if allowed_quality and selected_quality and selected_quality not in allowed_quality:
         await call.answer("Выбранное качество больше недоступно. Выбери его заново; поцелуи не списаны.", show_alert=True)
         return
     if quality is None:
