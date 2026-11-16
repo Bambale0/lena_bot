@@ -39,6 +39,7 @@ FINAL_FAILURES = frozenset({
 })
 REVIEW_STATES = frozenset({"REFUNDED", "PARTIAL_REFUNDED", "PARTIAL_REVERSED"})
 MAX_BATCH_SIZE = 50
+MAX_AUDIT_OFFSET = 10000
 
 
 def decide_tbank_action(
@@ -78,9 +79,15 @@ def decide_tbank_action(
     return "pending", "provider_not_final"
 
 
-async def reconcile(*, limit: int, lookback_days: int, min_age_minutes: int, apply: bool) -> dict[str, object]:
+async def reconcile(*, limit: int, lookback_days: int, min_age_minutes: int, apply: bool, offset: int = 0) -> dict[str, object]:
     if not 1 <= limit <= MAX_BATCH_SIZE:
         raise ValueError(f"limit must be within 1..{MAX_BATCH_SIZE}")
+    if not 0 <= offset <= MAX_AUDIT_OFFSET:
+        raise ValueError(f"offset must be within 0..{MAX_AUDIT_OFFSET}")
+    if apply and offset:
+        # Applying updates shrinks the pending set. Offset pagination could
+        # skip rows; operator writes always start with oldest pending rows.
+        raise ValueError("--offset is allowed only in read-only dry-run mode")
     if not 1 <= lookback_days <= 3650:
         raise ValueError("lookback-days must be within 1..3650")
     if not 5 <= min_age_minutes <= 24 * 60:
@@ -101,9 +108,12 @@ async def reconcile(*, limit: int, lookback_days: int, min_age_minutes: int, app
                     Transaction.created_at <= now - timedelta(minutes=min_age_minutes),
                 )
                 .order_by(Transaction.created_at.asc(), Transaction.id.asc())
-                .limit(limit)
+                .offset(offset)
+                .limit(limit + 1)
             )
         ).scalars().all()
+    has_more = len(rows) > limit
+    rows = rows[:limit]
     # Deliberately release the query transaction before calling the provider.
     # A dry-run does not issue any local write or status mutation.
     counts: Counter[str] = Counter()
@@ -161,7 +171,14 @@ async def reconcile(*, limit: int, lookback_days: int, min_age_minutes: int, app
         print(json.dumps({"tx_id": tx.id, "decision": action, "reason": reason, "outcome": outcome}))
         await asyncio.sleep(0.25)
 
-    return {"mode": "apply" if apply else "dry_run", "checked": len(rows), "outcomes": dict(counts)}
+    return {
+        "mode": "apply" if apply else "dry_run",
+        "checked": len(rows),
+        "offset": offset,
+        "next_offset": offset + len(rows) if has_more and not apply else None,
+        "has_more": has_more if not apply else False,
+        "outcomes": dict(counts),
+    }
 
 
 def main() -> int:
@@ -169,6 +186,10 @@ def main() -> int:
     parser.add_argument("--apply", action="store_true", help="Apply verified paid/final-failure states; default is dry-run")
     parser.add_argument("--limit", type=int, default=20, help="Max pending invoices to query (1..50)")
     parser.add_argument("--lookback-days", type=int, default=30, help="Only newer pending invoices (1..3650)")
+    parser.add_argument(
+        "--offset", type=int, default=0,
+        help="Read-only dry-run pagination offset (0..10000); forbidden with --apply",
+    )
     parser.add_argument("--min-age-minutes", type=int, default=30, help="Skip very new invoices (5..1440)")
     args = parser.parse_args()
     install_referral_reward_policy(repo)
@@ -178,6 +199,7 @@ def main() -> int:
             lookback_days=args.lookback_days,
             min_age_minutes=args.min_age_minutes,
             apply=args.apply,
+            offset=args.offset,
         ))
     except (ValueError, RuntimeError) as exc:
         print(f"reconciliation_config_error={type(exc).__name__}", file=sys.stderr)
