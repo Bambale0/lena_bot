@@ -126,8 +126,8 @@ async def test_lava_webhook_does_not_confirm_without_server_side_paid_invoice(mo
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.post("/webhook/lava", json=payload)
 
-    assert response.status_code == 200
-    assert response.text == "OK"
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "30"
     confirm_and_add.assert_not_awaited()
 
 def _tribute_signed_body(payload: dict, secret: str = "tribute-secret") -> tuple[bytes, str]:
@@ -440,3 +440,89 @@ async def _assert_atomic_refund(monkeypatch, kind, external_id, amount, currency
         atomic.assert_awaited_once_with(ANY, external_id, provider, original_amount_minor=amount, currency=currency)
     unsafe_add.assert_not_awaited()
     unsafe_status.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_lava_webhook_retries_transient_verification_failure(monkeypatch) -> None:
+    pending_tx = SimpleNamespace(
+        id=12, user_id=7, amount_rub=500.0, credits=50.0,
+        provider=PaymentProvider.lava, status=TransactionStatus.pending,
+    )
+    confirm = AsyncMock()
+    monkeypatch.setattr(main, "AsyncSessionLocal", _FakeSessionContext)
+    monkeypatch.setattr(main.repo, "get_transaction_by_external_id", AsyncMock(return_value=pending_tx))
+    monkeypatch.setattr(main.repo, "confirm_transaction_and_add_credits", confirm)
+    monkeypatch.setattr(main, "lava_get_invoice", AsyncMock(side_effect=TimeoutError("provider timeout")))
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/webhook/lava",
+            json={"eventType": "payment.success", "data": {"invoiceId": "invoice-1"}},
+        )
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "30"
+    confirm.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "authoritative_invoice",
+    [
+        {"status": "completed", "amount": 500.0, "currency": "RUB"},  # missing id
+        {"id": "invoice-1", "status": "completed", "currency": "RUB"},  # missing amount
+        {"id": "invoice-1", "status": "completed", "amount": 500.0},  # missing currency
+        {"id": "invoice-1", "status": "completed", "amount": "invalid", "currency": "RUB"},
+    ],
+)
+async def test_lava_webhook_never_credits_missing_invoice_evidence(
+    monkeypatch, authoritative_invoice,
+) -> None:
+    pending_tx = SimpleNamespace(
+        id=12, user_id=7, amount_rub=500.0, credits=50.0,
+        provider=PaymentProvider.lava, status=TransactionStatus.pending,
+    )
+    confirm = AsyncMock()
+    monkeypatch.setattr(main, "AsyncSessionLocal", _FakeSessionContext)
+    monkeypatch.setattr(main.repo, "get_transaction_by_external_id", AsyncMock(return_value=pending_tx))
+    monkeypatch.setattr(main.repo, "confirm_transaction_and_add_credits", confirm)
+    monkeypatch.setattr(main, "lava_get_invoice", AsyncMock(return_value=authoritative_invoice))
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/webhook/lava",
+            json={"eventType": "payment.success", "data": {"invoiceId": "invoice-1"}},
+        )
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "30"
+    confirm.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "authoritative_invoice",
+    [
+        {"id": "other-invoice", "status": "completed", "amount": 500.0, "currency": "RUB"},
+        {"id": "invoice-1", "status": "completed", "amount": 501.0, "currency": "RUB"},
+        {"id": "invoice-1", "status": "completed", "amount": 500.0, "currency": "USD"},
+    ],
+)
+async def test_lava_webhook_never_credits_mismatched_invoice_evidence(
+    monkeypatch, authoritative_invoice,
+) -> None:
+    pending_tx = SimpleNamespace(
+        id=12, user_id=7, amount_rub=500.0, credits=50.0,
+        provider=PaymentProvider.lava, status=TransactionStatus.pending,
+    )
+    confirm = AsyncMock()
+    monkeypatch.setattr(main, "AsyncSessionLocal", _FakeSessionContext)
+    monkeypatch.setattr(main.repo, "get_transaction_by_external_id", AsyncMock(return_value=pending_tx))
+    monkeypatch.setattr(main.repo, "confirm_transaction_and_add_credits", confirm)
+    monkeypatch.setattr(main, "lava_get_invoice", AsyncMock(return_value=authoritative_invoice))
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/webhook/lava",
+            json={"eventType": "payment.success", "data": {"invoiceId": "invoice-1"}},
+        )
+    assert response.status_code == 200
+    confirm.assert_not_awaited()
