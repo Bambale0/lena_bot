@@ -844,7 +844,7 @@ function FeedRemixRunnerPortal() {
       resetForm(null);
     } catch (runError) {
       const rejected = runError instanceof FeedApiError && (
-        runError.code === "feed_remix_precharge_denied" || [401, 403].includes(runError.status)
+        ["feed_remix_precharge_denied", "feed_remix_preadmission_price_changed"].includes(runError.code || "") || [401, 403].includes(runError.status)
       );
       if (rejected) writeLaunchMarker(scope, false);
       if (activeScope.current !== scope || sequence !== openSequence.current) return;
