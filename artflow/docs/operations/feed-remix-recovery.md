@@ -39,3 +39,18 @@ No prompt, Telegram initData, provider token, full request payload or key
 should be written to operational logs. Do not send real paid provider jobs
 as a production smoke test. The schema migration preserves existing payment
 and generation rows; downgrade refuses to discard nonempty claim history.
+
+## Proven pre-admission price conflicts
+
+A `409` carrying `detail.code = feed_remix_preadmission_price_changed`
+is emitted **before** the idempotency claim is reserved or credits are
+charged. The Mini App may clear the local launch marker, refresh the quote,
+and request explicit confirmation of the updated price. It must still
+create a fresh random key for the new attempt.
+
+A generic `409`, a network timeout, a connection loss, or an unknown paid
+response is **not** a proven pre-admission rejection. Retain the original
+key and block a new paid submit until exact-key recovery or an operator-led
+ledger reconciliation establishes the outcome. Never treat all `409`s as
+retryable and never bypass branch-required CI or protected merges to roll
+out the financial fix.
