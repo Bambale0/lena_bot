@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.fix_stuck_tbank_payments import decide_tbank_action
+from scripts.fix_stuck_tbank_payments import decide_tbank_action, reconcile
 
 
 def state(*, payment_id: str = "payment-123", status: str = "CONFIRMED",
@@ -84,3 +84,26 @@ def test_standalone_cli_help_does_not_trigger_db_api_import_cycle() -> None:
     )
     assert process.returncode == 0
     assert "--apply" in process.stdout
+    assert "--offset" in process.stdout
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("offset", "apply"),
+    [(-1, False), (10001, False), (1, True), (50, True)],
+)
+async def test_tbank_reconcile_rejects_unsafe_audit_offset(offset: int, apply: bool) -> None:
+    # Invalid pagination and offset+apply must fail before API/DB access.
+    with pytest.raises(ValueError, match="offset"):
+        await reconcile(
+            limit=2, lookback_days=30, min_age_minutes=30,
+            apply=apply, offset=offset,
+        )
+
+
+def test_dry_run_offset_is_bounded_and_write_mode_never_offsets() -> None:
+    source = (Path(__file__).parents[1] / "scripts/fix_stuck_tbank_payments.py").read_text()
+    assert ".offset(offset)" in source
+    assert ".limit(limit + 1)" in source
+    assert "if apply and offset:" in source
+    assert 'parser.add_argument("--apply", action="store_true"' in source
