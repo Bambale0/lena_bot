@@ -82,7 +82,7 @@ function writeLaunchMarker(scope: LaunchScope, pending: boolean, key?: string): 
 }
 
 class FeedApiError extends Error {
-  constructor(message: string, readonly status: number) { super(message); }
+  constructor(message: string, readonly status: number, readonly code = "") { super(message); }
 }
 
 let runnerRoot: Root | null = null;
@@ -127,13 +127,15 @@ async function apiJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   });
   if (!response.ok) {
     let message = `Ошибка API ${response.status}`;
+    let code = "";
     try {
       const payload = await response.json();
+      code = String(payload?.detail?.code || payload?.error?.code || "");
       message = String(payload?.error?.message || (typeof payload?.detail === "string" ? payload.detail : payload?.detail?.message) || payload?.message || message);
     } catch {
       // Keep fallback message.
     }
-    throw new FeedApiError(message, response.status);
+    throw new FeedApiError(message, response.status, code);
   }
   if (response.status === 204) return undefined as T;
   const payload = await response.json();
@@ -841,7 +843,9 @@ function FeedRemixRunnerPortal() {
       openSequence.current++;
       resetForm(null);
     } catch (runError) {
-      const rejected = runError instanceof FeedApiError && runError.status >= 400 && runError.status < 500 && runError.status !== 408 && runError.status !== 409;
+      const rejected = runError instanceof FeedApiError && (
+        runError.code === "feed_remix_precharge_denied" || [401, 403].includes(runError.status)
+      );
       if (rejected) writeLaunchMarker(scope, false);
       if (activeScope.current !== scope || sequence !== openSequence.current) return;
       setLaunchUncertain(!rejected);
