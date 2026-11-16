@@ -4962,20 +4962,26 @@ async def remix_feed_post(
             )
             if not charge.allowed:
                 await release_proven_precharge_reject()
-                await release_proven_precharge_reject()
-            raise HTTPException(status_code=402, detail=precharge_denial_detail(f"Insufficient credits: need {nominal_credits}"))
+                raise HTTPException(
+                    status_code=402,
+                    detail=precharge_denial_detail(f"Insufficient credits: need {nominal_credits}"),
+                )
             total_credits = charge.charged_credits
         else:
             total_credits = nominal_credits
             if user.credits < total_credits:
                 await release_proven_precharge_reject()
-                await release_proven_precharge_reject()
-            raise HTTPException(status_code=402, detail=precharge_denial_detail(f"Insufficient credits: need {total_credits}"))
+                raise HTTPException(
+                    status_code=402,
+                    detail=precharge_denial_detail(f"Insufficient credits: need {total_credits}"),
+                )
             ok = await repo.spend_credits(session, user.id, total_credits)
             if not ok:
                 await release_proven_precharge_reject()
-                await release_proven_precharge_reject()
-            raise HTTPException(status_code=402, detail=precharge_denial_detail("Failed to spend credits"))
+                raise HTTPException(
+                    status_code=402,
+                    detail=precharge_denial_detail("Failed to spend credits"),
+                )
 
         image_session_id: int | None = None
         if gen_type == "image":
@@ -5146,15 +5152,27 @@ async def remix_feed_post(
             amount=nominal_credits,
         )
         if not charge.allowed:
-            raise HTTPException(status_code=402, detail=precharge_denial_detail(f"Insufficient credits: need {nominal_credits}"))
+            await release_proven_precharge_reject()
+            raise HTTPException(
+                status_code=402,
+                detail=precharge_denial_detail(f"Insufficient credits: need {nominal_credits}"),
+            )
         total_credits = charge.charged_credits
     else:
         total_credits = nominal_credits
         if user.credits < total_credits:
-            raise HTTPException(status_code=402, detail=precharge_denial_detail(f"Insufficient credits: need {total_credits}"))
+            await release_proven_precharge_reject()
+            raise HTTPException(
+                status_code=402,
+                detail=precharge_denial_detail(f"Insufficient credits: need {total_credits}"),
+            )
         ok = await repo.spend_credits(session, user.id, total_credits)
         if not ok:
-            raise HTTPException(status_code=402, detail=precharge_denial_detail("Failed to spend credits"))
+            await release_proven_precharge_reject()
+            raise HTTPException(
+                status_code=402,
+                detail=precharge_denial_detail("Failed to spend credits"),
+            )
 
     image_session_id: int | None = None
     if gen_type == "image":
