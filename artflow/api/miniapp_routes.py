@@ -188,6 +188,7 @@ from core.seedance_reconciliation import (
 )
 from core.trend_user_fields import TrendUserFieldsError, render_trend_prompt
 from core.trends import is_trend_prompt, trend_kind, trend_user_fields
+from db import feed_remix_claims
 from db import repository as repo
 from db.models import (
     CreditLedgerEntry,
@@ -2195,6 +2196,9 @@ class VideoGenRequest(BaseModel):
 
 class FeedRemixRequest(BaseModel):
     model: str
+    idempotency_key: str | None = Field(
+        default=None, min_length=16, max_length=128, pattern=r"^[A-Za-z0-9_-]+$",
+    )
     change_request: str = Field(default="", max_length=800)
     mode: str = "text"                    # "text" | "image"
     duration: int = Field(default=5, ge=2, le=30)
@@ -4769,6 +4773,61 @@ async def quote_feed_remix(
     }
 
 
+def _feed_remix_request_hash(gen_id: int, body: FeedRemixRequest, *, surface: str) -> str:
+    """Freeze the requested paid inputs; the opaque key itself is not hashed in."""
+    frozen = {
+        "source_generation_id": gen_id,
+        "surface": surface,
+        "body": body.model_dump(mode="json", exclude={"idempotency_key"}),
+    }
+    return hashlib.sha256(
+        json.dumps(frozen, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    ).hexdigest()
+
+
+async def _existing_feed_remix_claim_response(
+    session: AsyncSession, user: User, claim: Any,
+    *, source_id: int, request_hash: str,
+) -> GenerationOut:
+    if claim.source_generation_id != source_id or claim.request_hash != request_hash:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "feed_remix_request_key_conflict", "message": "Ключ уже относится к другому запуску"},
+        )
+    if claim.generation_id is None:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "feed_remix_processing", "message": "Исходный запуск ещё обрабатывается; проверь его статус"},
+        )
+    previous = await repo.get_generation_by_id(session, claim.generation_id)
+    if previous is None or previous.user_id != user.id:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "feed_remix_unavailable", "message": "Результат запуска требует ручной проверки"},
+        )
+    return _gen_out(previous)
+
+
+@router.get("/feed/remix-claim/{request_key}")
+async def feed_remix_claim_status(
+    request_key: str,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> dict[str, Any]:
+    """Exact user-scoped read-only recovery; never creates or pays for a job."""
+    if not (16 <= len(request_key) <= 128) or re.fullmatch(r"[A-Za-z0-9_-]+", request_key) is None:
+        raise HTTPException(status_code=422, detail="Invalid feed-remix request key")
+    claim = await feed_remix_claims.get_claim(session, user_id=user.id, request_key=request_key)
+    if claim is None:
+        return {"state": "unavailable", "task": None}
+    if claim.generation_id is None:
+        return {"state": "processing", "task": None}
+    generation = await repo.get_generation_by_id(session, claim.generation_id)
+    if generation is None or generation.user_id != user.id:
+        return {"state": "unavailable", "task": None}
+    return {"state": "complete", "task": _gen_out(generation).model_dump(mode="json")}
+
+
 @router.post("/feed/{gen_id}/remix", response_model=GenerationOut, status_code=202)
 async def remix_feed_post(
     gen_id: int,
@@ -4780,6 +4839,62 @@ async def remix_feed_post(
     """
     Repeat a public post, or edit its public media without disclosing author text.
     """
+    request_hash = (
+        _feed_remix_request_hash(gen_id, body, surface=surface)
+        if body.idempotency_key else None
+    )
+    if body.idempotency_key:
+        previous_claim = await feed_remix_claims.get_claim(
+            session, user_id=user.id, request_key=body.idempotency_key,
+        )
+        if previous_claim is not None:
+            return await _existing_feed_remix_claim_response(
+                session, user, previous_claim,
+                source_id=gen_id, request_hash=request_hash,
+            )
+
+    async def reserve_before_charge() -> GenerationOut | None:
+        if body.idempotency_key is None:
+            return None  # Legacy clients remain compatible during rollout.
+        claim, created = await feed_remix_claims.reserve_claim(
+            session,
+            user_id=user.id,
+            request_key=body.idempotency_key,
+            request_hash=request_hash,
+            source_generation_id=gen_id,
+        )
+        if not created:
+            return await _existing_feed_remix_claim_response(
+                session, user, claim, source_id=gen_id, request_hash=request_hash,
+            )
+        return None
+
+    async def release_proven_precharge_reject() -> None:
+        if body.idempotency_key:
+            await feed_remix_claims.release_precharge_claim(
+                session, user_id=user.id,
+                request_key=body.idempotency_key, request_hash=request_hash,
+            )
+
+    def precharge_denial_detail(message: str) -> str | dict[str, str]:
+        # Only this exact code certifies no financial side effect happened.
+        return (
+            {"code": "feed_remix_precharge_denied", "message": message}
+            if body.idempotency_key else message
+        )
+
+    async def link_before_provider_submit(generation_id: int) -> None:
+        if body.idempotency_key and not await feed_remix_claims.link_generation(
+            session, user_id=user.id,
+            request_key=body.idempotency_key, generation_id=generation_id,
+        ):
+            # Charge may already be recorded; an unlinked claim must be
+            # investigated, never retried or sent to the paid provider.
+            raise HTTPException(
+                status_code=503,
+                detail="Запуск ожидает проверки. Повторная оплата заблокирована.",
+            )
+
     if body.model in KLING4_MODELS:
         await require_kling4_access(session, user)
         raise HTTPException(status_code=422, detail="Открой Kling 4 в студии: роли материалов требуют отдельного подтверждения")
@@ -4839,6 +4954,10 @@ async def remix_feed_post(
         if active >= MAX_CONCURRENT:
             raise HTTPException(status_code=429, detail="Too many concurrent generations")
 
+        existing_submission = await reserve_before_charge()
+        if existing_submission is not None:
+            return existing_submission
+
         if gen_type == "image":
             charge = await repo.charge_image_generation(
                 session,
@@ -4847,15 +4966,27 @@ async def remix_feed_post(
                 amount=nominal_credits,
             )
             if not charge.allowed:
-                raise HTTPException(status_code=402, detail=f"Insufficient credits: need {nominal_credits}")
+                await release_proven_precharge_reject()
+                raise HTTPException(
+                    status_code=402,
+                    detail=precharge_denial_detail(f"Insufficient credits: need {nominal_credits}"),
+                )
             total_credits = charge.charged_credits
         else:
             total_credits = nominal_credits
             if user.credits < total_credits:
-                raise HTTPException(status_code=402, detail=f"Insufficient credits: need {total_credits}")
+                await release_proven_precharge_reject()
+                raise HTTPException(
+                    status_code=402,
+                    detail=precharge_denial_detail(f"Insufficient credits: need {total_credits}"),
+                )
             ok = await repo.spend_credits(session, user.id, total_credits)
             if not ok:
-                raise HTTPException(status_code=402, detail="Failed to spend credits")
+                await release_proven_precharge_reject()
+                raise HTTPException(
+                    status_code=402,
+                    detail=precharge_denial_detail("Failed to spend credits"),
+                )
 
         image_session_id: int | None = None
         if gen_type == "image":
@@ -4886,6 +5017,8 @@ async def remix_feed_post(
             source_feed_gen_id=None if own_recipe else gen_id,
             input_params=feed_context or None,
         )
+
+        await link_before_provider_submit(gen.id)
 
         try:
             if body.model == "midjourney-imagine":
@@ -4990,14 +5123,19 @@ async def remix_feed_post(
             nominal_credits = wan_quote.credits
             normalized_video.update(wan_quote.stored_params())
             if body.quoted_credits is None or round(float(body.quoted_credits), 6) != round(nominal_credits, 6):
-                raise HTTPException(status_code=409, detail="Цена Wan изменилась или не подтверждена. Проверь сумму и подтверди запуск.")
+                raise HTTPException(status_code=409, detail={"code": "feed_remix_preadmission_price_changed", "message": "Цена Wan изменилась или не подтверждена. Проверь сумму и подтверди запуск."})
         else:
             billing_seconds, nominal_credits = await _video_reference_price(
                 normalized_video, VIDEO_CAPS.get(body.model, {}), model_cost.credits,
             )
-            _require_video_price_confirmation(body.quoted_credits, nominal_credits, billing_seconds)
+            try:
+                _require_video_price_confirmation(body.quoted_credits, nominal_credits, billing_seconds)
+            except HTTPException as exc:
+                if exc.status_code != 409:
+                    raise
+                raise HTTPException(status_code=409, detail={"code": "feed_remix_preadmission_price_changed", "message": str(exc.detail)}) from exc
             if body.duration_override is not None and (body.quoted_credits is None or round(body.quoted_credits, 6) != round(nominal_credits, 6)):
-                raise HTTPException(status_code=409, detail="Цена изменилась. Проверь сумму и подтверди запуск.")
+                raise HTTPException(status_code=409, detail={"code": "feed_remix_preadmission_price_changed", "message": "Цена изменилась. Проверь сумму и подтверди запуск."})
         normalized_video.update({
             "billing_output_seconds": billing_seconds.output,
             "billing_reference_seconds": billing_seconds.references,
@@ -5012,6 +5150,10 @@ async def remix_feed_post(
     if active >= MAX_CONCURRENT:
         raise HTTPException(status_code=429, detail="Too many concurrent generations")
 
+    existing_submission = await reserve_before_charge()
+    if existing_submission is not None:
+        return existing_submission
+
     if gen_type == "image":
         charge = await repo.charge_image_generation(
             session,
@@ -5020,15 +5162,27 @@ async def remix_feed_post(
             amount=nominal_credits,
         )
         if not charge.allowed:
-            raise HTTPException(status_code=402, detail=f"Insufficient credits: need {nominal_credits}")
+            await release_proven_precharge_reject()
+            raise HTTPException(
+                status_code=402,
+                detail=precharge_denial_detail(f"Insufficient credits: need {nominal_credits}"),
+            )
         total_credits = charge.charged_credits
     else:
         total_credits = nominal_credits
         if user.credits < total_credits:
-            raise HTTPException(status_code=402, detail=f"Insufficient credits: need {total_credits}")
+            await release_proven_precharge_reject()
+            raise HTTPException(
+                status_code=402,
+                detail=precharge_denial_detail(f"Insufficient credits: need {total_credits}"),
+            )
         ok = await repo.spend_credits(session, user.id, total_credits)
         if not ok:
-            raise HTTPException(status_code=402, detail="Failed to spend credits")
+            await release_proven_precharge_reject()
+            raise HTTPException(
+                status_code=402,
+                detail=precharge_denial_detail("Failed to spend credits"),
+            )
 
     image_session_id: int | None = None
     if gen_type == "image":
@@ -5058,6 +5212,7 @@ async def remix_feed_post(
         source_feed_gen_id=None if own_recipe else gen_id,
         input_params={**(normalized_video or {}), **feed_context} or None,
     )
+    await link_before_provider_submit(gen.id)
     failed_generation_id = gen.id
     failed_user_id = user.id
     image_request_id = (
