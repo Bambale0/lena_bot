@@ -187,7 +187,8 @@ from core.seedance_reconciliation import (
 )
 from core.trend_user_fields import TrendUserFieldsError, render_trend_prompt
 from core.trends import is_trend_prompt, trend_kind, trend_user_fields
-from db import feed_remix_claims, repository as repo
+from db import feed_remix_claims
+from db import repository as repo
 from db.models import (
     CreditLedgerEntry,
     Generation,
