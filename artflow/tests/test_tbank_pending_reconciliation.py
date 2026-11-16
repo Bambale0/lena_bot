@@ -4,9 +4,12 @@ from __future__ import annotations
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
+from scripts import fix_stuck_tbank_payments as audit
 from scripts.fix_stuck_tbank_payments import decide_tbank_action, reconcile
 
 
@@ -123,10 +126,6 @@ async def test_aggregate_only_mode_rejects_any_apply_before_provider_or_db() -> 
 
 @pytest.mark.asyncio
 async def test_aggregate_only_dry_run_redacts_transaction_ids(monkeypatch, capsys) -> None:
-    from types import SimpleNamespace
-    from unittest.mock import AsyncMock
-    from scripts import fix_stuck_tbank_payments as audit
-
     transactions = [
         SimpleNamespace(
             id=987654321, external_id="secret-payment-id", amount_rub=150.0,
