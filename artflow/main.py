@@ -1371,7 +1371,10 @@ async def lava_webhook(request: Request) -> PlainTextResponse:
             return PlainTextResponse("OK")
 
         try:
-            invoice = await lava_get_invoice(external_id)
+            # Lava expects a 2xx webhook acknowledgement within 10 seconds.
+            # Bound the authoritative read so slow provider I/O triggers a
+            # retryable 503 instead of exceeding the delivery deadline.
+            invoice = await asyncio.wait_for(lava_get_invoice(external_id), timeout=7.0)
         except Exception as exc:
             logger.error('Lava invoice verification failed for %s: %s', safe_identifier(external_id), type(exc).__name__)
             # The provider lookup is authoritative. A transient read error must
