@@ -144,7 +144,8 @@ def test_webview_persists_exact_key_and_does_not_allow_keyed_manual_override():
     assert "writeLaunchMarker(scope, true, requestKey)" in src
     assert "/feed/remix-claim/" in src
     assert "!readLaunchRequestKey(activeScope.current)" in src
-    assert 'runError.code === "feed_remix_precharge_denied"' in src
+    assert '"feed_remix_precharge_denied", "feed_remix_preadmission_price_changed"' in src
+    assert 'runError.code || ""' in src
     assert "runError.status !== 409" not in src
 
 
