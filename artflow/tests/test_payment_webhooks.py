@@ -472,9 +472,11 @@ async def test_lava_webhook_retries_transient_verification_failure(monkeypatch) 
         {"id": "invoice-1", "status": "completed", "currency": "RUB"},  # missing amount
         {"id": "invoice-1", "status": "completed", "amount": 500.0},  # missing currency
         {"id": "invoice-1", "status": "completed", "amount": "invalid", "currency": "RUB"},
+        {"id": "invoice-1", "eventType": "payment.success", "status": "pending",
+         "amount": 500.0, "currency": "RUB"},
     ],
 )
-async def test_lava_webhook_never_credits_missing_invoice_evidence(
+async def test_lava_webhook_never_credits_unverifiable_invoice_evidence(
     monkeypatch, authoritative_invoice,
 ) -> None:
     pending_tx = SimpleNamespace(
