@@ -149,7 +149,8 @@ test("unknown repeat launch survives reload without replay and requires history 
   await expect(dialog.getByRole("button", { name: /Запустить повтор/ })).toBeDisabled();
   expect(launches).toBe(1);
   await dialog.getByRole("button", { name: "Проверить историю" }).click();
-  await expect(dialog.getByRole("button", { name: "Я проверил историю — разрешить новый запуск" })).toBeEnabled();
+  await expect(dialog.getByRole("button", { name: "Я проверил историю — разрешить новый запуск" })).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: /Запустить повтор/ })).toBeDisabled();
   expect(launches).toBe(1);
 });
 
@@ -862,19 +863,14 @@ test("creator photo-to-video replay selects duration, restores draft and reconfi
     await page.screenshot({ path: testInfo.outputPath("duration-selection.png") });
   }
   await dialog.getByRole("button", { name: /Запустить повтор/ }).click();
-  await expect(dialog.getByRole("button", { name: "Запустить повтор · 35 💋" })).toBeEnabled();
+  await expect(dialog.getByText(/Результат запуска неизвестен/)).toBeVisible();
+  await expect(dialog.getByRole("button", { name: /Запустить повтор/ })).toBeDisabled();
   expect(launches).toBe(1);
   expect(sent).toMatchObject({ duration_override: 15, quoted_credits: 30 });
-  await dialog.getByRole("button", { name: /Запустить повтор/ }).click();
-  await expect(page.getByRole("dialog", { name: /Задача #9205/ })).toBeVisible();
-  expect(sent).toMatchObject({
-    model: model.key, change_request: "Белый костюм, причёска каре, число 35",
-    image_url: "https://example.test/uploaded-ref.png",
-    reference_urls: ["https://example.test/uploaded-ref.png"],
-    video_url: null, duration: 10, duration_override: 15, quoted_credits: 35,
-    aspect_ratio: "9:16", resolution: "720p",
-    aspect_ratio_override: "16:9", resolution_override: "1080p",
-  });
+  // A generic 409 after paid POST is ambiguous: never submit a second paid job.
+  await page.reload();
+  await expect(dialog.getByRole("button", { name: /Запустить повтор/ })).toBeDisabled();
+  expect(launches).toBe(1);
 });
 
 test("deep-linked older creator video retains photo-only recipe provenance", async ({ page }) => {
@@ -1054,7 +1050,8 @@ for (const surface of ["telegram", "browser"] as const) {
     await expect(dialog.getByRole("button", { name: /Запустить повтор/ })).toBeEnabled();
     await dialog.getByRole("button", { name: /Запустить повтор/ }).click();
     await expect.poll(() => submitted).not.toBeNull();
-    expect(submitted).toEqual(latestQuote);
+    expect(submitted).toMatchObject(latestQuote!);
+    expect(submitted?.idempotency_key).toMatch(/^[a-f0-9]{32}$/);
     expect(submitted).toMatchObject({ source_image_url: selectedSource,
       image_url: "https://example.test/uploaded-ref.png", reference_urls: ["https://example.test/uploaded-ref.png"] });
   });
