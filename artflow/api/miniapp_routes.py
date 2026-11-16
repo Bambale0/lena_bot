@@ -79,6 +79,7 @@ from api.music_service import (
     normalize_music_model,
     upload_suno_voice_audio,
 )
+from api.neironych_missing_media_telemetry import should_log_missing_media
 from api.neironych_seedance import NeironychPreSubmitFailure, NeironychSubmissionUnknown
 from api.photo_prompt_service import generate_prompt_from_photo
 from api.public_files import (
@@ -762,10 +763,14 @@ async def _reconcile_neironych_image_generation(
             except Exception as exc:
                 logger.warning("Nano Banana 2 cached response recovery delayed gen=%s reason=%s", gen.id, type(exc).__name__)
         if not url:
-            logger.error(
-                "Neironych completed without recoverable image gen=%s request_id=%s",
-                gen.id, request_id,
-            )
+            # A single provider-completed job can be polled repeatedly.
+            # Keep an actionable ERROR without flooding logs or exposing
+            # provider request identifiers; do not change refund/retry policy.
+            if should_log_missing_media(gen.id):
+                logger.error(
+                    "Neironych completed without recoverable image gen=%s model=%s",
+                    gen.id, getattr(gen, "model", "unknown"),
+                )
             return await refund_if_overdue("completed_no_media")
         try:
             durable_url = recovered_url or await neironych_image_adapter.mirror_verified_nano_banana21_result(url)
