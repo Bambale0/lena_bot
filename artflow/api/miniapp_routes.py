@@ -187,13 +187,7 @@ from core.seedance_reconciliation import (
 )
 from core.trend_user_fields import TrendUserFieldsError, render_trend_prompt
 from core.trends import is_trend_prompt, trend_kind, trend_user_fields
-from db import repository as repo
-from db.feed_remix_claims import (
-    get_claim as get_feed_remix_claim,
-    link_generation as link_feed_remix_generation,
-    release_precharge_claim as release_feed_remix_precharge,
-    reserve_claim as reserve_feed_remix_claim,
-)
+from db import feed_remix_claims, repository as repo
 from db.models import (
     CreditLedgerEntry,
     Generation,
@@ -4817,7 +4811,7 @@ async def feed_remix_claim_status(
     """Exact user-scoped read-only recovery; never creates or pays for a job."""
     if not (16 <= len(request_key) <= 128) or re.fullmatch(r"[A-Za-z0-9_-]+", request_key) is None:
         raise HTTPException(status_code=422, detail="Invalid feed-remix request key")
-    claim = await get_feed_remix_claim(session, user_id=user.id, request_key=request_key)
+    claim = await feed_remix_claims.get_claim(session, user_id=user.id, request_key=request_key)
     if claim is None:
         return {"state": "unavailable", "task": None}
     if claim.generation_id is None:
@@ -4844,7 +4838,7 @@ async def remix_feed_post(
         if body.idempotency_key else None
     )
     if body.idempotency_key:
-        previous_claim = await get_feed_remix_claim(
+        previous_claim = await feed_remix_claims.get_claim(
             session, user_id=user.id, request_key=body.idempotency_key,
         )
         if previous_claim is not None:
@@ -4856,7 +4850,7 @@ async def remix_feed_post(
     async def reserve_before_charge() -> GenerationOut | None:
         if body.idempotency_key is None:
             return None  # Legacy clients remain compatible during rollout.
-        claim, created = await reserve_feed_remix_claim(
+        claim, created = await feed_remix_claims.reserve_claim(
             session,
             user_id=user.id,
             request_key=body.idempotency_key,
@@ -4871,13 +4865,13 @@ async def remix_feed_post(
 
     async def release_proven_precharge_reject() -> None:
         if body.idempotency_key:
-            await release_feed_remix_precharge(
+            await feed_remix_claims.release_precharge_claim(
                 session, user_id=user.id,
                 request_key=body.idempotency_key, request_hash=request_hash,
             )
 
     async def link_before_provider_submit(generation_id: int) -> None:
-        if body.idempotency_key and not await link_feed_remix_generation(
+        if body.idempotency_key and not await feed_remix_claims.link_generation(
             session, user_id=user.id,
             request_key=body.idempotency_key, generation_id=generation_id,
         ):
