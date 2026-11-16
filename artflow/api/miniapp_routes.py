@@ -769,7 +769,7 @@ async def _reconcile_neironych_image_generation(
             if should_log_missing_media(gen.id):
                 logger.error(
                     "Neironych completed without recoverable image gen=%s model=%s",
-                    gen.id, gen.model,
+                    gen.id, getattr(gen, "model", "unknown"),
                 )
             return await refund_if_overdue("completed_no_media")
         try:
