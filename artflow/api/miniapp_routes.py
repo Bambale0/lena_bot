@@ -4871,6 +4871,13 @@ async def remix_feed_post(
                 request_key=body.idempotency_key, request_hash=request_hash,
             )
 
+    def precharge_denial_detail(message: str) -> str | dict[str, str]:
+        # Only this exact code certifies no financial side effect happened.
+        return (
+            {"code": "feed_remix_precharge_denied", "message": message}
+            if body.idempotency_key else message
+        )
+
     async def link_before_provider_submit(generation_id: int) -> None:
         if body.idempotency_key and not await feed_remix_claims.link_generation(
             session, user_id=user.id,
@@ -4956,19 +4963,19 @@ async def remix_feed_post(
             if not charge.allowed:
                 await release_proven_precharge_reject()
                 await release_proven_precharge_reject()
-            raise HTTPException(status_code=402, detail=f"Insufficient credits: need {nominal_credits}")
+            raise HTTPException(status_code=402, detail=precharge_denial_detail(f"Insufficient credits: need {nominal_credits}"))
             total_credits = charge.charged_credits
         else:
             total_credits = nominal_credits
             if user.credits < total_credits:
                 await release_proven_precharge_reject()
                 await release_proven_precharge_reject()
-            raise HTTPException(status_code=402, detail=f"Insufficient credits: need {total_credits}")
+            raise HTTPException(status_code=402, detail=precharge_denial_detail(f"Insufficient credits: need {total_credits}"))
             ok = await repo.spend_credits(session, user.id, total_credits)
             if not ok:
                 await release_proven_precharge_reject()
                 await release_proven_precharge_reject()
-            raise HTTPException(status_code=402, detail="Failed to spend credits")
+            raise HTTPException(status_code=402, detail=precharge_denial_detail("Failed to spend credits"))
 
         image_session_id: int | None = None
         if gen_type == "image":
@@ -5139,15 +5146,15 @@ async def remix_feed_post(
             amount=nominal_credits,
         )
         if not charge.allowed:
-            raise HTTPException(status_code=402, detail=f"Insufficient credits: need {nominal_credits}")
+            raise HTTPException(status_code=402, detail=precharge_denial_detail(f"Insufficient credits: need {nominal_credits}"))
         total_credits = charge.charged_credits
     else:
         total_credits = nominal_credits
         if user.credits < total_credits:
-            raise HTTPException(status_code=402, detail=f"Insufficient credits: need {total_credits}")
+            raise HTTPException(status_code=402, detail=precharge_denial_detail(f"Insufficient credits: need {total_credits}"))
         ok = await repo.spend_credits(session, user.id, total_credits)
         if not ok:
-            raise HTTPException(status_code=402, detail="Failed to spend credits")
+            raise HTTPException(status_code=402, detail=precharge_denial_detail("Failed to spend credits"))
 
     image_session_id: int | None = None
     if gen_type == "image":
