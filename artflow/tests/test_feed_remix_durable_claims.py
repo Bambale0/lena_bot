@@ -7,9 +7,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from api import miniapp_routes as routes
 from db import feed_remix_claims as claims
+from db.models import FeedRemixClaim
 
 
 def body(*, key: str | None = "ab" * 16, model: str = "nano-banana-2"):
@@ -156,3 +158,75 @@ def test_paid_admission_and_binding_happen_before_provider_call():
     assert region.index("await reserve_before_charge()") < region.index("charge_image_generation(")
     assert region.index("await link_before_provider_submit(gen.id)") < region.index("midjourney_service.imagine(")
     assert region.rindex("await link_before_provider_submit(gen.id)") < region.index("result = await", region.index("await link_before_provider_submit(gen.id)", region.index("await link_before_provider_submit(gen.id)") + 1))
+
+
+@pytest.mark.asyncio
+async def test_sqlite_unique_user_key_and_one_time_generation_binding():
+    """Real SQL unique index and CAS, no production database or paid provider."""
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(FeedRemixClaim.__table__.create)
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        async with sessions() as session:
+            first, created = await claims.reserve_claim(
+                session, user_id=17, request_key="ab" * 16,
+                request_hash="f" * 64, source_generation_id=99,
+            )
+            assert created is True
+            second, created_again = await claims.reserve_claim(
+                session, user_id=17, request_key="ab" * 16,
+                request_hash="f" * 64, source_generation_id=99,
+            )
+            assert created_again is False
+            assert first.id == second.id
+            assert await claims.link_generation(
+                session, user_id=17, request_key="ab" * 16, generation_id=1001,
+            )
+            assert not await claims.link_generation(
+                session, user_id=17, request_key="ab" * 16, generation_id=1002,
+            )
+            await claims.release_precharge_claim(
+                session, user_id=17, request_key="ab" * 16, request_hash="f" * 64,
+            )
+            linked = await claims.get_claim(
+                session, user_id=17, request_key="ab" * 16,
+            )
+            assert linked is not None
+            assert linked.generation_id == 1001
+            assert linked.status == "linked"
+            other, other_created = await claims.reserve_claim(
+                session, user_id=18, request_key="ab" * 16,
+                request_hash="z" * 64, source_generation_id=100,
+            )
+            assert other_created and other.user_id == 18
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_sqlite_precharge_reject_releases_only_original_unlinked_request():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(FeedRemixClaim.__table__.create)
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        async with sessions() as session:
+            await claims.reserve_claim(
+                session, user_id=17, request_key="ac" * 16,
+                request_hash="f" * 64, source_generation_id=99,
+            )
+            await claims.release_precharge_claim(
+                session, user_id=17, request_key="ac" * 16,
+                request_hash="0" * 64,
+            )
+            assert await claims.get_claim(session, user_id=17, request_key="ac" * 16)
+            await claims.release_precharge_claim(
+                session, user_id=17, request_key="ac" * 16,
+                request_hash="f" * 64,
+            )
+            assert await claims.get_claim(
+                session, user_id=17, request_key="ac" * 16,
+            ) is None
+    finally:
+        await engine.dispose()
