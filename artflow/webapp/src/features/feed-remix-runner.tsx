@@ -56,11 +56,26 @@ function launchIsUncertain(scope: LaunchScope): boolean {
   try { const storage = draftStorage(); return !storage || storage.getItem(launchMarkerKey(scope)) !== null; }
   catch { return true; }
 }
-function writeLaunchMarker(scope: LaunchScope, pending: boolean): boolean {
+function newLaunchRequestKey(): string | null {
+  // Fail closed when the WebView cannot provide unpredictable request identity.
+  try {
+    const bytes = new Uint8Array(16);
+    window.crypto.getRandomValues(bytes);
+    return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
+  } catch { return null; }
+}
+function readLaunchRequestKey(scope: LaunchScope | null): string | null {
+  if (!scope) return null;
+  try {
+    const value = draftStorage()?.getItem(launchMarkerKey(scope));
+    return value && /^[a-f0-9]{32}$/.test(value) ? value : null;
+  } catch { return null; }
+}
+function writeLaunchMarker(scope: LaunchScope, pending: boolean, key?: string): boolean {
   try {
     const storage = draftStorage();
     if (!storage) return false;
-    if (pending) storage.setItem(launchMarkerKey(scope), "pending");
+    if (pending) storage.setItem(launchMarkerKey(scope), key || "pending");
     else storage.removeItem(launchMarkerKey(scope));
     return (storage.getItem(launchMarkerKey(scope)) !== null) === pending;
   } catch { return false; }
@@ -114,7 +129,7 @@ async function apiJson<T>(path: string, init: RequestInit = {}): Promise<T> {
     let message = `Ошибка API ${response.status}`;
     try {
       const payload = await response.json();
-      message = String(payload?.error?.message || payload?.detail || payload?.message || message);
+      message = String(payload?.error?.message || (typeof payload?.detail === "string" ? payload.detail : payload?.detail?.message) || payload?.message || message);
     } catch {
       // Keep fallback message.
     }
@@ -791,8 +806,9 @@ function FeedRemixRunnerPortal() {
     if (!item || !selectedModel || !requestBody || !canLaunch || busy || launchInFlight.current) return;
     const scope = activeScope.current;
     if (!scope || launchIsUncertain(scope)) { setLaunchUncertain(true); return; }
-    if (!writeLaunchMarker(scope, true)) {
-      setError("Не удалось сохранить защиту запуска. Разреши хранилище браузера и открой повтор заново.");
+    const requestKey = newLaunchRequestKey();
+    if (!requestKey || !writeLaunchMarker(scope, true, requestKey)) {
+      setError("Для безопасного запуска требуется защищённое хранилище и генератор случайных ключей WebView.");
       setLaunchUncertain(true);
       return;
     }
@@ -808,6 +824,7 @@ function FeedRemixRunnerPortal() {
         signal: controller.signal,
         body: JSON.stringify({
           ...requestBody,
+          idempotency_key: requestKey,
           ...(item && itemLooksVideo(item) ? { quoted_credits: quote?.cost_credits } : {}),
         }),
       });
@@ -824,7 +841,7 @@ function FeedRemixRunnerPortal() {
       openSequence.current++;
       resetForm(null);
     } catch (runError) {
-      const rejected = runError instanceof FeedApiError && runError.status >= 400 && runError.status < 500 && runError.status !== 408;
+      const rejected = runError instanceof FeedApiError && runError.status >= 400 && runError.status < 500 && runError.status !== 408 && runError.status !== 409;
       if (rejected) writeLaunchMarker(scope, false);
       if (activeScope.current !== scope || sequence !== openSequence.current) return;
       setLaunchUncertain(!rejected);
@@ -846,13 +863,38 @@ function FeedRemixRunnerPortal() {
     const scope = activeScope.current;
     if (!scope) return;
     setHistoryChecked(false);
+    const requestKey = readLaunchRequestKey(scope);
     try {
+      if (requestKey) {
+        // Keyed recovery is tied to the exact original paid submission. No
+        // blind last-20 history heuristic or manual restart of ambiguous jobs.
+        const result = await apiJson<{
+          state: "complete" | "processing" | "unavailable"; task: GenerationTask | null;
+        }>(`/feed/remix-claim/${encodeURIComponent(requestKey)}`);
+        if (scope !== activeScope.current) return;
+        if (result.state === "complete" && result.task && Number.isSafeInteger(result.task.id)) {
+          writeLaunchMarker(scope, false);
+          pendingRemix?.resolve(result.task);
+          pendingRemix = null;
+          toast.success("Исходный запуск найден");
+          activeScope.current = null;
+          openSequence.current++;
+          resetForm(null);
+          return;
+        }
+        setHistorySummary(result.state === "processing"
+          ? "Исходный запрос ещё обрабатывается или требует проверки; новый платный запуск заблокирован."
+          : "Точного результата пока нет. Сохраняем ключ запуска: не создавай новую платную задачу.");
+        return;
+      }
+      // Legacy sessionStorage markers lack a server key; retain the old
+      // history view without incorrectly pretending the task is proven.
       const history = await apiJson<GenerationTask[]>("/history?limit=20");
       if (scope !== activeScope.current) return;
       if (!Array.isArray(history)) throw new Error("История недоступна");
       setHistorySummary(history.length ? history.slice(0, 5).map(task => `#${task.id}: ${task.status}`).join(" · ") : "В последних задачах пока нет записей. Задача может появиться позднее.");
       setHistoryChecked(true);
-    } catch { if (scope === activeScope.current) setError("Не удалось проверить историю. Попробуй позже."); }
+    } catch { if (scope === activeScope.current) setError("Не удалось проверить запуск. Попробуй позже."); }
   };
 
   const phaseLabel = useMemo(() => {
@@ -935,12 +977,12 @@ function FeedRemixRunnerPortal() {
             <p className="text-xs text-muted-foreground">Проверка действует в этой вкладке. Повтор с другого устройства может создать отдельную платную задачу.</p>
             <Button variant="outline" onClick={() => void checkLaunchHistory()}>Проверить историю</Button>
             {historySummary ? <p className="text-xs">{historySummary}</p> : null}
-            <Button variant="outline" disabled={!historyChecked} onClick={() => {
+            {!readLaunchRequestKey(activeScope.current) ? <Button variant="outline" disabled={!historyChecked} onClick={() => {
               const scope = activeScope.current;
               if (scope && writeLaunchMarker(scope, false)) {
                 setLaunchUncertain(false); setHistoryChecked(false); setHistorySummary(""); setError("");
               }
-            }}>Я проверил историю — разрешить новый запуск</Button>
+            }}>Я проверил историю — разрешить новый запуск</Button> : null}
           </div> : null}
           <div className="grid grid-cols-[88px_1fr] gap-3 rounded-xl border border-border bg-card/65 p-2">
             <div className="overflow-hidden rounded-lg bg-muted">
