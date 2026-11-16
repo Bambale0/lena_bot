@@ -813,7 +813,7 @@ test("creator photo-to-video replay selects duration, restores draft and reconfi
     sent = route.request().postDataJSON() as Record<string, unknown>;
     if (launches === 1) {
       price = 35;
-      return route.fulfill({ status: 409, json: { detail: "Цена изменилась. Подтверди запуск ещё раз." } });
+      return route.fulfill({ status: 409, json: { detail: { code: "feed_remix_preadmission_price_changed", message: "Цена изменилась. Подтверди запуск ещё раз." } } });
     }
     return route.fulfill({ status: 202, json: {
       id: 9205, model: model.key, gen_type: "video",
@@ -863,14 +863,14 @@ test("creator photo-to-video replay selects duration, restores draft and reconfi
     await page.screenshot({ path: testInfo.outputPath("duration-selection.png") });
   }
   await dialog.getByRole("button", { name: /Запустить повтор/ }).click();
-  await expect(dialog.getByText(/Результат запуска неизвестен/)).toBeVisible();
-  await expect(dialog.getByRole("button", { name: /Запустить повтор/ })).toBeDisabled();
+  // The coded pre-admission 409 guarantees no payment or generation happened.
+  await expect(dialog.getByRole("button", { name: "Запустить повтор · 35 💋" })).toBeEnabled();
   expect(launches).toBe(1);
   expect(sent).toMatchObject({ duration_override: 15, quoted_credits: 30 });
-  // A generic 409 after paid POST is ambiguous: never submit a second paid job.
-  await page.reload();
-  await expect(dialog.getByRole("button", { name: /Запустить повтор/ })).toBeDisabled();
-  expect(launches).toBe(1);
+  await dialog.getByRole("button", { name: /Запустить повтор/ }).click();
+  await expect(page.getByRole("dialog", { name: /Задача #9205/ })).toBeVisible();
+  expect(launches).toBe(2);
+  expect(sent).toMatchObject({ duration_override: 15, quoted_credits: 35 });
 });
 
 test("deep-linked older creator video retains photo-only recipe provenance", async ({ page }) => {
