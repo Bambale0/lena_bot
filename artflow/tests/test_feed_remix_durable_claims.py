@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
@@ -82,7 +82,7 @@ async def test_exact_get_is_user_scoped_and_never_initiates_generation(monkeypat
     key = "ab" * 16
     get_claim = AsyncMock(return_value=SimpleNamespace(generation_id=991))
     get_gen = AsyncMock(return_value=SimpleNamespace(id=991, user_id=17))
-    monkeypatch.setattr(routes, "get_feed_remix_claim", get_claim)
+    monkeypatch.setattr(routes.feed_remix_claims, "get_claim", get_claim)
     monkeypatch.setattr(routes.repo, "get_generation_by_id", get_gen)
     monkeypatch.setattr(routes, "_gen_out", lambda gen: SimpleNamespace(
         model_dump=lambda **_: {"id": gen.id, "status": "processing"},
