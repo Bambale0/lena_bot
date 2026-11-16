@@ -5118,14 +5118,19 @@ async def remix_feed_post(
             nominal_credits = wan_quote.credits
             normalized_video.update(wan_quote.stored_params())
             if body.quoted_credits is None or round(float(body.quoted_credits), 6) != round(nominal_credits, 6):
-                raise HTTPException(status_code=409, detail="Цена Wan изменилась или не подтверждена. Проверь сумму и подтверди запуск.")
+                raise HTTPException(status_code=409, detail={"code": "feed_remix_preadmission_price_changed", "message": "Цена Wan изменилась или не подтверждена. Проверь сумму и подтверди запуск."})
         else:
             billing_seconds, nominal_credits = await _video_reference_price(
                 normalized_video, VIDEO_CAPS.get(body.model, {}), model_cost.credits,
             )
-            _require_video_price_confirmation(body.quoted_credits, nominal_credits, billing_seconds)
+            try:
+                _require_video_price_confirmation(body.quoted_credits, nominal_credits, billing_seconds)
+            except HTTPException as exc:
+                if exc.status_code != 409:
+                    raise
+                raise HTTPException(status_code=409, detail={"code": "feed_remix_preadmission_price_changed", "message": str(exc.detail)}) from exc
             if body.duration_override is not None and (body.quoted_credits is None or round(body.quoted_credits, 6) != round(nominal_credits, 6)):
-                raise HTTPException(status_code=409, detail="Цена изменилась. Проверь сумму и подтверди запуск.")
+                raise HTTPException(status_code=409, detail={"code": "feed_remix_preadmission_price_changed", "message": "Цена изменилась. Проверь сумму и подтверди запуск."})
         normalized_video.update({
             "billing_output_seconds": billing_seconds.output,
             "billing_reference_seconds": billing_seconds.references,
