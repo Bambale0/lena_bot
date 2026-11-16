@@ -397,7 +397,7 @@ async def test_corrupt_credit_refund_snapshot_never_adds_wallet_credits(payment_
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("invoice", [{"eventType": "payment.success"}, {"data": {"event_type": "invoice.paid"}}])
-async def test_review_lava_event_only_invoice_is_reconciled_atomically(payment_db, monkeypatch, invoice):
+async def test_lava_event_only_invoice_cannot_credit_without_authoritative_paid_status(payment_db, monkeypatch, invoice):
     from unittest.mock import AsyncMock
 
     from bot.handlers import payment
@@ -407,11 +407,11 @@ async def test_review_lava_event_only_invoice_is_reconciled_atomically(payment_d
     monkeypatch.setattr(main.settings, "REFERRAL_L1_CREDITS", 0)
     async with factory() as session:
         status, _ = await payment._reconcile_transaction_status(session, await session.get(Transaction, tx_id))
-        assert status == TransactionStatus.paid
+        assert status == TransactionStatus.pending
     async with factory() as session:
-        assert (await session.get(User, payer_id)).credits == 50
+        assert (await session.get(User, payer_id)).credits == 0
         entries = (await session.scalars(select(CreditLedgerEntry).where(CreditLedgerEntry.user_id == payer_id))).all()
-        assert len(entries) == 1 and entries[0].delta == 50
+        assert entries == []
 
 
 @pytest.mark.asyncio

@@ -1371,24 +1371,40 @@ async def lava_webhook(request: Request) -> PlainTextResponse:
             return PlainTextResponse("OK")
 
         try:
-            invoice = await lava_get_invoice(external_id)
+            # Lava expects a 2xx webhook acknowledgement within 10 seconds.
+            # Bound the authoritative read so slow provider I/O triggers a
+            # retryable 503 instead of exceeding the delivery deadline.
+            invoice = await asyncio.wait_for(lava_get_invoice(external_id), timeout=7.0)
         except Exception as exc:
             logger.error('Lava invoice verification failed for %s: %s', safe_identifier(external_id), type(exc).__name__)
-            return PlainTextResponse("OK")
+            # The provider lookup is authoritative. A transient read error must
+            # not acknowledge the paid webhook or it may never be redelivered.
+            return PlainTextResponse("Invoice verification unavailable", status_code=503, headers={"Retry-After": "30"})
 
         verified_invoice_id = lava_extract_invoice_id(invoice)
-        if verified_invoice_id and not hmac.compare_digest(str(verified_invoice_id), str(external_id)):
+        if not verified_invoice_id:
+            callback_anomaly(logger, "lava", "verification_missing_invoice_id")
+            return PlainTextResponse("Invoice verification incomplete", status_code=503, headers={"Retry-After": "30"})
+        if not hmac.compare_digest(str(verified_invoice_id), str(external_id)):
             logger.warning("Lava invoice id mismatch webhook=%s verified=%s", safe_identifier(external_id), safe_identifier(verified_invoice_id))
             return PlainTextResponse("OK")
         if not lava_is_paid_invoice(invoice):
             logger.warning("Lava webhook claimed paid but invoice is not paid: %s", safe_identifier(external_id))
-            return PlainTextResponse("OK")
+            # The provider may be eventually consistent immediately after a paid
+            # notification. Ask for redelivery rather than permanently losing it.
+            return PlainTextResponse("Invoice not yet verified paid", status_code=503, headers={"Retry-After": "30"})
         currency = lava_extract_currency(invoice)
-        if currency and currency != "RUB":
+        if not currency:
+            callback_anomaly(logger, "lava", "verification_missing_currency")
+            return PlainTextResponse("Invoice verification incomplete", status_code=503, headers={"Retry-After": "30"})
+        if currency != "RUB":
             logger.warning("Lava invoice currency mismatch invoice=%s currency=%s", safe_identifier(external_id), safe_identifier(currency))
             return PlainTextResponse("OK")
         amount_rub = lava_extract_amount_rub(invoice)
-        if amount_rub is not None and round(amount_rub, 2) != round(float(tx.amount_rub), 2):
+        if amount_rub is None:
+            callback_anomaly(logger, "lava", "verification_missing_amount")
+            return PlainTextResponse("Invoice verification incomplete", status_code=503, headers={"Retry-After": "30"})
+        if round(amount_rub, 2) != round(float(tx.amount_rub), 2):
             logger.warning(
                 "Lava invoice amount mismatch invoice=%s expected=%s actual=%s",
                 safe_identifier(external_id),
