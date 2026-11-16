@@ -87,6 +87,7 @@ def test_standalone_cli_help_does_not_trigger_db_api_import_cycle() -> None:
     assert process.returncode == 0
     assert "--apply" in process.stdout
     assert "--offset" in process.stdout
+    assert "--aggregate-only" in process.stdout
 
 
 @pytest.mark.asyncio
@@ -109,3 +110,60 @@ def test_dry_run_offset_is_bounded_and_write_mode_never_offsets() -> None:
     assert ".limit(limit + 1)" in source
     assert "if apply and offset:" in source
     assert 'parser.add_argument("--apply", action="store_true"' in source
+
+
+@pytest.mark.asyncio
+async def test_aggregate_only_mode_rejects_any_apply_before_provider_or_db() -> None:
+    with pytest.raises(ValueError, match="aggregate-only"):
+        await reconcile(
+            limit=2, lookback_days=30, min_age_minutes=30,
+            apply=True, aggregate_only=True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_aggregate_only_dry_run_redacts_transaction_ids(monkeypatch, capsys) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from scripts import fix_stuck_tbank_payments as audit
+
+    transactions = [
+        SimpleNamespace(
+            id=987654321, external_id="secret-payment-id", amount_rub=150.0,
+            provider_amount_minor=15000,
+        ),
+    ]
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def execute(self, _statement):
+            return SimpleNamespace(
+                scalars=lambda: SimpleNamespace(all=lambda: transactions),
+            )
+
+    provider_state = AsyncMock(return_value=state(
+        payment_id="secret-payment-id", status="CANCELED",
+    ))
+    monkeypatch.setattr(audit, "AsyncSessionLocal", FakeSession)
+    monkeypatch.setattr(audit, "get_payment_state", provider_state)
+    monkeypatch.setattr(audit.settings, "TBANK_TERMINAL_KEY", "terminal-1")
+    monkeypatch.setattr(audit.settings, "TBANK_PASSWORD", "test-only")
+    monkeypatch.setattr(audit.asyncio, "sleep", AsyncMock())
+
+    result = await audit.reconcile(
+        limit=1, lookback_days=30, min_age_minutes=30,
+        apply=False, aggregate_only=True,
+    )
+    assert result["mode"] == "dry_run"
+    assert result["aggregate_only"] is True
+    assert result["checked"] == 1
+    assert result["outcomes"] == {
+        "failed:provider_terminal_failure:observed": 1,
+    }
+    assert capsys.readouterr().out == ""
+    provider_state.assert_awaited_once_with("secret-payment-id")
