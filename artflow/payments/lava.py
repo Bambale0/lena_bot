@@ -97,7 +97,6 @@ def is_success_webhook(payload: dict[str, Any]) -> bool:
 
 
 def is_paid_invoice(payload: dict[str, Any]) -> bool:
-    event = _extract_first(payload, "eventType", "event_type", "type", "event").strip().lower()
     status = _extract_first(payload, "status").strip().lower()
     # The invoice GET is the authority. An explicit pending/failed state must
     # never be overridden by a stale event label. Missing status is not proof.
