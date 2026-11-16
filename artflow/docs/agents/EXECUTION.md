@@ -1,5 +1,18 @@
 # Execution ledger — Studio capability completion (2026-10-24)
 
+## Active 2026-11-15 — Telegram repeat quality for Nano Banana 2.1
+
+- Baseline main `8dd1eb4bcebfa4923bcb292a517311ed3ba20084`, branch `fix/apix-nano21-repeat-quality-20261115`.
+- User goal: add working quality buttons in APIX Telegram's multi-reference "Повтор из ленты" checkout, preserving format, reference limits, billing and provider contract.
+- Root cause: `repeat_reference_marketplace._keyboard` renders only mode/ratio/model; `_run` hardcodes model default for both quoted price and stored session quality. Nano Banana 2.1 already supports 1K/2K/4K through `IMAGE_CAPS`, providers and image pricing variants.
+- Reused boundaries: Telegram inline callbacks and `PromptUseFSM.reference_upload`; `repo.resolve_image_model_cost(quality=...)`; `repo.create_image_session(quality=...)`; `image_gen._launch_session_generation`. No provider, database or admin pricing changes.
+- Site and Mini App: existing catalog already offers model quality options and quality prices; Telegram bot alone lacks a multi-ref control. No new site/miniapp feature is required, but parity must be verified in CI.
+- Design: source options exclusively from model capability registry; record selected tier in FSM; reject stale/invalid callbacks before paid launch; keep compatible source-recipe quality on initial selection; keep chosen tier in quote and generation; restrict unsupported square 4K for affected models.
+- Risk: author-recipe inherited quality, model switches, malformed callback data, price lookup fallback and stale state. No live customer task or paid smoke without an explicit budget.
+- Test seam: bot keyboard/callback + `_run` quote/session contract, existing provider/miniapp tests. Changes developed as tests-before-fix on feature branch, verify exact SHA CI before auto-merge.
+- Status: feature implementation and regressions committed on branch; CI, PR review and production deployment not yet confirmed at this ledger update.
+
+
 ## Active 2026-10-28 — Referral lineage immutability and production repair
 
 - Baseline `602fe401cdf3705116e40604717686faac57e005`; branch

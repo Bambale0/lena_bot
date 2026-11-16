@@ -48,6 +48,65 @@ def test_uploaded_reference_screen_exposes_repeat_settings() -> None:
     assert "prompt_multi_ref:model_menu" in callbacks
 
 
+def test_nano_banana_21_repeat_exposes_resolution_buttons() -> None:
+    markup = repeat_reference_marketplace._keyboard(
+        uploaded=3, max_refs=4, feed_repeat=True, model_key="nano-banana-2.1",
+    )
+    callbacks = {button.callback_data for row in markup.inline_keyboard for button in row}
+    assert "prompt_multi_ref:quality_menu" in callbacks
+    quality_menu = repeat_reference_marketplace._quality_keyboard("nano-banana-2.1", "2K")
+    labels = {button.callback_data: button.text for row in quality_menu.inline_keyboard for button in row}
+    assert "✅" in labels["prompt_multi_ref:quality:2K"]
+    assert all(f"prompt_multi_ref:quality:{tier}" in labels for tier in ("1K", "2K", "4K"))
+
+
+def test_models_with_fixed_quality_do_not_show_a_resolution_control() -> None:
+    markup = repeat_reference_marketplace._keyboard(
+        uploaded=2, max_refs=4, feed_repeat=True, model_key="qwen/image-edit",
+    )
+    callbacks = {button.callback_data for row in markup.inline_keyboard for button in row}
+    assert "prompt_multi_ref:quality_menu" not in callbacks
+
+
+@pytest.mark.asyncio
+async def test_model_choice_restores_original_supported_resolution_and_resets_on_switch(monkeypatch) -> None:
+    monkeypatch.setattr(marketplace, "safe_edit_message", AsyncMock())
+    state = FakeState({
+        "feed_use_prompt": "recipe", "feed_use_model": "nano-banana-2.1",
+        "feed_original_recipe_replay": True, "prompt_multi_ref_quality": "4K",
+    })
+    call = SimpleNamespace(
+        data="prompt_pick_model:77:nano-banana-2.1",
+        message=SimpleNamespace(), answer=AsyncMock(),
+    )
+    await marketplace.cb_prompt_pick_model(call, state)
+    assert state.data["prompt_multi_ref_quality"] == "4K"
+    call.data = "prompt_pick_model:77:nano-banana-2"
+    await marketplace.cb_prompt_pick_model(call, state)
+    assert state.data["prompt_multi_ref_quality"] == marketplace._default_quality_for_model("nano-banana-2")
+
+
+@pytest.mark.asyncio
+async def test_repeat_quality_selection_updates_summary_and_rejects_unknown_tier() -> None:
+    state = FakeState({
+        "feed_use_prompt": "image recipe", "use_model_key": "nano-banana-2.1",
+        "prompt_multi_ref_ratio": "9:16", "prompt_multi_ref_count": 3,
+        "prompt_multi_ref_max": 4,
+    })
+    call = SimpleNamespace(
+        data="prompt_multi_ref:quality:4K",
+        message=SimpleNamespace(answer=AsyncMock()), answer=AsyncMock(),
+    )
+    await repeat_reference_marketplace._set_quality(call, state)
+    assert state.data["prompt_multi_ref_quality"] == "4K"
+    assert state.data["prompt_multi_ref_quality_explicit"] is True
+    assert "Качество: <b>4K</b>" in call.message.answer.await_args.args[0]
+    call.data = "prompt_multi_ref:quality:8K"
+    await repeat_reference_marketplace._set_quality(call, state)
+    assert state.data["prompt_multi_ref_quality"] == "4K"
+    assert call.answer.await_args.kwargs["show_alert"] is True
+
+
 def test_repeat_screen_text_shows_selected_settings() -> None:
     text = repeat_reference_marketplace._text(
         {
@@ -55,7 +114,8 @@ def test_repeat_screen_text_shows_selected_settings() -> None:
             "prompt_multi_ref_file_ids": ["one", "two"],
             "prompt_multi_ref_max": 10,
             "prompt_multi_ref_ratio": "9:16",
-            "use_model_key": "nano-banana-2",
+            "use_model_key": "nano-banana-2.1",
+            "prompt_multi_ref_quality": "4K",
         }
     )
 
@@ -63,6 +123,7 @@ def test_repeat_screen_text_shows_selected_settings() -> None:
     assert "Режим: <b>Фото → фото</b>" in text
     assert "Формат: <b>9:16</b>" in text
     assert "Нейросеть:" in text
+    assert "Качество: <b>4K</b>" in text
 
 
 def test_ratio_menu_does_not_offer_unsupported_portrait_ratio() -> None:
@@ -155,8 +216,10 @@ async def test_run_feed_repeat_passes_all_reference_urls(monkeypatch, stale_stat
             "feed_use_gen_id": 77,
             "feed_use_user_id": stale_state_user_id,
             "feed_original_recipe_replay": True,
-            "use_model_key": "nano-banana-pro",
+            "use_model_key": "nano-banana-2.1",
             "prompt_multi_ref_ratio": "9:16",
+            "prompt_multi_ref_quality": "4K",
+            "prompt_multi_ref_quality_explicit": True,
             "prompt_multi_ref_file_ids": ["ref-1", "ref-2", "ref-3"],
             "prompt_multi_ref_max": 4,
         }
@@ -184,7 +247,7 @@ async def test_run_feed_repeat_passes_all_reference_urls(monkeypatch, stale_stat
         repeat_reference_marketplace.repo,
         "resolve_image_model_cost",
         AsyncMock(return_value=SimpleNamespace(credits=2)),
-    ), patch.object(
+    ) as resolve_cost, patch.object(
         repeat_reference_marketplace.repo,
         "create_image_session",
         AsyncMock(return_value=image_session),
@@ -209,7 +272,10 @@ async def test_run_feed_repeat_passes_all_reference_urls(monkeypatch, stale_stat
     assert create_kwargs["reference_file_ids"] == ["ref-1", "ref-2", "ref-3"]
     assert create_kwargs["mode"] == "image"
     assert create_kwargs["aspect_ratio"] == "9:16"
+    assert create_kwargs["quality"] == "4K"
+    assert resolve_cost.await_args.kwargs["quality"] == "4K"
     assert state.data.get("repeat_aspect_ratio") == "9:16"
+    assert state.data.get("quality_explicit") is True
 
     launch_kwargs = launch.await_args.kwargs
     assert launch_kwargs["action_type"] == ImageGenerationAction.repeat
