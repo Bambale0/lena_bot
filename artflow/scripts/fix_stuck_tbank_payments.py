@@ -2,6 +2,7 @@
 """Conservative, bounded T-Bank pending reconciliation.
 
 Default mode is read-only against the local database and calls only T-Bank GetState.
+Use --aggregate-only to output only safe outcome counts without transaction IDs.
 Use --apply only after reviewing dry-run results; no age-based status changes.
 All balance/ledger writes use the atomic repository seam and referral policy.
 """
@@ -79,7 +80,9 @@ def decide_tbank_action(
     return "pending", "provider_not_final"
 
 
-async def reconcile(*, limit: int, lookback_days: int, min_age_minutes: int, apply: bool, offset: int = 0) -> dict[str, object]:
+async def reconcile(*, limit: int, lookback_days: int, min_age_minutes: int, apply: bool, offset: int = 0, aggregate_only: bool = False) -> dict[str, object]:
+    if apply and aggregate_only:
+        raise ValueError("aggregate-only is read-only and cannot be combined with --apply")
     if not 1 <= limit <= MAX_BATCH_SIZE:
         raise ValueError(f"limit must be within 1..{MAX_BATCH_SIZE}")
     if not 0 <= offset <= MAX_AUDIT_OFFSET:
@@ -167,12 +170,15 @@ async def reconcile(*, limit: int, lookback_days: int, min_age_minutes: int, app
             except Exception as exc:
                 outcome = f"write_failed_{type(exc).__name__}"
         counts[f"{action}:{reason}:{outcome}"] += 1
-        # User IDs, payment references, provider payloads and API credentials are not printed.
-        print(json.dumps({"tx_id": tx.id, "decision": action, "reason": reason, "outcome": outcome}))
+        # Aggregate audit mode never prints transaction IDs or individual decisions.
+        # Even a dry-run identifier is sensitive when the report is shared.
+        if not aggregate_only:
+            print(json.dumps({"tx_id": tx.id, "decision": action, "reason": reason, "outcome": outcome}))
         await asyncio.sleep(0.25)
 
     return {
         "mode": "apply" if apply else "dry_run",
+        "aggregate_only": aggregate_only,
         "checked": len(rows),
         "offset": offset,
         "next_offset": offset + len(rows) if has_more and not apply else None,
@@ -184,6 +190,7 @@ async def reconcile(*, limit: int, lookback_days: int, min_age_minutes: int, app
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true", help="Apply verified paid/final-failure states; default is dry-run")
+    parser.add_argument("--aggregate-only", action="store_true", help="Dry-run aggregate outcomes only, without transaction identifiers; incompatible with --apply")
     parser.add_argument("--limit", type=int, default=20, help="Max pending invoices to query (1..50)")
     parser.add_argument("--lookback-days", type=int, default=30, help="Only newer pending invoices (1..3650)")
     parser.add_argument(
@@ -200,6 +207,7 @@ def main() -> int:
             min_age_minutes=args.min_age_minutes,
             apply=args.apply,
             offset=args.offset,
+            aggregate_only=args.aggregate_only,
         ))
     except (ValueError, RuntimeError) as exc:
         print(f"reconciliation_config_error={type(exc).__name__}", file=sys.stderr)
