@@ -43,13 +43,15 @@ def test_confirmed_exact_payment_is_eligible_for_atomic_credit() -> None:
         (state(success=False), "provider_not_successful"),
         (state(status="REFUNDED"), "refund_requires_separate_reconciliation"),
         (state(status="PARTIAL_REFUNDED"), "refund_requires_separate_reconciliation"),
+        (state(status="REVERSED"), "refund_requires_separate_reconciliation"),
+        (state(status="PARTIAL_REVERSED"), "refund_requires_separate_reconciliation"),
     ],
 )
 def test_unsafe_or_ambiguous_provider_status_never_confirms(response: dict, reason: str) -> None:
     assert decision(response) == ("review", reason)
 
 
-@pytest.mark.parametrize("provider_status", ["CANCELED", "CANCELLED", "REJECTED", "DEADLINE_EXPIRED", "AUTH_FAIL", "REVERSED"])
+@pytest.mark.parametrize("provider_status", ["CANCELED", "CANCELLED", "REJECTED", "DEADLINE_EXPIRED", "AUTH_FAIL"])
 def test_final_provider_failure_requires_verified_amount_and_identity(provider_status: str) -> None:
     assert decision(state(status=provider_status)) == ("failed", "provider_terminal_failure")
 
