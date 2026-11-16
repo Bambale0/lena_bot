@@ -45,3 +45,17 @@ async def test_lava_create_invoice_uses_v2_endpoint(monkeypatch) -> None:
     assert calls[0][2]["offerId"] == "offer-1"
     assert calls[0][2]["currency"] == "RUB"
     assert calls[0][2]["clientUtm"]["user_id"] == "7"
+
+
+@pytest.mark.parametrize(
+    ("invoice", "expected"),
+    [
+        ({"id": "i", "status": "completed"}, True),
+        ({"id": "i", "eventType": "payment.success", "status": "pending"}, False),
+        ({"id": "i", "eventType": "payment.success", "status": "failed"}, False),
+        ({"id": "i", "eventType": "payment.success"}, False),
+        ({"id": "i", "status": "cancelled"}, False),
+    ],
+)
+def test_lava_invoice_get_status_is_authoritative(invoice: dict, expected: bool) -> None:
+    assert lava.is_paid_invoice(invoice) is expected
