@@ -312,6 +312,29 @@ class TrendRunClaim(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+
+class FeedRemixClaim(Base):
+    """Unique paid feed-remix submission owned by exactly one user."""
+
+    __tablename__ = "feed_remix_claims"
+    __table_args__ = (
+        UniqueConstraint("user_id", "request_key", name="uq_feed_remix_claim_user_key"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    request_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_generation_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    generation_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("generations.id"),
+    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="running")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(),
+    )
+
+
 class ImageSession(Base):
     """Saved image generation settings for iterative Syntx-like workflow."""
 
