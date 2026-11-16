@@ -108,7 +108,8 @@ async def test_exact_get_is_user_scoped_and_never_initiates_generation(monkeypat
 @pytest.mark.asyncio
 async def test_claim_binding_is_a_guarded_compare_and_swap():
     session = AsyncMock()
-    session.execute.return_value = MagicMock()\n    session.execute.return_value.scalar_one_or_none.return_value = 5
+    session.execute.return_value = MagicMock()
+    session.execute.return_value.scalar_one_or_none.return_value = 5
     assert await claims.link_generation(
         session, user_id=17, request_key="ab" * 16, generation_id=991,
     )
