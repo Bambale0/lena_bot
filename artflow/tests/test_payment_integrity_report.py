@@ -29,6 +29,7 @@ def provider_row(**overrides: object) -> dict[str, object]:
         "nonpaid_with_payment_ledger": 0,
         "pending_last_24h": 1,
         "pending_older_7d": 1,
+        "pending_older_30d": 1,
         "pending_older_90d": 0,
         "pending_missing_external_id": 0,
     }
@@ -45,6 +46,10 @@ def test_healthy_report_counts_only_aggregates() -> None:
     assert data["integrity_ok"] is True
     assert data["summary"]["paid"] == 5
     assert data["summary"]["pending"] == 2
+    assert data["summary"]["failed"] == 0
+    assert data["summary"]["pending_last_24h"] == 1
+    assert data["summary"]["pending_older_30d"] == 1
+    assert data["summary"]["pending_missing_external_id"] == 0
     assert data["summary"]["paid_without_ledger"] == 0
     as_json = json.dumps(data)
     assert "secret-payment-reference" not in as_json
@@ -66,10 +71,39 @@ def test_orphan_payment_credit_is_reported() -> None:
 
 
 def test_pending_age_never_causes_financial_integrity_failure() -> None:
-    result = make_report([provider_row(pending_older_7d=1800, pending_older_90d=300)], 0)
+    result = make_report([
+        provider_row(pending_older_7d=1800, pending_older_30d=850, pending_older_90d=300)
+    ], 0)
     assert result["integrity_ok"] is True
     assert result["summary"]["pending_older_7d"] == 1800
+    assert result["summary"]["pending_older_30d"] == 850
+    assert result["summary"]["pending_older_90d"] == 300
     assert "not necessarily paid externally" in result["interpretation"]
+
+
+def test_aggregate_summary_sums_pending_aging_and_missing_ids_without_leaking_identity() -> None:
+    report = make_report([
+        provider_row(provider="tbank", pending_last_24h=1, pending_older_7d=1,
+                     pending_older_30d=1, pending_older_90d=0,
+                     pending_missing_external_id=1, external_id="private-tbank-id"),
+        provider_row(provider="cryptobot", pending_last_24h=2, pending_older_7d=4,
+                     pending_older_30d=3, pending_older_90d=2,
+                     pending_missing_external_id=0, external_id="private-crypto-id"),
+    ], 0)
+    assert report["summary"]["pending_last_24h"] == 3
+    assert report["summary"]["pending_older_7d"] == 5
+    assert report["summary"]["pending_older_30d"] == 4
+    assert report["summary"]["pending_older_90d"] == 2
+    assert report["summary"]["pending_missing_external_id"] == 1
+    assert report["integrity_ok"] is True
+    serialized = json.dumps(report)
+    assert "private-tbank-id" not in serialized
+    assert "private-crypto-id" not in serialized
+
+
+def test_sql_uses_30_day_pending_age_filter_without_provider_calls() -> None:
+    assert "created_at < now() - interval '30 days'" in PROVIDER_REPORT_SQL
+    assert "AS pending_older_30d" in PROVIDER_REPORT_SQL
 
 
 class FakeResult:
