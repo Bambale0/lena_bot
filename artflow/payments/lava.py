@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -79,6 +81,35 @@ def extract_amount_rub(payload: dict[str, Any]) -> float | None:
         return float(str(raw).replace(",", "."))
     except ValueError:
         return None
+
+
+_EXACT_RUB_RE = re.compile(r"[0-9]{1,12}(?:[.,][0-9]{1,2})?")
+
+
+def exact_rub_minor(value: object) -> int | None:
+    """Parse a RUB amount without rounding or binary float arithmetic.
+
+    Reject negative, non-finite, exponent, overprecision and ambiguous input.
+    Both authoritative provider evidence and local transaction snapshots must
+    be representable as exact whole kopeks before a wallet credit is possible.
+    """
+    if isinstance(value, bool) or not isinstance(value, (str, int, float, Decimal)):
+        return None
+    raw = str(value).strip()
+    if not _EXACT_RUB_RE.fullmatch(raw):
+        return None
+    minor = Decimal(raw.replace(",", ".")) * 100
+    if minor != minor.to_integral_value() or minor <= 0:
+        return None
+    return int(minor)
+
+
+def extract_amount_minor(payload: dict[str, Any]) -> int | None:
+    raw = _extract_first(
+        payload, "amount", "amountRub", "amount_rub",
+        "paidAmount", "paid_amount", "price",
+    )
+    return exact_rub_minor(raw)
 
 
 def extract_currency(payload: dict[str, Any]) -> str:
