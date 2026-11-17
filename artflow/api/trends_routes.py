@@ -75,7 +75,12 @@ from db.trend_category_repository import (
     require_existing_trend_category,
     update_trend_category,
 )
-from db.trend_run_claims import get_claim, list_unlinked_claims, release_pre_submit_claim, reserve_claim
+from db.trend_run_claims import (
+    get_claim,
+    list_unlinked_claims,
+    release_pre_submit_claim,
+    reserve_claim,
+)
 
 router = APIRouter(prefix="/api/v1", tags=["trends"])
 logger = logging.getLogger(__name__)
