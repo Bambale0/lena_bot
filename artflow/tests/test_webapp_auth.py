@@ -64,6 +64,32 @@ def test__verify_init_data_rejects_expired_auth_date() -> None:
     assert exc.value.status_code == 401
 
 
+@pytest.mark.parametrize("future_seconds", [301, 3600])
+def test__verify_init_data_rejects_future_auth_date(future_seconds: int) -> None:
+    future = int(time.time()) + future_seconds
+    with pytest.raises(HTTPException) as exc:
+        _verify_init_data(make_init_data(auth_date=future), bot_token=BOT_TOKEN)
+    assert exc.value.status_code == 401
+
+
+def test__verify_init_data_accepts_small_clock_skew() -> None:
+    future = int(time.time()) + 120
+    assert _verify_init_data(make_init_data(auth_date=future), bot_token=BOT_TOKEN)["id"] == 42
+
+
+@pytest.mark.parametrize("future_seconds", [301, 3600])
+def test_verify_telegram_login_data_rejects_future_auth_date(future_seconds: int) -> None:
+    future = int(time.time()) + future_seconds
+    with pytest.raises(HTTPException) as exc:
+        verify_telegram_login_data(make_login_data(auth_date=future), bot_token=BOT_TOKEN)
+    assert exc.value.status_code == 401
+
+
+def test_verify_telegram_login_data_accepts_small_clock_skew() -> None:
+    future = int(time.time()) + 120
+    assert verify_telegram_login_data(make_login_data(auth_date=future), bot_token=BOT_TOKEN)["id"] == 42
+
+
 def test_verify_telegram_login_data_accepts_valid_widget_hash() -> None:
     data = verify_telegram_login_data(make_login_data(user_id=888), bot_token=BOT_TOKEN)
     assert data["id"] == 888
