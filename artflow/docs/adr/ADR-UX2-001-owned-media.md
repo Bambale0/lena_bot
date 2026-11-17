@@ -63,7 +63,7 @@ A proposed `media_assets` record:
 | `revision` positive monotonic integer | Compare-and-set for replacement/revoke/resolve; avoids stale response applying to new material |
 | `created_at`, `updated_at`, `revoked_at`, `deleted_at` | Audit and retention; no assumed TTL |
 
-Indexes proposed: primary key `id`, (`owner_user_id`, `created_at`), (`state`, `updated_at`). Strong FK and bounds/allowed MIME validation. Sensitive `storage_key` excluded from all public serializers. `content_sha256` is not a cross-user lookup key in this first slice. An optional future `media_asset_generation_uses` relation (asset ID, generation ID, purpose, stage) would pin objects during asynchronous provider work; do not fabricate implicit ref-counts.
+Indexes proposed: primary key `id`, (`owner_user_id`, `created_at`), (`state`, `updated_at`), and a database UNIQUE constraint on (`storage_backend`, `storage_key`). A retry or writer bug must not bind a second logical asset to an already-owned physical key. Adoption must allocate an independent object before registering it; shared blob lifetime management is outside this first slice. Strong FK and bounds/allowed MIME validation. Sensitive `storage_key` excluded from all public serializers. `content_sha256` is not a cross-user lookup key in this first slice. An optional future `media_asset_generation_uses` relation (asset ID, generation ID, purpose, stage) would pin objects during asynchronous provider work; do not fabricate implicit ref-counts.
 
 **Isolation:** one logical upload per row, even when bytes are identical. New registered uploads must not use a shared, content-addressed *writable/deletable* path without separate blob lifetime management; prefer per-asset random opaque object keys. Keep legacy content-addressed files untouched.
 
@@ -81,15 +81,16 @@ Persist registry row only after bytes exist and are validated. If registry write
 
 ### Resolve / refresh
 `POST /api/web/media-assets/{asset_id}/resolve` request:
-`{ "purpose": "preview|generation", "expected_revision": 3, "request_id": "<uuid>" }`.
-The server authenticates, checks owner, state, size/hash if required, object existence and backend health **before** it mints any access URL. Only a successful owner-scoped response may contain `url`, `expires_at`, `asset_id`, `revision` and provider-compatible media metadata. Metadata lookup may report `refreshable` (owner verified and object exists, old access link expired); resolve then returns a renewed *access capability*, not a new right.
+`{ "purpose": "preview", "expected_revision": 3, "request_id": "<uuid>" }`.
+The public operation is preview-only. A client-supplied generation purpose is rejected before any capability is minted. Generation capabilities belong to a later internal service requiring a server-created, authorized generation/use identity, recorded owner and asset revision, and a bounded ingestion lease; ownership alone never authorizes that capability.
+The server authenticates, checks owner, state, size/hash if required, object existence and backend health **before** it mints any access URL. Only a successful owner-scoped response may contain `url`, `expires_at`, `asset_id`, `revision` and provider-compatible media metadata. Metadata lookup may report `refreshable` only as the current server-observed ability to issue a preview link: authorized owner, ready state, object present and signing/delivery policy available. It does not assert that a client-held link expired: lookup has no issued-link identity or expiry evidence. Transient storage/signing failures return `temporary_error`. Resolve rechecks every predicate and returns a renewed *access capability*, not a new right.
 
 Repeated identical `request_id` for the same actor/asset/version/purpose must be safe and must not create additional objects, charges or privilege. Idempotency may reuse a previously issued response only while owner entitlement, row revision, revocation state and access-link validity remain unchanged; revocation always wins over replay. Conflict in request body under the same key is 409. Concurrent replacement/revocation increments `revision`; stale expected revisions yield 409, and delayed frontend responses are ignored based on (owner, draft kind, local material ID, revision, operation ID). Never change `included`, list order or prompt during a URL refresh.
 
 No generation is started by lookup or resolve; generation initiation is a separate authorized/billable boundary. Provider fetch timing must be accounted for; issuing a URL which expires before the provider downloads media is NOT success.
 
 ### Revocation and deletion
-A future authenticated revoke marks the row non-resolvable immediately and creates an audited tombstone. Physical delete is deferred until server-proven in-flight uses are released. Revocation cannot remove a previously cached *public legacy URL* from external clients; do not advertise it as such. Deletion/failed object lookup must never be interpreted as a reason to create a replacement on behalf of an unauthorized actor.
+A future authenticated revoke marks the row non-resolvable immediately and creates an audited tombstone. This alone does not revoke an already-issued bearer capability, including a private signed object-store URL. Immediate private-delivery revocation is NOT promised until a separately reviewed serving path checks current state/revision on every fetch (including cache and range requests), or an independently verified invalidation mechanism provides equivalent behavior. Without that mechanism, redemption remains possible until capability expiry. The serving mechanism and any narrowly scoped already-authorized provider ingestion lease exception require architecture approval before Task D/F; the schema-only slice cannot establish those semantics. Physical delete is deferred until server-proven in-flight uses are released. Revocation cannot remove a previously cached *public legacy URL* from external clients; do not advertise it as such. Deletion/failed object lookup must never be interpreted as a reason to create a replacement on behalf of an unauthorized actor.
 
 ### Failures (externally observable)
 - 401: no authenticated user.
@@ -107,7 +108,7 @@ Success payload status: `available` or `refreshable` (as appropriate to lookup),
 2. **Forged/expired receipt:** legacy `apixasset` cannot be exchanged for a durable record solely by decoding or verifying it; any adoption must prove authoritative server lineage.
 3. **Same bytes, different user:** distinct registry ownership and independently managed deletion; dedupe is a future blob-layer concern.
 4. **Hidden author references:** trend-author files/prompts cannot be adopted into the remixing user's registry. They remain server-controlled, with no client URL leakage.
-5. **Revoked access:** a previously issued URL may stay public/cached in the legacy path; new private delivery only may provide enforceable revocation.
+5. **Revoked access:** a previously issued URL may stay public/cached in the legacy path; private signed links likewise remain redeemable until expiry unless a separately verified dereference-time state/revision check or invalidation mechanism enforces revocation.
 6. **TOCTOU:** check→provider fetch race. Future generation uses should pin the object/lease until provider ingestion, with idempotent reconciliation on lost webhook/outage. File-existence check alone does not solve this.
 7. **Race:** two refreshes and replacement, deletion, owner switch, delayed AJAX. All compare `revision` and UI operation identity; late responses cannot resurrect old refs.
 8. **SSRF:** never network-fetch arbitrary user URLs on this route. Any future external importer requires DNS/IP validation including redirect/rebinding/pinned socket, no private/link-local/metadata addresses, body/timeout caps and no forwarded Telegram auth headers.
@@ -116,7 +117,7 @@ Success payload status: `available` or `refreshable` (as appropriate to lookup),
 
 ## 7. Configuration, CDN and provider boundary
 
-Current `STATIC_UPLOAD_*` settings describe *public* mount/base URLs only. Do not overload them with private signing or TTL semantics. A future typed control plane must validate retention/TTL, maximum asset bytes/count/age, active-generation lease period, rate limits and supported private delivery backends. Sensitive signing keys remain in managed secret storage; audit a key identifier, never the key. No TTL is introduced in source in this ADR.
+Current `STATIC_UPLOAD_*` settings describe *public* mount/base URLs only. Do not overload them with private signing or TTL semantics. A future typed, database-backed control plane must validate retention/TTL, maximum asset bytes/count/age, active-generation lease period, rate limits, cohort availability and supported private delivery backends. It requires an authenticated administrator API, server-side authorization, optimistic version checks and durable actor/time/old-value/new-value audit. Runtime policy changes must not require source edits, manual SQL or redeploy; environment configuration is bootstrap only. The concrete settings schema and admin interface are a separate reviewed implementation slice before issuance is enabled. Sensitive signing keys remain in managed secret storage; audit a key identifier, never the key. No TTL is introduced in source in this ADR.
 
 Future provider adapters must obtain a scoped URL from the media service and decide whether that vendor accepts auth-less, time-limited HTTPS URLs, whether redirects work, and how long ingestion may be delayed. Provider and Telegram consumers should share the asset identity/authorization service, **not** the raw-media HTML UX. Support rollback to legacy URL-only behavior while the feature remains disabled.
 
@@ -144,7 +145,11 @@ Primary seam: server owner-scoped `MediaAssetRepository.resolve_for_actor` (prop
 | Unknown/other-owner ID | Indistinguishable 404; no URL/path leak |
 | Same-byte uploads by two owners | Distinct asset identities; one revoke cannot remove the other's bytes |
 | Unsubmitted draft | Upload still owned and resolvable; no Generation row required |
-| Expired URL, valid object/owner | Refreshable then new URL; keeps stable ID/revision |
+| Expired URL, valid object/owner | Refreshable means current ability to mint, not inferred client expiry; resolve rechecks predicates and preserves stable identity |
+| Two rows sharing a physical key | Database uniqueness rejects the second registration, including concurrent writes |
+| Client asks for generation-purpose link | Reject; no capability or generation is created |
+| Link issued before revoke | No instant-revocation claim without verified dereference-time enforcement; issuance feature stays gated |
+| Non-admin changes media policy | Denied server-side; authorized changes persist with actor/time/version audit |
 | Expired signed receipt alone | Cannot create/extend durable rights |
 | Physically missing own file | Missing, no billing or fake replacement; prompt/order preserved |
 | Revoked/deleted object | Resolve fails; no automatic ownership reassignment |
