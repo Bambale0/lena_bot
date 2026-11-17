@@ -75,7 +75,7 @@ from db.trend_category_repository import (
     require_existing_trend_category,
     update_trend_category,
 )
-from db.trend_run_claims import get_claim, release_pre_submit_claim, reserve_claim
+from db.trend_run_claims import get_claim, list_unlinked_claims, release_pre_submit_claim, reserve_claim
 
 router = APIRouter(prefix="/api/v1", tags=["trends"])
 logger = logging.getLogger(__name__)
@@ -630,6 +630,29 @@ async def prepare_trend(
     return {
         **trend_public_payload(await _get_public_trend(session, trend_id)),
         "prompt_hidden": True,
+    }
+
+
+@router.get("/trends/runs/recoverable")
+async def recoverable_trend_runs(
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_miniapp_user),
+) -> dict[str, Any]:
+    """List only this authenticated user's unlinked paid admissions.
+
+    Never creates a claim, retries a paid POST or exposes a prompt/asset/price.
+    An empty list is not proof that a lost POST was never accepted.
+    """
+    claims = await list_unlinked_claims(session, int(user.id))
+    return {
+        "runs": [
+            {
+                "trend_id": claim.trend_id,
+                "request_key": claim.request_key,
+                "state": "uncertain" if claim.status == "uncertain" else "processing",
+            }
+            for claim in claims
+        ],
     }
 
 
