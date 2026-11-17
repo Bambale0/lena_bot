@@ -167,6 +167,14 @@ async def reconcile(
                         or current.external_id != tx.external_id
                     ):
                         outcome = "already_resolved"
+                    elif (
+                        current.amount_rub != tx.amount_rub
+                        or current.provider_amount_minor != tx.provider_amount_minor
+                    ):
+                        # GetState verified the earlier snapshot. A changed
+                        # local amount must be independently re-verified before
+                        # any terminal transition or credit grant.
+                        outcome = "payment_amount_changed_requires_review"
                     elif action == "paid":
                         # Percent-based referral commissions are normally applied by
                         # the webhook's separate commission seam. This CLI must not
