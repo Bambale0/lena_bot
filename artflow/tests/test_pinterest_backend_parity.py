@@ -373,7 +373,7 @@ def test_pinterest_trend_alias_uses_standalone_service_entry_instead_of_missing_
     show_trend = runner.split("const showTrend = useCallback((next: TrendPublic) => {", 1)[1].split(
         "const loadTrend = useCallback(", 1
     )[0]
-    guard = show_trend.split("if (isPinterestServiceTrend(next)) {", 1)[1].split("}", 1)[0]
+    guard = show_trend.split("if (isPinterestServiceTrend(next)) {", 1)[1].split("\n    }", 1)[0]
     assert "openPinterestService();" in guard
     assert "setTrend(next)" not in guard
     assert "return;" in guard
