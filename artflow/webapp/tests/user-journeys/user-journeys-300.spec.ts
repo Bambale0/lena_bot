@@ -370,6 +370,11 @@ async function mockMiniApp(page: Page, options: MockOptions = {}) {
       } } : { status: 404, json: { detail: "Category not found" } });
     }
     if (path === "/api/v1/trends" && method === "GET") return route.fulfill({ json: trends });
+    // Fresh mocked users have no reserved paid trend submissions. The runner
+    // must still perform this authenticated read-only check before any POST.
+    if (path === "/api/v1/trends/runs/recoverable" && method === "GET") {
+      return route.fulfill({ json: { runs: [] } });
+    }
     const trendCheckoutMatch = path.match(/^\/api\/v1\/trends\/(\d+)\/checkout$/);
     if (trendCheckoutMatch && method === "GET") {
       const balance = Number(user.credits || 100);
