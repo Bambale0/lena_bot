@@ -10,6 +10,7 @@ import { readStudioBalance, subscribeStudioBalance } from "@/lib/studio-balance"
 import { clearPendingTopup, readPendingTopup, savePendingTopup, sameTopupAttempt, revokePaymentAccess, subscribePaymentAccessRevoked } from "@/lib/topup-recovery";
 import { canReopenPayment, paymentFromResponse, paymentResolution, type RepeatPayment, type PaymentProvider } from "@/features/feed-repeat-payment";
 import { isPinterestServiceTrend } from "@/features/pinterest-service";
+import { openPinterestService } from "@/features/pinterest-service-runner";
 import type { GenerationTask, TrendItem, TrendUserField } from "@/lib/types";
 import { notifyHaptic, openExternalUrl, readStartParam, readTelegramInitData } from "@/lib/telegram";
 import { trendRunNeedsReadOnlyRecovery, TREND_RUN_UNCERTAIN_MESSAGE } from "@/lib/trend-run-recovery";
@@ -650,7 +651,15 @@ function TrendRunnerPortal() {
       if (heldTrend.current.id !== next.id) setError(uncertainRunKey ? TREND_RUN_UNCERTAIN_MESSAGE : "Сначала проверь оплату предыдущего повтора. Фото и настройки сохранены.");
       return;
     }
-    resetRunner(); setUserValues(initialTrendUserValues(next)); setTrend(next);
+    resetRunner();
+    if (isPinterestServiceTrend(next)) {
+      // Pinterest is a standalone service, not a paid /trends/{id}/run.
+      // The legacy PinterestTrendFlow points to an unmounted API route.
+      setTrend(null);
+      openPinterestService();
+      return;
+    }
+    setUserValues(initialTrendUserValues(next)); setTrend(next);
   }, [resetRunner, uncertainRunKey]);
 
   const loadTrend = useCallback(async (trendId: number) => {
