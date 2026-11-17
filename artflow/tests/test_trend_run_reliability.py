@@ -1023,7 +1023,9 @@ async def test_postgres_different_device_keys_race_allows_one_unlinked_claim():
     """Use isolated CI PostgreSQL schema to prove atomicity across connections."""
     import os
     from uuid import uuid4
+
     from sqlalchemy import text
+
     from db.trend_run_claims import PendingTrendRunError
 
     url = os.environ.get("APIX_TEST_POSTGRES_URL")
