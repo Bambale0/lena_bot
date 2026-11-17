@@ -100,7 +100,7 @@ test("server claim inventory accepts only bounded, typed GET-only recovery ident
     { runs: new Array(21).fill(runs[0]) },
     { runs: [{ ...runs[0], trend_id: -1 }] },
     { runs: [{ ...runs[0], request_key: "short" }] },
-    { runs: [{ ...runs[0], request_key: "control\\nchar" }] },
+    { runs: [{ ...runs[0], request_key: "control" + String.fromCharCode(10) + "char" }] },
     { runs: [{ ...runs[0], state: "complete" }] },
     { runs: [{ ...runs[0], state: "unknown" }] },
   ]) {
