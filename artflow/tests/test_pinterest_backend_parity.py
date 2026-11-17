@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from inspect import signature
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, create_autospec
 
@@ -360,3 +361,26 @@ def test_bootstrap_mounts_service_without_pinterest_trend_routes() -> None:
     assert "POST" in miniapp_paths["/api/v1/services/pinterest/run"]
     assert "/api/v1/trends/{trend_id}/pinterest-run" not in trend_paths
     assert "POST" in trend_paths["/api/v1/trends/{trend_id}/run"]
+
+
+def test_pinterest_trend_alias_uses_standalone_service_entry_instead_of_missing_route() -> None:
+    """Any legacy Pinterest trend opens the existing independent service checkout."""
+    frontend = Path(__file__).resolve().parents[1] / "webapp" / "src" / "features"
+    runner = (frontend / "trend-runner.tsx").read_text(encoding="utf-8")
+    service = (frontend / "pinterest-service-runner.tsx").read_text(encoding="utf-8")
+    alias = (frontend / "pinterest-service.ts").read_text(encoding="utf-8")
+
+    show_trend = runner.split("const showTrend = useCallback((next: TrendPublic) => {", 1)[1].split(
+        "const loadTrend = useCallback(", 1
+    )[0]
+    guard = show_trend.split("if (isPinterestServiceTrend(next)) {", 1)[1].split("}", 1)[0]
+    assert "openPinterestService();" in guard
+    assert "setTrend(next)" not in guard
+    assert "return;" in guard
+    assert 'from "@/features/pinterest-service-runner"' in runner
+    assert 'PINTEREST_SERVICE_ALIAS_ID = 0' in alias
+    assert '"/services/pinterest/run"' in service
+    assert '"/services/pinterest/upload"' in service
+    # The legacy route has no mounted backend handler: it must not be the
+    # entry point for Pinterest aliases or users receive a false paid action.
+    assert "/trends/${trend.id}/pinterest-run" in runner
