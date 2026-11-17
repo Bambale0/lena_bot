@@ -935,3 +935,131 @@ async def test_pre_submit_rejection_releases_claim_for_retry(tmp_path):
             assert created
     finally:
         await engine.dispose()
+
+
+def test_single_unlinked_trend_claim_migration_fails_closed_and_preserves_evidence():
+    """Migration refuses ambiguous historical claims instead of rewriting them."""
+    path = Path(__file__).resolve().parents[1] / "db/migrations/versions/059_trend_single_unlinked_actor.py"
+    spec = importlib.util.spec_from_file_location("trend_single_unlinked_migration", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    engine = sa.create_engine("sqlite:///:memory:")
+    try:
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                "CREATE TABLE trend_run_claims (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, "
+                "request_key VARCHAR(128) NOT NULL, generation_id INTEGER)"
+            )
+            connection.exec_driver_sql(
+                "INSERT INTO trend_run_claims VALUES (1, 7, 'first', NULL), (2, 7, 'second', NULL)"
+            )
+            with Operations.context(MigrationContext.configure(connection)):
+                with pytest.raises(RuntimeError, match="manual review"):
+                    module.upgrade()
+            assert connection.exec_driver_sql(
+                "SELECT count(*) FROM trend_run_claims"
+            ).scalar_one() == 2
+            connection.exec_driver_sql(
+                "UPDATE trend_run_claims SET generation_id = 10 WHERE id = 2"
+            )
+            with Operations.context(MigrationContext.configure(connection)):
+                module.upgrade()
+            with pytest.raises(sa.exc.IntegrityError):
+                connection.exec_driver_sql(
+                    "INSERT INTO trend_run_claims VALUES (3, 7, 'third', NULL)"
+                )
+            connection.exec_driver_sql(
+                "INSERT INTO trend_run_claims VALUES (4, 8, 'other-actor', NULL)"
+            )
+            connection.exec_driver_sql(
+                "UPDATE trend_run_claims SET generation_id = 11 WHERE id = 1"
+            )
+            connection.exec_driver_sql(
+                "INSERT INTO trend_run_claims VALUES (5, 7, 'after-linking', NULL)"
+            )
+            with Operations.context(MigrationContext.configure(connection)):
+                module.downgrade()
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_unlinked_trend_claim_blocks_new_device_key_until_resolved(tmp_path):
+    from db.trend_run_claims import PendingTrendRunError
+
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'cross-device-claims.db'}")
+    async with engine.begin() as conn:
+        await conn.run_sync(TrendRunClaim.__table__.create)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async def attempt(key: str, user_id: int = 7):
+        async with factory() as session:
+            return await reserve_claim(
+                session, user_id=user_id, request_key=key,
+                request_hash="a" * 64, trend_id=12,
+            )
+    try:
+        first, created = await attempt("device-a")
+        assert created
+        with pytest.raises(PendingTrendRunError):
+            await attempt("device-b")
+        duplicate, created = await attempt("device-a")
+        assert not created and duplicate.id == first.id
+        other, created = await attempt("different-user", user_id=8)
+        assert created and other.user_id == 8
+        async with factory() as session:
+            saved = await session.get(TrendRunClaim, first.id)
+            saved.generation_id = 99
+            saved.status = "complete"
+            await session.commit()
+        next_claim, created = await attempt("device-b")
+        assert created and next_claim.request_key == "device-b"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_postgres_different_device_keys_race_allows_one_unlinked_claim():
+    """Use isolated CI PostgreSQL schema to prove atomicity across connections."""
+    import os
+    from uuid import uuid4
+    from sqlalchemy import text
+    from db.trend_run_claims import PendingTrendRunError
+
+    url = os.environ.get("APIX_TEST_POSTGRES_URL")
+    if not url:
+        pytest.skip("Requires disposable PostgreSQL, exercised by backend-quality CI")
+    schema = "test_trend_claim_" + uuid4().hex
+    admin = create_async_engine(url)
+    async with admin.begin() as connection:
+        await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+    engine = create_async_engine(url, connect_args={"server_settings": {"search_path": schema}})
+    try:
+        async with engine.begin() as connection:
+            await connection.execute(text("CREATE TABLE users (id integer PRIMARY KEY)"))
+            await connection.execute(text("CREATE TABLE generations (id integer PRIMARY KEY)"))
+            await connection.run_sync(TrendRunClaim.__table__.create)
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+
+        async def attempt(key: str) -> str:
+            async with factory() as session:
+                try:
+                    _, created = await reserve_claim(
+                        session, user_id=7, request_key=key,
+                        request_hash="a" * 64, trend_id=12,
+                    )
+                    return "created" if created else "existing"
+                except PendingTrendRunError:
+                    return "blocked"
+
+        results = await asyncio.gather(attempt("device-1"), attempt("device-2"))
+        assert sorted(results) == ["blocked", "created"]
+        async with factory() as session:
+            claims = (await session.execute(sa.select(TrendRunClaim))).scalars().all()
+            assert len(claims) == 1
+            assert claims[0].generation_id is None
+    finally:
+        await engine.dispose()
+        async with admin.begin() as connection:
+            await connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+        await admin.dispose()
