@@ -76,6 +76,7 @@ from db.trend_category_repository import (
     update_trend_category,
 )
 from db.trend_run_claims import (
+    PendingTrendRunError,
     get_claim,
     list_unlinked_claims,
     release_pre_submit_claim,
@@ -787,13 +788,22 @@ async def run_trend(
     # Hold a shared category-row lock through durable claim reservation. A hide
     # committed first blocks this run; a run admitted first is allowed to finish.
     await _lock_public_trend_category(session, trend)
-    claim, created = await reserve_claim(
-        session,
-        user_id=user_id,
-        request_key=body.idempotency_key,
-        request_hash=request_hash,
-        trend_id=trend_id,
-    )
+    try:
+        claim, created = await reserve_claim(
+            session,
+            user_id=user_id,
+            request_key=body.idempotency_key,
+            request_hash=request_hash,
+            trend_id=trend_id,
+        )
+    except PendingTrendRunError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "trend_run_pending",
+                "message": "A previous paid trend run is unresolved. Check recovery before starting another.",
+            },
+        ) from exc
     if not created:
         return await _existing_trend_run_response(session, user, claim, trend_id, request_hash)
 

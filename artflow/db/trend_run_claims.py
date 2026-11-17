@@ -9,6 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from db.models import TrendRunClaim
 
 
+class PendingTrendRunError(Exception):
+    """A different unresolved paid admission already exists for this actor."""
+
+
+
 async def get_claim(session: AsyncSession, user_id: int, request_key: str) -> TrendRunClaim | None:
     return (
         await session.execute(
@@ -62,9 +67,19 @@ async def reserve_claim(
             await session.flush()
     except IntegrityError:
         existing = await get_claim(session, user_id, request_key)
-        if existing is None:
-            raise
-        return existing, False
+        if existing is not None:
+            return existing, False
+        # A second device may use a different idempotency key. The partial
+        # unique index rejects it atomically, even across separate workers.
+        pending = await session.scalar(
+            select(TrendRunClaim.id).where(
+                TrendRunClaim.user_id == user_id,
+                TrendRunClaim.generation_id.is_(None),
+            ).limit(1)
+        )
+        if pending is not None:
+            raise PendingTrendRunError from None
+        raise
     await session.commit()
     return claim, True
 

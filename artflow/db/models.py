@@ -300,7 +300,16 @@ class TrendRunClaim(Base):
     """Durable, user-scoped guard before a potentially paid trend submission."""
 
     __tablename__ = "trend_run_claims"
-    __table_args__ = (UniqueConstraint("user_id", "request_key", name="uq_trend_run_claim_user_key"),)
+    __table_args__ = (
+        UniqueConstraint("user_id", "request_key", name="uq_trend_run_claim_user_key"),
+        Index(
+            "uq_trend_run_claim_single_unlinked_user",
+            "user_id",
+            unique=True,
+            postgresql_where=text("generation_id IS NULL"),
+            sqlite_where=text("generation_id IS NULL"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
