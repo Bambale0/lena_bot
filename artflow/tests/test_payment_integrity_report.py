@@ -41,7 +41,7 @@ def test_healthy_report_counts_only_aggregates() -> None:
     data = make_report([
         provider_row(user_id=987654321, external_id="secret-payment-reference"),
         provider_row(provider="lava", transactions=2, paid=2, pending=0,
-                     pending_last_24h=0, pending_older_7d=0),
+                     pending_last_24h=0, pending_older_7d=0, pending_older_30d=0),
     ], orphan_count=0)
     assert data["integrity_ok"] is True
     assert data["summary"]["paid"] == 5
