@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -91,6 +92,7 @@ def test_standalone_cli_help_does_not_trigger_db_api_import_cycle() -> None:
     assert "--apply" in process.stdout
     assert "--offset" in process.stdout
     assert "--aggregate-only" in process.stdout
+    assert "--audit-min-age-days" in process.stdout
 
 
 @pytest.mark.asyncio
@@ -105,6 +107,64 @@ async def test_tbank_reconcile_rejects_unsafe_audit_offset(offset: int, apply: b
             limit=2, lookback_days=30, min_age_minutes=30,
             apply=apply, offset=offset,
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("days", "lookback", "apply"),
+    [(7, 3650, True), (30, 3650, True), (-1, 3650, False),
+     (3651, 3650, False), (30, 30, False), (31, 30, False)],
+)
+async def test_aged_cohort_never_allows_apply_or_invalid_window(
+    days: int, lookback: int, apply: bool,
+) -> None:
+    with pytest.raises(ValueError, match="audit-min-age-days"):
+        await reconcile(
+            limit=2, lookback_days=lookback, min_age_minutes=30,
+            apply=apply, audit_min_age_days=days,
+        )
+
+
+@pytest.mark.asyncio
+async def test_aged_cohort_limits_read_only_query_and_never_calls_provider(
+    monkeypatch,
+) -> None:
+    seen_queries = []
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def execute(self, query):
+            seen_queries.append(query)
+            return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: []))
+
+    get_state = AsyncMock()
+    monkeypatch.setattr(audit, "AsyncSessionLocal", FakeSession)
+    monkeypatch.setattr(audit, "get_payment_state", get_state)
+    monkeypatch.setattr(audit.settings, "TBANK_TERMINAL_KEY", "terminal-test")
+    monkeypatch.setattr(audit.settings, "TBANK_PASSWORD", "test-only")
+
+    result = await reconcile(
+        limit=5, lookback_days=3650, min_age_minutes=30, apply=False,
+        aggregate_only=True, audit_min_age_days=90,
+    )
+    assert result["checked"] == 0
+    assert result["audit_min_age_days"] == 90
+    assert result["mode"] == "dry_run"
+    get_state.assert_not_awaited()
+    assert len(seen_queries) == 1
+    date_params = [
+        value for value in seen_queries[0].compile().params.values()
+        if isinstance(value, datetime)
+    ]
+    assert len(date_params) == 2
+    ages = sorted((datetime.now(timezone.utc) - value).days for value in date_params)
+    assert ages[0] in (89, 90)
+    assert ages[1] in (3649, 3650)
 
 
 def test_dry_run_offset_is_bounded_and_write_mode_never_offsets() -> None:
