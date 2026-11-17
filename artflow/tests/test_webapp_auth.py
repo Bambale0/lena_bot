@@ -64,7 +64,6 @@ def test__verify_init_data_rejects_expired_auth_date() -> None:
     assert exc.value.status_code == 401
 
 
-
 @pytest.mark.parametrize("future_seconds", [301, 3600])
 def test__verify_init_data_rejects_future_auth_date(future_seconds: int) -> None:
     future = int(time.time()) + future_seconds
