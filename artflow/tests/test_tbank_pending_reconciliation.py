@@ -230,15 +230,17 @@ async def test_aggregate_only_dry_run_redacts_transaction_ids(monkeypatch, capsy
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("has_refund_notice", "latest_status", "expected_outcome", "writes"),
+    ("has_refund_notice", "latest_status", "changed_field", "expected_outcome", "writes"),
     [
-        (True, "pending", "refund_notice_requires_review", 0),
-        (False, "paid", "already_resolved", 0),
-        (False, "pending", "failed", 1),
+        (True, "pending", None, "refund_notice_requires_review", 0),
+        (False, "paid", None, "already_resolved", 0),
+        (False, "pending", None, "failed", 1),
+        (False, "pending", "amount_rub", "payment_amount_changed_requires_review", 0),
+        (False, "pending", "provider_amount_minor", "payment_amount_changed_requires_review", 0),
     ],
 )
 async def test_tbank_operator_failure_serializes_refunds_and_rechecks_state(
-    monkeypatch, has_refund_notice, latest_status, expected_outcome, writes,
+    monkeypatch, has_refund_notice, latest_status, changed_field, expected_outcome, writes,
 ) -> None:
     from db.models import PaymentProvider, PaymentRefundNotice, Transaction, TransactionStatus
 
@@ -250,6 +252,10 @@ async def test_tbank_operator_failure_serializes_refunds_and_rechecks_state(
         **candidate.__dict__, provider=PaymentProvider.tbank,
         status=TransactionStatus(latest_status),
     )
+    if changed_field == "amount_rub":
+        current.amount_rub = 155.0
+    elif changed_field == "provider_amount_minor":
+        current.provider_amount_minor = 15500
     lock = AsyncMock()
     fail = AsyncMock(return_value=current)
 
