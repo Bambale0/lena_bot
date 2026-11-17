@@ -29,8 +29,13 @@ from sqlalchemy import select
 import api  # noqa: E402,F401
 from core.config import settings
 from db import repository as repo
-from db.models import PaymentProvider, Transaction, TransactionStatus
-from db.payment_refunds import RefundNeedsReconciliation, money_minor, strict_minor
+from db.models import PaymentProvider, PaymentRefundNotice, Transaction, TransactionStatus
+from db.payment_refunds import (
+    RefundNeedsReconciliation,
+    lock_payment_identity,
+    money_minor,
+    strict_minor,
+)
 from db.referral_reward_policy import install_referral_reward_policy
 from db.session import AsyncSessionLocal
 from payments.tbank import get_payment_state
@@ -148,8 +153,14 @@ async def reconcile(
             # Repository helpers atomically guard pending->terminal and ledger exactly-once.
             try:
                 async with AsyncSessionLocal() as session:
-                    current = await session.get(Transaction, tx.id)
-                    if (
+                    # Match the refund/confirmation advisory-lock namespace so
+                    # a late webhook cannot overtake our status check.
+                    await lock_payment_identity(session, str(tx.external_id))
+                    notice = await session.get(PaymentRefundNotice, str(tx.external_id))
+                    current = await session.get(Transaction, tx.id, populate_existing=True)
+                    if notice is not None:
+                        outcome = "refund_notice_requires_review"
+                    elif (
                         current is None
                         or current.provider != PaymentProvider.tbank
                         or current.status != TransactionStatus.pending
