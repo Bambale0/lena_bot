@@ -76,6 +76,10 @@ SELECT provider,
        ) AS pending_older_7d,
        count(*) FILTER (
            WHERE status = 'pending'
+                 AND created_at < now() - interval '30 days'
+       ) AS pending_older_30d,
+       count(*) FILTER (
+           WHERE status = 'pending'
                  AND created_at < now() - interval '90 days'
        ) AS pending_older_90d,
        count(*) FILTER (
@@ -109,14 +113,16 @@ def make_report(provider_rows: list[dict[str, Any]], orphan_count: int) -> dict[
     """Only aggregate values are serialized. Never include users or payment IDs."""
     providers = []
     summary = {
-        "transactions": 0, "paid": 0, "pending": 0,
-        "pending_older_7d": 0, "pending_older_90d": 0,
+        "transactions": 0, "paid": 0, "pending": 0, "failed": 0,
+        "pending_last_24h": 0, "pending_older_7d": 0,
+        "pending_older_30d": 0, "pending_older_90d": 0,
+        "pending_missing_external_id": 0,
         **{name: 0 for name in INTEGRITY_FIELDS},
     }
     allowed_fields = (
         "transactions", "paid", "pending", "failed",
         *INTEGRITY_FIELDS, "pending_last_24h", "pending_older_7d",
-        "pending_older_90d", "pending_missing_external_id",
+        "pending_older_30d", "pending_older_90d", "pending_missing_external_id",
     )
     for row in provider_rows:
         item = {"provider": str(row["provider"])}
