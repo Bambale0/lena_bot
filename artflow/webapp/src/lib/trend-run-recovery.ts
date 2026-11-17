@@ -61,3 +61,32 @@ export function clearPendingTrendRun(storage: StoragePort | null, actorId: numbe
     return storage.getItem(pendingKey(actorId)) === null;
   } catch { return false; }
 }
+
+/** Backend evidence for GET-only recovery; never a receipt or permission to retry. */
+export type RecoverableTrendRun = {
+  trend_id: number;
+  request_key: string;
+  state: "processing" | "uncertain";
+};
+
+export function parseRecoverableTrendRuns(value: unknown): RecoverableTrendRun[] | null {
+  if (!value || typeof value !== "object") return null;
+  const runs = (value as { runs?: unknown }).runs;
+  if (!Array.isArray(runs) || runs.length > 20) return null;
+  const result: RecoverableTrendRun[] = [];
+  for (const entry of runs) {
+    if (!entry || typeof entry !== "object") return null;
+    const claim = entry as Record<string, unknown>;
+    if (!Number.isSafeInteger(claim.trend_id) || (claim.trend_id as number) <= 0
+      || typeof claim.request_key !== "string"
+      || claim.request_key.length < 8 || claim.request_key.length > 128
+      || /[\x00-\x1f]/.test(claim.request_key)
+      || (claim.state !== "processing" && claim.state !== "uncertain")) return null;
+    result.push({
+      trend_id: claim.trend_id as number,
+      request_key: claim.request_key,
+      state: claim.state,
+    });
+  }
+  return result;
+}
