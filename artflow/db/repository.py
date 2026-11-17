@@ -3425,6 +3425,17 @@ async def set_transaction_status(
 ) -> Transaction | None:
     if status != TransactionStatus.failed:
         raise ValueError("Use the atomic payment confirmation/refund operation")
+
+    # Failed webhook and operator transitions must serialize with CONFIRMED
+    # and refund settlement. A refund notice is authoritative and must never
+    # be superseded by a late failure notification.
+    from db.models import PaymentRefundNotice
+    from db.payment_refunds import lock_payment_identity
+
+    await lock_payment_identity(session, external_id)
+    if await session.get(PaymentRefundNotice, external_id) is not None:
+        await session.rollback()
+        return None
     result = await session.execute(
         update(Transaction)
         .where(

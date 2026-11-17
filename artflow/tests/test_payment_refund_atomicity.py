@@ -212,6 +212,88 @@ async def test_late_failure_cannot_overwrite_paid_transaction(payment_db, status
 
 
 @pytest.mark.asyncio
+async def test_late_failed_webhook_cannot_override_prior_refund_notice(payment_db):
+    from db import repository as repo
+    from db.models import PaymentRefundNotice
+
+    factory, _ = payment_db
+    tx_id, payer_id, _ = await seed_payment(
+        factory, PaymentProvider.tbank, status=TransactionStatus.pending, balance=0,
+    )
+    async with factory() as session:
+        session.add(PaymentRefundNotice(
+            external_id="test-payment-1", provider=PaymentProvider.tbank.value,
+        ))
+        await session.commit()
+
+    # Real repository helper must use the same advisory lock as refund/confirm.
+    async with factory() as session:
+        changed = await repo.set_transaction_status(
+            session, "test-payment-1", TransactionStatus.failed,
+        )
+    assert changed is None
+    async with factory() as session:
+        assert (await session.get(Transaction, tx_id)).status == TransactionStatus.pending
+        assert (await session.get(User, payer_id)).credits == 0
+
+    async with factory() as session:
+        assert await repo.confirm_transaction_and_add_credits(
+            session, "test-payment-1",
+        ) is None
+    async with factory() as session:
+        assert (await session.get(Transaction, tx_id)).status == TransactionStatus.refunded
+        assert (await session.get(User, payer_id)).credits == 0
+        credits = list((await session.scalars(select(CreditLedgerEntry).where(
+            CreditLedgerEntry.source_type == "transaction",
+            CreditLedgerEntry.source_id == str(tx_id),
+        ))).all())
+        assert credits == []
+
+
+@pytest.mark.asyncio
+async def test_concurrent_pending_failure_and_confirmation_are_mutually_exclusive(payment_db):
+    from db import repository as repo
+
+    factory, _ = payment_db
+    tx_id, payer_id, _ = await seed_payment(
+        factory, PaymentProvider.tbank, status=TransactionStatus.pending, balance=0,
+    )
+
+    async def fail():
+        async with factory() as session:
+            return await repo.set_transaction_status(
+                session, "test-payment-1", TransactionStatus.failed,
+            )
+
+    async def confirm():
+        async with factory() as session:
+            return await repo.confirm_transaction_and_add_credits(
+                session, "test-payment-1",
+            )
+
+    failure, confirmation = await asyncio.gather(fail(), confirm())
+    assert (failure is None) != (confirmation is None)
+
+    async with factory() as session:
+        tx = await session.get(Transaction, tx_id)
+        user = await session.get(User, payer_id)
+        credits = list((await session.scalars(select(CreditLedgerEntry).where(
+            CreditLedgerEntry.source_type == "transaction",
+            CreditLedgerEntry.source_id == str(tx_id),
+        ))).all())
+    if tx.status == TransactionStatus.paid:
+        assert confirmation is not None
+        assert user.credits == 50
+        assert len(credits) == 1
+        assert credits[0].delta == 50
+    else:
+        assert tx.status == TransactionStatus.failed
+        assert confirmation is None
+        assert user.credits == 0
+        assert credits == []
+
+
+@pytest.mark.asyncio
 async def test_referral_accrual_after_refund_is_not_resurrected(payment_db):
     from db import repository as repo
 
