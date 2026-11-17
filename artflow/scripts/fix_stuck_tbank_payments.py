@@ -80,9 +80,14 @@ def decide_tbank_action(
     return "pending", "provider_not_final"
 
 
-async def reconcile(*, limit: int, lookback_days: int, min_age_minutes: int, apply: bool, offset: int = 0, aggregate_only: bool = False) -> dict[str, object]:
+async def reconcile(
+    *, limit: int, lookback_days: int, min_age_minutes: int, apply: bool,
+    offset: int = 0, aggregate_only: bool = False, audit_min_age_days: int = 0,
+) -> dict[str, object]:
     if apply and aggregate_only:
         raise ValueError("aggregate-only is read-only and cannot be combined with --apply")
+    if apply and audit_min_age_days:
+        raise ValueError("audit-min-age-days is read-only and cannot be combined with --apply")
     if not 1 <= limit <= MAX_BATCH_SIZE:
         raise ValueError(f"limit must be within 1..{MAX_BATCH_SIZE}")
     if not 0 <= offset <= MAX_AUDIT_OFFSET:
@@ -95,10 +100,15 @@ async def reconcile(*, limit: int, lookback_days: int, min_age_minutes: int, app
         raise ValueError("lookback-days must be within 1..3650")
     if not 5 <= min_age_minutes <= 24 * 60:
         raise ValueError("min-age-minutes must be within 5..1440")
+    if not 0 <= audit_min_age_days <= 3650:
+        raise ValueError("audit-min-age-days must be within 0..3650")
+    if audit_min_age_days >= lookback_days:
+        raise ValueError("audit-min-age-days must be smaller than lookback-days")
     if not settings.TBANK_TERMINAL_KEY or not settings.TBANK_PASSWORD:
         raise RuntimeError("T-Bank credentials are not configured")
 
     now = datetime.now(timezone.utc)
+    minimum_age = max(timedelta(minutes=min_age_minutes), timedelta(days=audit_min_age_days))
     async with AsyncSessionLocal() as session:
         rows = (
             await session.execute(
@@ -108,7 +118,7 @@ async def reconcile(*, limit: int, lookback_days: int, min_age_minutes: int, app
                     Transaction.status == TransactionStatus.pending,
                     Transaction.external_id.is_not(None),
                     Transaction.created_at >= now - timedelta(days=lookback_days),
-                    Transaction.created_at <= now - timedelta(minutes=min_age_minutes),
+                    Transaction.created_at <= now - minimum_age,
                 )
                 .order_by(Transaction.created_at.asc(), Transaction.id.asc())
                 .offset(offset)
@@ -181,6 +191,7 @@ async def reconcile(*, limit: int, lookback_days: int, min_age_minutes: int, app
         "aggregate_only": aggregate_only,
         "checked": len(rows),
         "offset": offset,
+        "audit_min_age_days": audit_min_age_days,
         "next_offset": offset + len(rows) if has_more and not apply else None,
         "has_more": has_more if not apply else False,
         "outcomes": dict(counts),
@@ -198,6 +209,10 @@ def main() -> int:
         help="Read-only dry-run pagination offset (0..10000); forbidden with --apply",
     )
     parser.add_argument("--min-age-minutes", type=int, default=30, help="Skip very new invoices (5..1440)")
+    parser.add_argument(
+        "--audit-min-age-days", type=int, default=0,
+        help="Read-only audit of invoices at least N days old (0..3650); incompatible with --apply",
+    )
     args = parser.parse_args()
     install_referral_reward_policy(repo)
     try:
@@ -208,6 +223,7 @@ def main() -> int:
             apply=args.apply,
             offset=args.offset,
             aggregate_only=args.aggregate_only,
+            audit_min_age_days=args.audit_min_age_days,
         ))
     except (ValueError, RuntimeError) as exc:
         print(f"reconciliation_config_error={type(exc).__name__}", file=sys.stderr)
