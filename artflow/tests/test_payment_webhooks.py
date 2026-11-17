@@ -13,6 +13,7 @@ from tribute_fixtures import catalog_offer
 import main
 from db.models import PaymentProvider, TransactionStatus
 from main import app
+from payments.lava import exact_rub_minor, extract_amount_minor
 
 
 class _FakeSessionContext:
@@ -521,6 +522,82 @@ async def test_lava_webhook_never_credits_mismatched_invoice_evidence(
     monkeypatch.setattr(main.repo, "confirm_transaction_and_add_credits", confirm)
     monkeypatch.setattr(main, "lava_get_invoice", AsyncMock(return_value=authoritative_invoice))
 
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/webhook/lava",
+            json={"eventType": "payment.success", "data": {"invoiceId": "invoice-1"}},
+        )
+    assert response.status_code == 200
+    confirm.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (500, 50000),
+        (500.0, 50000),
+        ("500,01", 50001),
+        ("0.01", 1),
+        ("500.04", 50004),
+        ("500.004", None),
+        (500.004, None),
+        ("500.000", None),
+        ("5e2", None),
+        ("NaN", None),
+        ("Infinity", None),
+        ("-500", None),
+        (True, None),
+        (0, None),
+        ("0.00", None),
+        ("9999999999999", None),
+    ],
+)
+def test_lava_rub_amount_requires_exact_kopeks(raw, expected):
+    assert exact_rub_minor(raw) == expected
+    assert extract_amount_minor({"data": {"amount": raw}}) == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider_amount", [
+    500.004, "500.005", "500.000", "5e2", "NaN", "Infinity", True,
+])
+async def test_lava_paid_webhook_rejects_subkopeck_or_ambiguous_amount(
+    monkeypatch, provider_amount,
+) -> None:
+    pending_tx = SimpleNamespace(
+        id=12, user_id=7, amount_rub=500.0, credits=50.0,
+        provider=PaymentProvider.lava, status=TransactionStatus.pending,
+    )
+    confirm = AsyncMock()
+    monkeypatch.setattr(main, "AsyncSessionLocal", _FakeSessionContext)
+    monkeypatch.setattr(main.repo, "get_transaction_by_external_id", AsyncMock(return_value=pending_tx))
+    monkeypatch.setattr(main.repo, "confirm_transaction_and_add_credits", confirm)
+    monkeypatch.setattr(main, "lava_get_invoice", AsyncMock(return_value={
+        "id": "invoice-1", "status": "paid", "amount": provider_amount, "currency": "RUB",
+    }))
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/webhook/lava",
+            json={"eventType": "payment.success", "data": {"invoiceId": "invoice-1"}},
+        )
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "30"
+    confirm.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_lava_exact_one_kopeck_mismatch_does_not_credit(monkeypatch) -> None:
+    pending_tx = SimpleNamespace(
+        id=12, user_id=7, amount_rub=500.0, credits=50.0,
+        provider=PaymentProvider.lava, status=TransactionStatus.pending,
+    )
+    confirm = AsyncMock()
+    monkeypatch.setattr(main, "AsyncSessionLocal", _FakeSessionContext)
+    monkeypatch.setattr(main.repo, "get_transaction_by_external_id", AsyncMock(return_value=pending_tx))
+    monkeypatch.setattr(main.repo, "confirm_transaction_and_add_credits", confirm)
+    monkeypatch.setattr(main, "lava_get_invoice", AsyncMock(return_value={
+        "id": "invoice-1", "status": "paid", "amount": "500.01", "currency": "RUB",
+    }))
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.post(
             "/webhook/lava",
