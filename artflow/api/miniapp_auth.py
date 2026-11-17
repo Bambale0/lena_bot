@@ -89,7 +89,11 @@ def _verify_init_data(init_data: str, bot_token: str | None = None) -> dict:
         auth_date = int(params.get("auth_date", "0"))
     except ValueError:
         raise HTTPException(status_code=401, detail="Malformed auth_date in initData")
-    if auth_date <= 0 or auth_date > time.time() + TELEGRAM_INIT_DATA_FUTURE_SKEW_SECONDS or time.time() - auth_date > TELEGRAM_INIT_DATA_MAX_AGE_SECONDS:
+    if (
+        auth_date <= 0
+        or auth_date > time.time() + TELEGRAM_INIT_DATA_FUTURE_SKEW_SECONDS
+        or time.time() - auth_date > TELEGRAM_INIT_DATA_MAX_AGE_SECONDS
+    ):
         raise HTTPException(status_code=401, detail="Telegram initData expired")
 
     raw_user = params.get("user")
@@ -123,7 +127,11 @@ def verify_telegram_login_data(data: dict, bot_token: str | None = None) -> dict
         auth_date = int(data.get("auth_date") or 0)
     except (TypeError, ValueError):
         raise HTTPException(status_code=401, detail="Malformed auth_date in Telegram login data")
-    if auth_date <= 0 or auth_date > time.time() + TELEGRAM_INIT_DATA_FUTURE_SKEW_SECONDS or time.time() - auth_date > TELEGRAM_INIT_DATA_MAX_AGE_SECONDS:
+    if (
+        auth_date <= 0
+        or auth_date > time.time() + TELEGRAM_INIT_DATA_FUTURE_SKEW_SECONDS
+        or time.time() - auth_date > TELEGRAM_INIT_DATA_MAX_AGE_SECONDS
+    ):
         raise HTTPException(status_code=401, detail="Telegram login data expired")
 
     try:
