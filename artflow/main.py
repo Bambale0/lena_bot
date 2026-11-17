@@ -134,7 +134,10 @@ from payments.lava import (
     cached_payment_url as lava_cached_payment_url,
 )
 from payments.lava import (
-    extract_amount_rub as lava_extract_amount_rub,
+    exact_rub_minor as lava_exact_rub_minor,
+)
+from payments.lava import (
+    extract_amount_minor as lava_extract_amount_minor,
 )
 from payments.lava import (
     extract_currency as lava_extract_currency,
@@ -1400,16 +1403,17 @@ async def lava_webhook(request: Request) -> PlainTextResponse:
         if currency != "RUB":
             logger.warning("Lava invoice currency mismatch invoice=%s currency=%s", safe_identifier(external_id), safe_identifier(currency))
             return PlainTextResponse("OK")
-        amount_rub = lava_extract_amount_rub(invoice)
-        if amount_rub is None:
-            callback_anomaly(logger, "lava", "verification_missing_amount")
+        amount_minor = lava_extract_amount_minor(invoice)
+        expected_minor = lava_exact_rub_minor(tx.amount_rub)
+        if amount_minor is None or expected_minor is None:
+            # Do not round fractional kopeks, accept non-finite numbers, or
+            # grant credits when the local snapshot is not representable.
+            callback_anomaly(logger, "lava", "verification_invalid_amount_precision")
             return PlainTextResponse("Invoice verification incomplete", status_code=503, headers={"Retry-After": "30"})
-        if round(amount_rub, 2) != round(float(tx.amount_rub), 2):
+        if amount_minor != expected_minor:
             logger.warning(
-                "Lava invoice amount mismatch invoice=%s expected=%s actual=%s",
+                "Lava invoice amount mismatch invoice=%s",
                 safe_identifier(external_id),
-                tx.amount_rub,
-                amount_rub,
             )
             return PlainTextResponse("OK")
 
