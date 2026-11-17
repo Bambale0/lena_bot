@@ -13,7 +13,7 @@ import { isPinterestServiceTrend } from "@/features/pinterest-service";
 import { openPinterestService } from "@/features/pinterest-service-runner";
 import type { GenerationTask, TrendItem, TrendUserField } from "@/lib/types";
 import { notifyHaptic, openExternalUrl, readStartParam, readTelegramInitData } from "@/lib/telegram";
-import { trendRunNeedsReadOnlyRecovery, TREND_RUN_UNCERTAIN_MESSAGE } from "@/lib/trend-run-recovery";
+import { clearPendingTrendRun, readPendingTrendRun, savePendingTrendRun, trendRunNeedsReadOnlyRecovery, TREND_RUN_UNCERTAIN_MESSAGE, type PendingTrendRun } from "@/lib/trend-run-recovery";
 import { safeExternalUrl } from "@/lib/utils";
 
 const TREND_RUNNER_EVENT = "apix:open-trend-runner";
@@ -560,7 +560,7 @@ function TrendRunnerPortal() {
   const [trend, setTrend] = useState<TrendPublic | null>(null);
   const [phase, setPhase] = useState<RunnerPhase>("idle");
   const [error, setError] = useState("");
-  const [uncertainRunKey, setUncertainRunKey] = useState<string | null>(null);
+  const [pendingRun, setPendingRun] = useState<PendingTrendRun | null>(null);
   const [localPreview, setLocalPreview] = useState("");
   const [uploadedAsset, setUploadedAsset] = useState<TrendUploadResponse | null>(null);
   const [userValues, setUserValues] = useState<Record<string, string>>({});
@@ -594,6 +594,7 @@ function TrendRunnerPortal() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const runKeyRef = useRef<{ fingerprint: string; key: string } | null>(null);
 
+  const uncertainRunKey = pendingRun ? (pendingRun.requestKey || "unavailable") : null;
   const genericBusy = phase === "uploading" || phase === "generating";
   const busy = genericBusy || pinterestBusy;
   const preview = safeExternalUrl(trend?.preview_url || "");
@@ -613,7 +614,7 @@ function TrendRunnerPortal() {
     checkoutSequence.current++;
     setDuration(null);
     runKeyRef.current = null;
-    setUncertainRunKey(null);
+    setPendingRun(null);
     setPhase("idle");
     setError("");
     setPinterestBusy(false);
@@ -755,6 +756,11 @@ function TrendRunnerPortal() {
       const saved = readPendingTopup(paymentStorage(), viewer.id);
       // Preserve the current in-memory URL, but follow an acknowledged/settled shared guard.
       if (!saved || !paymentRef.current || !sameTopupAttempt(saved, paymentRef.current)) { paymentRef.current = saved; setPaymentWaiting(Boolean(saved)); }
+      const unresolved = readPendingTrendRun(paymentStorage(), viewer.id);
+      if (unresolved) {
+        setPendingRun(unresolved);
+        setError(TREND_RUN_UNCERTAIN_MESSAGE);
+      }
     }).catch(() => { if (!controller.signal.aborted) setError("Не удалось подтвердить аккаунт для оплаты. Открой повтор ещё раз."); })
       .finally(() => window.clearTimeout(timeout));
     return () => { controller.abort(); window.clearTimeout(timeout); };
@@ -902,7 +908,14 @@ function TrendRunnerPortal() {
     try {
       const status = await apiJson<TrendRunStatus>(`/trends/${trendId}/runs/${encodeURIComponent(key)}`);
       if (status.state === "complete" && status.task?.id) {
-        setUncertainRunKey(null);
+        const owner = paymentOwner.current;
+        const saved = owner ? readPendingTrendRun(paymentStorage(), owner) : null;
+        if (saved && saved.requestKey === key && saved.trendId === trendId
+            && !clearPendingTrendRun(paymentStorage(), owner!, saved)) {
+          setError("Задача найдена, но не удалось убрать защиту повторного запуска. Проверь доступ к хранилищу браузера.");
+          return false;
+        }
+        setPendingRun(null);
         setSelectedTask(status.task);
         setTaskOpen(true);
         setTrend(null);
@@ -925,15 +938,33 @@ function TrendRunnerPortal() {
       toast.error("Сначала дождись расчёта стоимости тренда");
       return;
     }
+    const owner = paymentOwner.current;
+    if (!owner) {
+      setError("Дождись подтверждения аккаунта перед запуском. Платная генерация не создавалась.");
+      return;
+    }
+    const previous = readPendingTrendRun(paymentStorage(), owner);
+    if (previous) {
+      setPendingRun(previous);
+      setError(TREND_RUN_UNCERTAIN_MESSAGE);
+      return;
+    }
+    const fingerprint = JSON.stringify([trend.id, assetId, values, duration]);
+    const requestKey = runKeyRef.current?.fingerprint === fingerprint
+      ? runKeyRef.current.key
+      : buildIdempotencyKey(trend.id);
+    const attempt: PendingTrendRun = { trendId: trend.id, requestKey, startedAt: Date.now() };
+    if (!savePendingTrendRun(paymentStorage(), owner, attempt)) {
+      setPendingRun(readPendingTrendRun(paymentStorage(), owner));
+      setError("Не удалось сохранить защиту запуска. Проверь хранилище Mini App; платная генерация не создавалась.");
+      return;
+    }
+    runKeyRef.current = { fingerprint, key: requestKey };
+    setPendingRun(attempt);
     setError("");
     const sequence = operationSequence.current;
     try {
       setPhase("generating");
-      const fingerprint = JSON.stringify([trend.id, assetId, values, duration]);
-      const requestKey = runKeyRef.current?.fingerprint === fingerprint
-        ? runKeyRef.current.key
-        : buildIdempotencyKey(trend.id);
-      runKeyRef.current = { fingerprint, key: requestKey };
       const result = await apiJson<TrendRunResponse>(`/trends/${trend.id}/run`, {
         method: "POST",
         body: JSON.stringify({
@@ -946,6 +977,7 @@ function TrendRunnerPortal() {
       });
       if (sequence !== operationSequence.current) return;
       if (!result.task?.id) throw new Error("Не удалось подтвердить создание задачи");
+      if (clearPendingTrendRun(paymentStorage(), owner, attempt)) setPendingRun(null);
       setSelectedTask(result.task);
       setTaskOpen(true);
       notifyHaptic("success");
@@ -961,7 +993,7 @@ function TrendRunnerPortal() {
           && trendRunNeedsReadOnlyRecovery(runError instanceof TrendApiError ? runError.status : undefined)) {
         const key = runKeyRef.current?.key;
         if (key) {
-          setUncertainRunKey(key);
+          setPendingRun(attempt);
           setPhase("error");
           setError(TREND_RUN_UNCERTAIN_MESSAGE);
           const resolved = await checkUncertainRun(key, trend.id);
@@ -969,6 +1001,13 @@ function TrendRunnerPortal() {
           return;
         }
       }
+      // Only a definite client rejection is evidence of no accepted paid
+      // work. Network failure, 409/429/5xx and malformed success keep the
+      // write-ahead guard for GET-only recovery after reload.
+      const rejected = runError instanceof TrendApiError
+        && (runError.code === "trend_quote_stale"
+          || !trendRunNeedsReadOnlyRecovery(runError.status));
+      if (rejected && clearPendingTrendRun(paymentStorage(), owner, attempt)) setPendingRun(null);
       const message = runError instanceof Error ? runError.message : "Не удалось запустить тренд";
       setError(message);
       setPhase("error");
@@ -1269,13 +1308,17 @@ function TrendRunnerPortal() {
                 </Button>
               ) : null}
 
-              {uncertainRunKey && trend ? (
+              {pendingRun && trend ? (
                 <div className="grid gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
                   <p role="alert">{TREND_RUN_UNCERTAIN_MESSAGE}</p>
-                  <Button type="button" variant="outline"
-                    onClick={() => void checkUncertainRun(uncertainRunKey, trend.id)}>
-                    Проверить запуск без нового списания
-                  </Button>
+                  {pendingRun.trendId > 0 && pendingRun.requestKey ? (
+                    <Button type="button" variant="outline"
+                      onClick={() => void checkUncertainRun(pendingRun.requestKey, pendingRun.trendId)}>
+                      Проверить запуск без нового списания
+                    </Button>
+                  ) : (
+                    <p>Сохранённые данные попытки повреждены или недоступны. Повторный запуск заблокирован; обратись в поддержку.</p>
+                  )}
                 </div>
               ) : null}
 
