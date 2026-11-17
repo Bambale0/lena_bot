@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { clearPendingTrendRun, readPendingTrendRun, savePendingTrendRun, trendRunNeedsReadOnlyRecovery, TREND_RUN_UNCERTAIN_MESSAGE } from "../../src/lib/trend-run-recovery.ts";
+import { clearPendingTrendRun, parseRecoverableTrendRuns, readPendingTrendRun, savePendingTrendRun, trendRunNeedsReadOnlyRecovery, TREND_RUN_UNCERTAIN_MESSAGE } from "../../src/lib/trend-run-recovery.ts";
 
 test("ambiguous paid trend POST results require status lookup, never blind retry", () => {
   for (const status of [undefined, 408, 409, 429, 500, 502, 503, 504]) {
@@ -84,4 +84,34 @@ test("old attempt cannot clear a different actor's or newer paid submission", ()
   assert.equal(clearPendingTrendRun(storage, 12, original), false);
   assert.deepEqual(readPendingTrendRun(storage, 12), next);
   assert.equal(clearPendingTrendRun(storage, 12, next), true);
+});
+
+test("server claim inventory accepts only bounded, typed GET-only recovery identities", () => {
+  const runs = [
+    { trend_id: 12, request_key: "claim-for-trend-12", state: "processing" },
+    { trend_id: 9, request_key: "claim-for-trend-9", state: "uncertain" },
+  ];
+  assert.deepEqual(parseRecoverableTrendRuns({ runs }), runs);
+  assert.deepEqual(parseRecoverableTrendRuns({ runs: [] }), []);
+  for (const invalid of [
+    null,
+    {},
+    { runs: null },
+    { runs: new Array(21).fill(runs[0]) },
+    { runs: [{ ...runs[0], trend_id: -1 }] },
+    { runs: [{ ...runs[0], request_key: "short" }] },
+    { runs: [{ ...runs[0], request_key: "control" + String.fromCharCode(10) + "char" }] },
+    { runs: [{ ...runs[0], state: "complete" }] },
+    { runs: [{ ...runs[0], state: "unknown" }] },
+  ]) {
+    assert.equal(parseRecoverableTrendRuns(invalid), null);
+  }
+});
+
+test("server inventory never upgrades an inconclusive claim into a safe retry", () => {
+  const item = { trend_id: 15, request_key: "lost-reply-claim", state: "uncertain" };
+  const recovered = parseRecoverableTrendRuns({ runs: [item] });
+  assert.equal(recovered?.length, 1);
+  assert.equal(recovered?.[0]?.state, "uncertain");
+  assert.equal(trendRunNeedsReadOnlyRecovery(504), true);
 });

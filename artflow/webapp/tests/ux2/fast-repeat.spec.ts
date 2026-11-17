@@ -22,6 +22,7 @@ async function prepare(page: Page, initialBalance = 100) {
     if (path.endsWith("/models/music")) return json([{ key: "music-fixture", display_name: "Музыка", credits: 20, modes: ["text"] }]);
     if (path.endsWith("/trend-categories")) return json({ items: [{ key: "portrait", title: "Портреты", sort_order: 0, trend_count: 1, preview_items: [trend] }], has_more: false, next_cursor: null });
     if (path.endsWith("/trend-categories/portrait/trends")) return json({ category: { key: "portrait", title: "Портреты", sort_order: 0 }, items: [trend], has_more: false, next_cursor: null });
+    if (path.endsWith("/trends/runs/recoverable")) return json({ runs: [] });
     if (path.endsWith("/trends")) return json([trend]);
     if (path.endsWith("/trends/101")) return json(trend);
     if (path.endsWith("/feed")) return json([item]);

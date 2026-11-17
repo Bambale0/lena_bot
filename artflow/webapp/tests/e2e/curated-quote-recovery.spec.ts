@@ -21,6 +21,7 @@ async function prepare(page: Page) {
     if (path.endsWith("/me")) return json({ id: state.actor, tg_id: 123, full_name: "Тест", credits: 100, language: "ru", miniapp_ux2_available: state.admitted });
     if (path.endsWith("/studio/preview")) return json({ allowed: true, ui_version: 3 });
     if (path.endsWith("/me/permissions")) return json({ is_admin: true });
+    if (path.endsWith("/trends/runs/recoverable")) return json({ runs: [] });
     if (path.endsWith("/trends")) return json([trend]);
     if (path.endsWith("/trends/101")) return json(trend);
     if (path.endsWith("/checkout")) {

@@ -20,6 +20,26 @@ async def get_claim(session: AsyncSession, user_id: int, request_key: str) -> Tr
     ).scalar_one_or_none()
 
 
+async def list_unlinked_claims(
+    session: AsyncSession, user_id: int, *, limit: int = 20,
+) -> list[TrendRunClaim]:
+    """Read-only and actor-scoped: discover admitted work without browser storage.
+
+    Only unlinked work is actionable via the recovery GET. Linked generations
+    belong in the ordinary task history, not in an unresolved paid-run list.
+    """
+    result = await session.execute(
+        select(TrendRunClaim)
+        .where(
+            TrendRunClaim.user_id == user_id,
+            TrendRunClaim.generation_id.is_(None),
+        )
+        .order_by(TrendRunClaim.id.desc())
+        .limit(min(max(limit, 1), 20))
+    )
+    return list(result.scalars().all())
+
+
 async def reserve_claim(
     session: AsyncSession,
     *,

@@ -268,6 +268,57 @@ async def trend_client(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_recoverable_trend_runs_only_returns_owned_unlinked_identities(trend_client):
+    client, monkeypatch, reserve, create = trend_client
+    listing = AsyncMock(return_value=[
+        SimpleNamespace(
+            trend_id=12, request_key="opaque-request-123", status="running",
+            user_id=7, request_hash="private-asset-hash",
+        ),
+        SimpleNamespace(
+            trend_id=27, request_key="opaque-request-456", status="uncertain",
+            user_id=7, request_hash="private-asset-hash-2",
+        ),
+    ])
+    monkeypatch.setattr("api.trends_routes.list_unlinked_claims", listing)
+    response = await client.get("/api/v1/trends/runs/recoverable")
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "runs": [
+            {"trend_id": 12, "request_key": "opaque-request-123", "state": "processing"},
+            {"trend_id": 27, "request_key": "opaque-request-456", "state": "uncertain"},
+        ],
+    }
+    assert "private-asset-hash" not in response.text
+    listing.assert_awaited_once_with(ANY, 7)
+    reserve.assert_not_awaited()
+    create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_recoverable_claim_query_scoped_and_bounded_without_writes():
+    from db.trend_run_claims import list_unlinked_claims
+
+    class ReadOnlySession:
+        def __init__(self):
+            self.query = None
+
+        async def execute(self, query):
+            self.query = query
+            return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: []))
+
+    session = ReadOnlySession()
+    assert await list_unlinked_claims(session, 71, limit=1000) == []
+    sql = str(session.query.compile(compile_kwargs={"literal_binds": True}))
+    assert "trend_run_claims.user_id = 71" in sql
+    assert "trend_run_claims.generation_id IS NULL" in sql
+    assert "LIMIT 20" in sql
+    assert "ORDER BY trend_run_claims.id DESC" in sql
+    assert "UPDATE" not in sql
+    assert "DELETE" not in sql
+
+
+@pytest.mark.asyncio
 async def test_trend_run_status_readonly_no_claim(trend_client):
     client, monkeypatch, reserve, create = trend_client
     response = await client.get("/api/v1/trends/12/runs/unknown-request-key")
