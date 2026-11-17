@@ -1038,6 +1038,7 @@ async def test_postgres_different_device_keys_race_allows_one_unlinked_claim():
         async with engine.begin() as connection:
             await connection.execute(text("CREATE TABLE users (id integer PRIMARY KEY)"))
             await connection.execute(text("CREATE TABLE generations (id integer PRIMARY KEY)"))
+            await connection.execute(text("INSERT INTO users (id) VALUES (7)"))
             await connection.run_sync(TrendRunClaim.__table__.create)
         factory = async_sessionmaker(engine, expire_on_commit=False)
 
