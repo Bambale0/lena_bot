@@ -226,3 +226,73 @@ async def test_aggregate_only_dry_run_redacts_transaction_ids(monkeypatch, capsy
     }
     assert capsys.readouterr().out == ""
     provider_state.assert_awaited_once_with("secret-payment-id")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("has_refund_notice", "latest_status", "expected_outcome", "writes"),
+    [
+        (True, "pending", "refund_notice_requires_review", 0),
+        (False, "paid", "already_resolved", 0),
+        (False, "pending", "failed", 1),
+    ],
+)
+async def test_tbank_operator_failure_serializes_refunds_and_rechecks_state(
+    monkeypatch, has_refund_notice, latest_status, expected_outcome, writes,
+) -> None:
+    from db.models import PaymentProvider, PaymentRefundNotice, Transaction, TransactionStatus
+
+    candidate = SimpleNamespace(
+        id=987654321, external_id="private-payment-id", amount_rub=150.0,
+        provider_amount_minor=15000,
+    )
+    current = SimpleNamespace(
+        **candidate.__dict__, provider=PaymentProvider.tbank,
+        status=TransactionStatus(latest_status),
+    )
+    lock = AsyncMock()
+    fail = AsyncMock(return_value=current)
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def execute(self, _query):
+            return SimpleNamespace(
+                scalars=lambda: SimpleNamespace(all=lambda: [candidate]),
+            )
+
+        async def get(self, model, key, **kwargs):
+            # Refund notice and current row must be read after the shared lock.
+            assert lock.await_count == 1
+            if model is PaymentRefundNotice:
+                assert key == candidate.external_id
+                return SimpleNamespace(provider="tbank") if has_refund_notice else None
+            assert model is Transaction
+            assert key == candidate.id
+            assert kwargs == {"populate_existing": True}
+            return current
+
+    monkeypatch.setattr(audit, "AsyncSessionLocal", FakeSession)
+    monkeypatch.setattr(audit, "lock_payment_identity", lock)
+    monkeypatch.setattr(audit, "get_payment_state", AsyncMock(
+        return_value=state(payment_id=candidate.external_id, status="CANCELED"),
+    ))
+    monkeypatch.setattr(audit.repo, "set_transaction_status", fail)
+    monkeypatch.setattr(audit.settings, "TBANK_TERMINAL_KEY", "terminal-1")
+    monkeypatch.setattr(audit.settings, "TBANK_PASSWORD", "test-only")
+    monkeypatch.setattr(audit.asyncio, "sleep", AsyncMock())
+
+    result = await reconcile(
+        limit=1, lookback_days=3650, min_age_minutes=30,
+        apply=True,
+    )
+    assert result["outcomes"] == {
+        f"failed:provider_terminal_failure:{expected_outcome}": 1,
+    }
+    assert lock.await_count == 1
+    assert lock.await_args.args[1] == candidate.external_id
+    assert fail.await_count == writes
