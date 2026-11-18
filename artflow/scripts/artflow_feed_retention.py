@@ -16,6 +16,11 @@ if str(REPO_ROOT) not in sys.path:
 
 from sqlalchemy import select, update
 
+# db.session imports db.repository, which in turn imports api submodules.
+# Initialize the api package first to avoid a circular import when this
+# maintenance script runs standalone (outside the application bootstrap).
+import api  # noqa: F401
+
 from db.models import Generation
 from db.session import AsyncSessionLocal
 
