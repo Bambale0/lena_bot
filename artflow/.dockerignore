@@ -43,4 +43,8 @@ yarn-debug.log*
 yarn-error.log*
 
 artifacts
-data/*.json
+
+# All /app/data runtime state is bind-mounted by docker-compose.yml.
+# Never bake PostgreSQL dumps, payment state, or operator diagnostics
+# into image layers or the BuildKit cache.
+data/
