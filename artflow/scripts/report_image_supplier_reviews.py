@@ -76,6 +76,7 @@ def make_report(rows: list[dict[str, Any]]) -> dict[str, Any]:
     """Whitelist aggregate fields; ignore all caller-supplied IDs, URLs, and prompts."""
     totals = {
         "review_count": 0, "pending": 0,
+        "pending_missing_task_identity": 0,
         "pending_not_covered_by_neironych_task_poller": 0,
         "pending_older_7d": 0, "pending_older_30d": 0,
         "remote_failed": 0, "remote_completed_pending_finance": 0,
@@ -104,6 +105,8 @@ def make_report(rows: list[dict[str, Any]]) -> dict[str, Any]:
             totals["pending"] += count
             totals["pending_older_7d"] += older7
             totals["pending_older_30d"] += older30
+            if identity == "missing":
+                totals["pending_missing_task_identity"] += count
             if provider == "neironych" and identity != "neironych_request_id":
                 totals["pending_not_covered_by_neironych_task_poller"] += count
         if state == "remote_failed":
@@ -117,8 +120,9 @@ def make_report(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "by_review_state": groups,
         "interpretation": (
             "Supplier review is separate from customer credit/refund status. "
-            "A pending review without a Neironych task ID cannot be polled by "
-            "the standard Neironych-image task-ID scheduler. Do not submit "
+            "Missing task identity requires operator evidence before "
+            "supplier reconciliation. The Neironych task-ID poller only "
+            "covers Neironych requests. Do not submit "
             "another paid request or change customer balances based on age."
         ),
     }
