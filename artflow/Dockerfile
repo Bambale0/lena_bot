@@ -20,6 +20,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+# Safety gate: /app/data and /app/static/upload are production bind mounts.
+# They must NEVER be stored inside a distributable image layer.
+RUN test ! -e /app/data \
+    && test ! -e /app/static/upload \
+    && test ! -e /app/.env
+
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
