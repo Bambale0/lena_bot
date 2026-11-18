@@ -20,7 +20,6 @@ from sqlalchemy import select, update
 # Initialize the api package first to avoid a circular import when this
 # maintenance script runs standalone (outside the application bootstrap).
 import api  # noqa: F401
-
 from db.models import Generation
 from db.session import AsyncSessionLocal
 
