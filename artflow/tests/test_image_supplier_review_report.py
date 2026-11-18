@@ -50,6 +50,7 @@ def test_aggregates_separate_unpollable_pending_reviews() -> None:
     summary = report["summary"]
     assert summary["review_count"] == 56
     assert summary["pending"] == 31
+    assert summary["pending_missing_task_identity"] == 3
     assert summary["pending_not_covered_by_neironych_task_poller"] == 3
     assert summary["pending_older_7d"] == 27
     assert summary["pending_older_30d"] == 17
@@ -58,6 +59,23 @@ def test_aggregates_separate_unpollable_pending_reviews() -> None:
     assert "private-provider-id" not in serialized
     assert "private-image-prompt" not in serialized
     assert "123456789" not in serialized
+
+
+
+
+def test_nexus_missing_identity_is_not_misclassified_as_neironych() -> None:
+    data = make_report([
+        sample_row(
+            provider="nexus",
+            model="nano-banana-pro",
+            task_identity_kind="missing",
+            review_count=3,
+            older_7d=3,
+            older_30d=0,
+        ),
+    ])
+    assert data["summary"]["pending_missing_task_identity"] == 3
+    assert data["summary"]["pending_not_covered_by_neironych_task_poller"] == 0
 
 
 @pytest.mark.parametrize(
