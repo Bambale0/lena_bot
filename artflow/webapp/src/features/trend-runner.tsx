@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { Film, ImageIcon, ImagePlus, LoaderCircle, Plus, Ruler, Weight, X } from "lucide-react";
+import { Film, ImageIcon, ImagePlus, LoaderCircle, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { TaskDetailSheet } from "@/components/task-detail-sheet";
@@ -20,7 +20,6 @@ const TREND_RUNNER_EVENT = "apix:open-trend-runner";
 const API_BASE = "/api/v1";
 const RUNNER_ROOT_ID = "apix-trend-runner-root";
 const ACCEPTED_TREND_PHOTOS = "image/jpeg,image/png,image/webp,image/heic,image/heif,image/avif,.jpg,.jpeg,.png,.webp,.heic,.heif,.avif";
-const MAX_PINTEREST_EXTRA_IDENTITY_PHOTOS = 5;
 const TREND_USER_NUMBER_RE = /^-?\d+(?:[.,]\d+)?$/;
 
 function trendUserFieldValid(field: TrendUserField, value: string): boolean {
@@ -48,10 +47,6 @@ type TrendUploadResponse = {
   filename?: string;
   content_type?: string;
   size?: number;
-};
-
-type PinterestReference = TrendUploadResponse & {
-  preview: string;
 };
 
 type TrendRunResponse = {
@@ -162,398 +157,6 @@ function openTrendRunnerById(trendId: number): void {
   window.dispatchEvent(new CustomEvent<TrendRunnerEventDetail>(TREND_RUNNER_EVENT, { detail: { trendId } }));
 }
 
-function PinterestPrimarySlot({
-  label,
-  badge,
-  emptyLabel,
-  item,
-  busy,
-  uploading,
-  inputRef,
-  inputLabel,
-  onFile,
-  onRemove,
-}: {
-  label: "РЕФЕРЕНС" | "ТЫ";
-  badge: string;
-  emptyLabel: string;
-  item: PinterestReference | null;
-  busy: boolean;
-  uploading: boolean;
-  inputRef: React.RefObject<HTMLInputElement | null>;
-  inputLabel: string;
-  onFile: (file: File) => void;
-  onRemove: () => void;
-}) {
-  return (
-    <div className="space-y-1.5">
-      <div className="flex items-center gap-1.5 px-1">
-        <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">{label}</p>
-        <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-semibold text-primary">{badge}</span>
-      </div>
-      <div className="relative">
-        <label className="relative flex min-h-44 cursor-pointer flex-col overflow-hidden rounded-2xl border border-dashed border-border/70 bg-secondary/35 text-sm transition hover:border-primary/50">
-          <input
-            ref={inputRef}
-            type="file"
-            accept={ACCEPTED_TREND_PHOTOS}
-            className="absolute inset-0 z-20 cursor-pointer opacity-0"
-            aria-label={inputLabel}
-            disabled={busy}
-            onChange={(event) => {
-              const file = event.currentTarget.files?.[0];
-              event.currentTarget.value = "";
-              if (file) onFile(file);
-            }}
-          />
-          {item ? (
-            <img src={item.preview} alt={label} className="h-36 w-full object-cover" />
-          ) : (
-            <div className="flex h-36 flex-col items-center justify-center gap-2 text-muted-foreground">
-              {uploading ? <LoaderCircle className="size-7 animate-spin text-primary" /> : <ImagePlus className="size-7 text-primary" />}
-              <span className="text-xs font-medium">Загрузить</span>
-            </div>
-          )}
-          <div className="flex min-h-10 items-center justify-center px-2 py-2 text-center text-xs font-medium text-foreground">
-            {item ? "Готово ✓" : emptyLabel}
-          </div>
-        </label>
-        {item && !busy ? (
-          <button
-            type="button"
-            aria-label={`Удалить ${label.toLowerCase()}`}
-            onClick={onRemove}
-            className="absolute right-2 top-2 z-30 flex size-8 items-center justify-center rounded-full bg-background/90 text-foreground shadow"
-          >
-            <X className="size-4" />
-          </button>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-function PinterestTrendFlow({
-  trend,
-  onTask,
-  onBusyChange,
-}: {
-  trend: TrendPublic;
-  onTask: (task: GenerationTask) => void;
-  onBusyChange: (busy: boolean) => void;
-}) {
-  const [scene, setScene] = useState<PinterestReference | null>(null);
-  const [identity, setIdentity] = useState<PinterestReference | null>(null);
-  const [identityExtras, setIdentityExtras] = useState<PinterestReference[]>([]);
-  const [heightCm, setHeightCm] = useState("");
-  const [weightKg, setWeightKg] = useState("");
-  const [phase, setPhase] = useState<RunnerPhase>("idle");
-  const [error, setError] = useState("");
-  const sceneInputRef = useRef<HTMLInputElement | null>(null);
-  const identityInputRef = useRef<HTMLInputElement | null>(null);
-  const extraInputRef = useRef<HTMLInputElement | null>(null);
-  const previewUrls = useRef<Set<string>>(new Set());
-
-  const busy = phase === "uploading" || phase === "generating";
-  const parsedHeight = Number(heightCm);
-  const parsedWeight = Number(weightKg);
-  const validHeight = Number.isInteger(parsedHeight) && parsedHeight >= 120 && parsedHeight <= 230;
-  const validWeight = Number.isInteger(parsedWeight) && parsedWeight >= 30 && parsedWeight <= 250;
-  const primaryReady = Boolean(scene && identity);
-  const ready = Boolean(primaryReady && validHeight && validWeight && !busy);
-
-  useEffect(() => {
-    onBusyChange(busy);
-  }, [busy, onBusyChange]);
-
-  useEffect(() => () => {
-    previewUrls.current.forEach((url) => URL.revokeObjectURL(url));
-    previewUrls.current.clear();
-    onBusyChange(false);
-  }, [onBusyChange]);
-
-  const revokePreview = (item: PinterestReference | null | undefined) => {
-    if (!item?.preview) return;
-    URL.revokeObjectURL(item.preview);
-    previewUrls.current.delete(item.preview);
-  };
-
-  const uploadOne = async (file: File, slot: "scene" | "identity") => {
-    if (busy) return;
-    const preview = URL.createObjectURL(file);
-    previewUrls.current.add(preview);
-    setError("");
-    setPhase("uploading");
-    try {
-      const form = new FormData();
-      form.append("file", file);
-      const uploaded = await apiJson<TrendUploadResponse>("/trends/upload", { method: "POST", body: form });
-      if (!uploaded.asset_id) throw new Error("Не удалось подтвердить загрузку фото");
-      const next: PinterestReference = { ...uploaded, preview };
-      if (slot === "scene") {
-        revokePreview(scene);
-        setScene(next);
-      } else {
-        revokePreview(identity);
-        setIdentity(next);
-      }
-      setPhase("idle");
-    } catch (uploadError) {
-      URL.revokeObjectURL(preview);
-      previewUrls.current.delete(preview);
-      const message = uploadError instanceof Error ? uploadError.message : "Не удалось загрузить фото";
-      setError(message);
-      setPhase("error");
-      toast.error(message);
-    }
-  };
-
-  const uploadExtras = async (files: File[]) => {
-    if (busy || !files.length) return;
-    const available = MAX_PINTEREST_EXTRA_IDENTITY_PHOTOS - identityExtras.length;
-    if (files.length > available) {
-      const message = `Можно добавить максимум ${MAX_PINTEREST_EXTRA_IDENTITY_PHOTOS} дополнительных ракурсов`;
-      setError(message);
-      setPhase("error");
-      toast.error(message);
-      return;
-    }
-
-    const previews = files.map((file) => URL.createObjectURL(file));
-    previews.forEach((url) => previewUrls.current.add(url));
-    setError("");
-    setPhase("uploading");
-    try {
-      const uploaded = await Promise.all(files.map(async (file, index) => {
-        const form = new FormData();
-        form.append("file", file);
-        const result = await apiJson<TrendUploadResponse>("/trends/upload", { method: "POST", body: form });
-        if (!result.asset_id) throw new Error("Не удалось подтвердить загрузку фото");
-        return { ...result, preview: previews[index] } as PinterestReference;
-      }));
-      setIdentityExtras((current) => [...current, ...uploaded]);
-      setPhase("idle");
-    } catch (uploadError) {
-      previews.forEach((url) => {
-        URL.revokeObjectURL(url);
-        previewUrls.current.delete(url);
-      });
-      const message = uploadError instanceof Error ? uploadError.message : "Не удалось загрузить дополнительные ракурсы";
-      setError(message);
-      setPhase("error");
-      toast.error(message);
-    }
-  };
-
-  const removeExtra = (index: number) => {
-    if (busy) return;
-    setIdentityExtras((current) => {
-      const target = current[index];
-      revokePreview(target);
-      return current.filter((_, currentIndex) => currentIndex !== index);
-    });
-    setError("");
-    setPhase("idle");
-  };
-
-  const generate = async () => {
-    if (!ready || !scene || !identity) return;
-    setError("");
-    setPhase("generating");
-    try {
-      const referenceAssetIds = [scene.asset_id, identity.asset_id, ...identityExtras.map((item) => item.asset_id)];
-      const result = await apiJson<TrendRunResponse>(`/trends/${trend.id}/pinterest-run`, {
-        method: "POST",
-        body: JSON.stringify({
-          reference_asset_ids: referenceAssetIds,
-          height_cm: parsedHeight,
-          weight_kg: parsedWeight,
-          confirmed: true,
-          idempotency_key: buildIdempotencyKey(trend.id),
-        }),
-      });
-      if (!result.task?.id) throw new Error("Не удалось подтвердить создание задачи");
-      notifyHaptic("success");
-      toast.success("Изображение отправлено в генерацию");
-      onTask(result.task);
-    } catch (generateError) {
-      notifyHaptic("error");
-      const message = generateError instanceof Error ? generateError.message : "Не удалось создать изображение";
-      setError(message);
-      setPhase("error");
-      toast.error(message);
-    }
-  };
-
-  return (
-    <div className="grid gap-3">
-      <div className="rounded-2xl border border-amber-300/30 bg-amber-200/10 p-3">
-        <p className="text-xs font-semibold text-foreground">Как получить результат 1 в 1</p>
-        <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-          Слева — кадр, который повторяем. Справа — ваше основное фото. Генерация не запускается после загрузки: сначала добавьте все данные и нажмите «Создать».
-        </p>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <PinterestPrimarySlot
-          label="РЕФЕРЕНС"
-          badge="откуда"
-          emptyLabel="Фото, которое повторяем"
-          item={scene}
-          busy={busy}
-          uploading={phase === "uploading"}
-          inputRef={sceneInputRef}
-          inputLabel="Загрузить референс Pinterest"
-          onFile={(file) => void uploadOne(file, "scene")}
-          onRemove={() => {
-            revokePreview(scene);
-            setScene(null);
-            setError("");
-            setPhase("idle");
-          }}
-        />
-        <PinterestPrimarySlot
-          label="ТЫ"
-          badge="кого вставляем"
-          emptyLabel="Ваше фото"
-          item={identity}
-          busy={busy}
-          uploading={phase === "uploading"}
-          inputRef={identityInputRef}
-          inputLabel="Загрузить ваше фото"
-          onFile={(file) => void uploadOne(file, "identity")}
-          onRemove={() => {
-            revokePreview(identity);
-            setIdentity(null);
-            setError("");
-            setPhase("idle");
-          }}
-        />
-      </div>
-
-      {primaryReady ? (
-        <>
-          <div className="space-y-2">
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground">1–5 ракурсов одного человека</p>
-              <span className="text-[10px] text-muted-foreground">{identityExtras.length}/{MAX_PINTEREST_EXTRA_IDENTITY_PHOTOS}</span>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {identityExtras.map((item, index) => (
-                <div key={`${item.asset_id}-${index}`} className="relative size-14 overflow-hidden rounded-xl border border-border/60">
-                  <img src={item.preview} alt={`Дополнительный ракурс ${index + 1}`} className="size-full object-cover" />
-                  {!busy ? (
-                    <button
-                      type="button"
-                      aria-label={`Удалить ракурс ${index + 1}`}
-                      onClick={() => removeExtra(index)}
-                      className="absolute right-0.5 top-0.5 flex size-5 items-center justify-center rounded-full bg-background/90 text-foreground"
-                    >
-                      <X className="size-3" />
-                    </button>
-                  ) : null}
-                </div>
-              ))}
-              {identityExtras.length < MAX_PINTEREST_EXTRA_IDENTITY_PHOTOS ? (
-                <label className="relative flex size-14 cursor-pointer items-center justify-center rounded-xl border border-dashed border-border/70 bg-secondary/25 text-muted-foreground hover:border-primary/50 hover:text-foreground">
-                  <input
-                    ref={extraInputRef}
-                    type="file"
-                    multiple
-                    accept={ACCEPTED_TREND_PHOTOS}
-                    className="absolute inset-0 cursor-pointer opacity-0"
-                    aria-label="Добавить дополнительные ракурсы"
-                    disabled={busy}
-                    onChange={(event) => {
-                      const files = Array.from(event.currentTarget.files || []);
-                      event.currentTarget.value = "";
-                      void uploadExtras(files);
-                    }}
-                  />
-                  {phase === "uploading" ? <LoaderCircle className="size-5 animate-spin" /> : <Plus className="size-5" />}
-                </label>
-              ) : null}
-            </div>
-            <p className="text-[10px] leading-relaxed text-muted-foreground">
-              Дополнительные ракурсы необязательны, но помогают точнее сохранить лицо, волосы и пропорции.
-            </p>
-          </div>
-
-          <div className="space-y-1 text-[11px] text-muted-foreground">
-            <p><span className="text-emerald-500">●</span> сцена, свет и поза считаются с референса</p>
-            <p><span className="text-emerald-500">●</span> лицо и внешность берутся только с твоего фото</p>
-          </div>
-        </>
-      ) : null}
-
-      <div className="grid grid-cols-2 gap-3">
-        <label className="space-y-1.5">
-          <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground">
-            <Ruler className="size-3.5" /> Рост
-          </span>
-          <div className="relative">
-            <input
-              type="number"
-              inputMode="numeric"
-              min={120}
-              max={230}
-              step={1}
-              value={heightCm}
-              onChange={(event) => setHeightCm(event.target.value.replace(/[^0-9]/g, "").slice(0, 3))}
-              placeholder="165"
-              disabled={busy}
-              aria-label="Рост"
-              aria-invalid={Boolean(heightCm) && !validHeight}
-              className="h-11 w-full rounded-xl border border-border/70 bg-secondary/25 px-3 pr-9 text-base outline-none transition focus:border-primary/60"
-            />
-            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">см</span>
-          </div>
-        </label>
-        <label className="space-y-1.5">
-          <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground">
-            <Weight className="size-3.5" /> Вес
-          </span>
-          <div className="relative">
-            <input
-              type="number"
-              inputMode="numeric"
-              min={30}
-              max={250}
-              step={1}
-              value={weightKg}
-              onChange={(event) => setWeightKg(event.target.value.replace(/[^0-9]/g, "").slice(0, 3))}
-              placeholder="55"
-              disabled={busy}
-              aria-label="Вес"
-              aria-invalid={Boolean(weightKg) && !validWeight}
-              className="h-11 w-full rounded-xl border border-border/70 bg-secondary/25 px-3 pr-9 text-base outline-none transition focus:border-primary/60"
-            />
-            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">кг</span>
-          </div>
-        </label>
-      </div>
-      <p className="-mt-1 text-[10px] leading-relaxed text-muted-foreground">
-        Рост и вес обязательны, чтобы руки, шея и пропорции тела совпали с вами.
-      </p>
-      {heightCm && !validHeight ? <p className="text-[10px] text-destructive">Рост должен быть от 120 до 230 см.</p> : null}
-      {weightKg && !validWeight ? <p className="text-[10px] text-destructive">Вес должен быть от 30 до 250 кг.</p> : null}
-
-      {error ? <p className="rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{error}</p> : null}
-
-      <Button type="button" disabled={!ready} className="h-12 text-base font-semibold" onClick={() => void generate()}>
-        {phase === "generating" ? <LoaderCircle className="size-4 animate-spin" /> : null}
-        {phase === "generating" ? "Генерирую…" : "Создать →"}
-      </Button>
-
-      {!ready ? (
-        <p className="text-center text-[10px] text-muted-foreground">
-          Для запуска нужны референс, ваше фото, рост и вес. Загрузка фото сама генерацию не запускает.
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
 function TrendRunnerPortal() {
   const balance = useSyncExternalStore(subscribeStudioBalance, readStudioBalance, () => null);
   const previousBalance = useRef(balance);
@@ -569,7 +172,6 @@ function TrendRunnerPortal() {
   const [selectedTask, setSelectedTask] = useState<GenerationTask | null>(null);
   const [taskOpen, setTaskOpen] = useState(false);
   const [taskBusy, setTaskBusy] = useState(false);
-  const [pinterestBusy, setPinterestBusy] = useState(false);
   const [checkout, setCheckout] = useState<TrendCheckoutQuote | null>(null);
   // Retain only safe capabilities for correction, never a payable price or balance.
   const [durationOffer, setDurationOffer] = useState<Pick<TrendCheckoutQuote,
@@ -598,10 +200,9 @@ function TrendRunnerPortal() {
 
   const uncertainRunKey = pendingRun ? (pendingRun.requestKey || "unavailable") : null;
   const genericBusy = phase === "uploading" || phase === "generating";
-  const busy = genericBusy || pinterestBusy;
+  const busy = genericBusy;
   const preview = safeExternalUrl(trend?.preview_url || "");
   const isVideoPreview = trend?.kind === "video" || /\.(mp4|webm|mov)(\?|$)/i.test(preview);
-  const isPinterest = Boolean(trend && isPinterestServiceTrend(trend));
   const hint = trend?.user_photo_hint || "Загрузите одно чёткое фото. Остальные параметры тренда уже настроены администратором.";
   const userFields = (trend?.user_fields || []).slice(0, 6);
   const userFieldsReady = userFields.every((field) => trendUserFieldValid(field, userValues[field.key] || ""));
@@ -621,7 +222,6 @@ function TrendRunnerPortal() {
     setServerRuns([]);
     setPhase("idle");
     setError("");
-    setPinterestBusy(false);
     setCheckout(null);
     setDurationOffer(null);
     setCheckoutError("");
@@ -659,7 +259,7 @@ function TrendRunnerPortal() {
     resetRunner();
     if (isPinterestServiceTrend(next)) {
       // Pinterest is a standalone service, not a paid /trends/{id}/run.
-      // The legacy PinterestTrendFlow points to an unmounted API route.
+      // Always use the standalone service with its validated quote and routes.
       setTrend(null);
       openPinterestService();
       return;
@@ -1133,26 +733,14 @@ function TrendRunnerPortal() {
       <Sheet
         balanceUnavailableReason={paymentWaiting || paymentBusy || busy ? "Завершите текущую операцию или проверьте уже открытую оплату ниже." : undefined}
         open={Boolean(trend)}
-        title={isPinterest ? "Повтори фото с Pinterest" : trend?.title || "Повторить тренд"}
-        description={isPinterest ? undefined : "Загрузи фото и подтверди стоимость. Сценарий тренда уже настроен."}
+        title={trend?.title || "Повторить тренд"}
+        description="Загрузи фото и подтверди стоимость. Сценарий тренда уже настроен."
         onOpenChange={(open) => {
           if (!open) closeRunner();
         }}
       >
         {trend ? (
-          isPinterest ? (
-            <PinterestTrendFlow
-              trend={trend}
-              onBusyChange={setPinterestBusy}
-              onTask={(task) => {
-                setSelectedTask(task);
-                setTaskOpen(true);
-                setTrend(null);
-                setPinterestBusy(false);
-              }}
-            />
-          ) : (
-            <div className="grid gap-3">
+          <div className="grid gap-3">
               <div className="overflow-hidden rounded-xl border border-border bg-muted">
                 {preview ? (
                   isVideoPreview ? (
@@ -1373,7 +961,6 @@ function TrendRunnerPortal() {
                 <p>Модель, скрытый промпт, формат и качество сохраняются из рецепта автора. Для видео можно выбрать доступную длительность.</p>
               </div>
             </div>
-          )
         ) : null}
       </Sheet>
 

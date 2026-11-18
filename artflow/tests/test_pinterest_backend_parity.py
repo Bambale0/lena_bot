@@ -381,6 +381,7 @@ def test_pinterest_trend_alias_uses_standalone_service_entry_instead_of_missing_
     assert 'PINTEREST_SERVICE_ALIAS_ID = 0' in alias
     assert '"/services/pinterest/run"' in service
     assert '"/services/pinterest/upload"' in service
-    # The legacy route has no mounted backend handler: it must not be the
-    # entry point for Pinterest aliases or users receive a false paid action.
-    assert "/trends/${trend.id}/pinterest-run" in runner
+    # Keep the unmounted legacy paid route out of shipped frontend code.
+    # All Pinterest aliases must use the dedicated service checkout instead.
+    assert "/trends/${trend.id}/pinterest-run" not in runner
+    assert "function PinterestTrendFlow" not in runner
