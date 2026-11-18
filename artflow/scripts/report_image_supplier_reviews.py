@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -51,7 +50,13 @@ GROUP BY provider, model, review_state, task_identity_kind
 ORDER BY provider, model, review_state, task_identity_kind
 """
 
-MODEL_RE = re.compile(r"^[a-z0-9_./-]{1,75}$")
+# Never print free-form model labels, which could include provider or user text.
+APPROVED_MODELS = frozenset({
+    "nano-banana-2.1", "nano-banana-2", "nano-banana-pro",
+    "nano-banana-pro-vip", "seedream/5-pro-text-to-image",
+    "seedream/5-pro-image-to-image", "gpt-image-2",
+    "gpt-image-2.5-sunburst",
+})
 STATES = frozenset({
     "pending", "remote_failed", "remote_completed_pending_finance",
     "needs_admin_resolution", "settled",
@@ -64,7 +69,7 @@ IDENTITIES = frozenset({
 
 def _safe_model(value: Any) -> str:
     name = str(value or "")
-    return name if MODEL_RE.fullmatch(name) else "other_model"
+    return name if name in APPROVED_MODELS else "other_model"
 
 
 def make_report(rows: list[dict[str, Any]]) -> dict[str, Any]:
