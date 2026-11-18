@@ -5,7 +5,6 @@ No external systems or data files are read: validate build rules only.
 
 from pathlib import Path
 
-
 ARTFLOW = Path(__file__).resolve().parents[1]
 
 
