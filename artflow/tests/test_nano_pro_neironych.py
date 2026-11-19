@@ -372,3 +372,44 @@ async def test_every_launch_surface_commits_native_snapshot_before_paid_post(mon
             session=launch.session, user=launch.user, surface=entry)
     assert events == ["commit_snapshot", "paid_post"]
     repo.charge_image_generation.assert_awaited_once()
+
+
+@pytest.mark.parametrize("model", [ImageModel.NANO_BANANA_PRO, ImageModel.NANO_BANANA_21])
+async def test_circuit_open_never_falls_back_to_nexus(monkeypatch, model):
+    """Provider admission rejected before POST: refund without buying a second job."""
+    refusal = transport.NeironychImageAdmissionUnavailable(
+        "provider_circuit_open", status_code=503, request_id=RID,
+    )
+    native = AsyncMock(side_effect=refusal)
+    if model == ImageModel.NANO_BANANA_PRO:
+        monkeypatch.setattr(nano_pro, "generate", native)
+    else:
+        monkeypatch.setattr(transport, "generate_nano_banana21_image", native)
+    nexus = AsyncMock(side_effect=AssertionError("No paid fallback while Neironych is primary"))
+    monkeypatch.setattr(nexus_image_adapter, "create_nexus_image_task", nexus)
+    with pytest.raises(transport.NeironychImageAdmissionUnavailable):
+        await image_service.generate_image(
+            model, "A cup", primary_provider="neironych",
+            quality="2K", aspect_ratio="1:1", request_id=RID,
+        )
+    native.assert_awaited_once()
+    nexus.assert_not_awaited()
+
+
+async def test_circuit_open_503_is_definite_but_generic_503_remains_unknown(monkeypatch):
+    real_client = httpx.AsyncClient
+    payload = {"model": "nano-banana-pro", "prompt": "Cup", "n": 1}
+    monkeypatch.setattr(transport.settings, "NEIRONYCH_API_KEY", "test-key")
+    for detail, expected in [
+        ("provider_circuit_open", transport.NeironychImageAdmissionUnavailable),
+        ("provider_temporarily_unavailable", transport.NeironychImageError),
+    ]:
+        def handler(request):
+            return httpx.Response(503, json={"detail": detail})
+        monkeypatch.setattr(
+            transport.httpx, "AsyncClient",
+            lambda **kw: real_client(transport=httpx.MockTransport(handler), **kw),
+        )
+        with pytest.raises(expected) as caught:
+            await transport._generate_image(payload, request_id=RID, subdir="nano-banana-pro")
+        assert caught.value.request_id == RID

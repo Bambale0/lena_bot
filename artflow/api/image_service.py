@@ -526,6 +526,10 @@ async def generate_image(
                     quality=quality,
                     request_id=request_id,
                 )
+            except neironych_image_adapter.NeironychImageAdmissionUnavailable:
+                # A model-specific circuit breaker is a fast, pre-submit refusal.
+                # Keep Neironych primary and refund; Nexus is not an authorized paid reroute.
+                raise
             except neironych_image_adapter.NeironychImageRejected as exc:
                 logger.warning(
                     "Neironych Nano Banana 2.1 definitively rejected request status=%s; using Nexus",
@@ -615,6 +619,9 @@ async def generate_image(
                     model_key=model.value, prompt=prompt, image_urls=refs, aspect_ratio=aspect_ratio, quality=quality,
                     request_id=request_id, before_submit=before_neironych_submit,
                 )
+            except neironych_image_adapter.NeironychImageAdmissionUnavailable:
+                # Do not buy a Nexus job when Neironych rejects a new admission.
+                raise
             except neironych_image_adapter.NeironychImageRejected as exc:
                 logger.warning("Nano Banana Pro definitively rejected status=%s; using Nexus", exc.status_code)
             else:
