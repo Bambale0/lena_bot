@@ -46,6 +46,10 @@ class NeironychImageRejected(NeironychImageError):
     """Provider definitely rejected the request without accepting a generation."""
 
 
+class NeironychImageAdmissionUnavailable(NeironychImageRejected):
+    """Neironych rejected admission before a paid provider POST; never fall back."""
+
+
 _TASK_PREFIX = "neironych-image:"
 
 
@@ -215,6 +219,11 @@ async def _generate_image(payload: dict[str, Any], *, request_id: str | None, su
         except ValueError:
             body = {}
         error_code = _error_code(body)
+        if response.status_code == 503 and isinstance(body, dict) and body.get("detail") == "provider_circuit_open":
+            raise NeironychImageAdmissionUnavailable(
+                "Neironych image primary temporarily unavailable before submission",
+                status_code=503, request_id=request_id,
+            )
         logger.warning(
             "Neironych image response request_id=%s status=%s code=%s",
             request_id, response.status_code, error_code,
