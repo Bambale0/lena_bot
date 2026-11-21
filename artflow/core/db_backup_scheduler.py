@@ -236,9 +236,12 @@ async def send_database_backup_to_admins(bot: Bot) -> int:
     finally:
         await asyncio.to_thread(_cleanup_transport_parts, backup.path, parts)
 
-    await asyncio.to_thread(cleanup_old_backups)
+    # Preserve previously generated dumps if Telegram delivery fails for
+    # every administrator. Rotating before checking delivery can discard the
+    # last backup an operator actually received during an upstream outage.
     if sent == 0:
         raise DatabaseBackupError("Failed to send DB backup to any admin chat")
+    await asyncio.to_thread(cleanup_old_backups)
     return sent
 
 
