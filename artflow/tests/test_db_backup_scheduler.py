@@ -73,10 +73,14 @@ async def test_send_database_backup_raises_if_no_admin_received_file(monkeypatch
 
     monkeypatch.setattr(db_backup_scheduler.settings, "ADMIN_IDS", [101], raising=False)
     monkeypatch.setattr(db_backup_scheduler, "create_database_backup", AsyncMock(return_value=backup))
-    monkeypatch.setattr(db_backup_scheduler, "cleanup_old_backups", lambda: None)
+    cleanup = AsyncMock()
+    monkeypatch.setattr(db_backup_scheduler, "cleanup_old_backups", cleanup)
 
     with pytest.raises(db_backup_scheduler.DatabaseBackupError):
         await db_backup_scheduler.send_database_backup_to_admins(bot)
+    # Delivery failure must not prune the last previously delivered dump.
+    cleanup.assert_not_awaited()
+    assert backup_path.exists()
 
 
 @pytest.mark.asyncio
