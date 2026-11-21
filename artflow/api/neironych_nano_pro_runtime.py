@@ -18,6 +18,18 @@ MODEL = "nano-banana-pro"
 SNAPSHOT_KEY = "neironych_nano_pro_submission"
 RATIOS = frozenset({"1:1", "16:9", "9:16", "4:3", "3:4", "21:9", "3:2", "2:3", "5:4", "4:5"})
 QUALITIES = frozenset({"1K", "2K", "4K"})
+RATIO_CHOICES = ("1:1", "3:4", "4:3", "9:16", "16:9", "2:3", "3:2", "4:5", "5:4", "21:9")
+
+
+def resolve_primary_aspect_ratio(value: str | None) -> str:
+    """Reject explicit unsupported ratios before any paid provider submission."""
+    ratio = value or "1:1"
+    if ratio not in RATIOS:
+        raise ValueError(
+            f"Формат {ratio} недоступен для Nano Banana Pro через Нейроныча. "
+            f"Выбери один из форматов: {', '.join(RATIO_CHOICES)}."
+        )
+    return ratio
 
 
 def normalized_quality(value: str) -> str:
